@@ -1975,6 +1975,19 @@ impl Gen {
             e.f71 = bldg as u8;
             e.act_life = 30;
             e.f140 = prm.rate as i32; // subSpellIndex = production
+            // ⭐ THE DEGRADATION LINK IS PER-ENTITY, NOT A TABLE READ:
+            // `fontTypeIndex_0x3D_61 = bldgprm[a2].byte_3` (:32795-98).
+            // Two crush paths ZERO it on the live entity — the castle
+            // level-up pre-clear `sub_11960` (EF:4410-11, called from
+            // EF:61128) and the (10,67) quake grab `sub_3A090`
+            // (EF:29335-36) — and `RemoveCastleStage_385C0` branches on
+            // the ENTITY's copy (EF:28090), so a crushed building
+            // demolishes for good instead of rebuilding as its
+            // successor forever. Reading the static table here is what
+            // let the 16 self-chaining ids resurrect under a levelling
+            // castle. Second consumer: the type-2 objective latch
+            // (EF:40771-79) — a castle-crushed building COMPLETES it.
+            e.f46 = prm.chain as i16;
             e.f136 = 0;
             if prm.flags & 8 == 0 {
                 e.f56 |= 2;

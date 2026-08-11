@@ -8254,10 +8254,12 @@ table, so 16 self-chaining ids rebuild forever); the held-back radius
 and window-centre fixes above; and the mc2l1 pure-replay blocker (the
 t=1 slot-138 rival-wizard z).
 
-# THE mc2l1 ROUND-2 REPORTS (2026-08-11) — A/B/C BANKED, D LANDED
+# THE mc2l1 ROUND-2 REPORTS (2026-08-11) — ✅ ALL FOUR LANDED
 
-Four more player reports off the same mc2l1 session. **D landed here; A, B and
-C are dug to implementation-ready specs and BANKED, not landed.** Every dig ran
+Four more player reports off the same mc2l1 session. **D landed 2026-08-11;
+A, B and C (both halves) landed 2026-08-12 from the banked specs — see
+§THE BANK, CASHED at the end of this section for what actually shipped, what
+the specs got wrong, and the one banked lead the CORPUS REFUTED.** Every dig ran
 two independent verifiers (an adversarial refuter and a completeness critic);
 all three cores came back CONFIRMED, all three fix specs came back
 PARTLY_WRONG. **The verifier corrections below are load-bearing — read them
@@ -8464,6 +8466,111 @@ line.
 relink for fire sharing a tile with a dwelling, a building anchor, a castle stage
 piece or a second tree — each relink function has exactly one call site — so
 retail genuinely draws fire UNDER those, and the port may already match.
+
+## ✅ THE BANK, CASHED (2026-08-12) — A, B AND C (BOTH HALVES) LANDED
+
+Implemented straight from the specs above, corrections included. All 10 fixture
+suites green (0 regressions, 0 drifts, 0 unpromoted fixes), 394 unit tests, fmt
++ clippy clean, every WGSL shader naga-validated.
+
+### A — the degradation link moved to its retail home, `Ent::f46`
+`mc2_spawn_building` seeds it from `bldgprm[type].byte_3` (:32795-98) and
+`mc2_house_collapse` now branches on the ENTITY's copy (:28090) instead of
+re-reading the static table. The two ZEROING paths were already correct and
+untouched (`mc2_castle_preclear` / the flood's quake grab), so the port had the
+clear and not the read — the exact shape that let the 16 self-chaining ids
+resurrect forever. Shipped in the same commit, as the spec demanded: the
+importer's `(10,45)` arm (`@0x3D`, was importing the dead `@0x2E`),
+`mc2_building_pad_reconstruct`'s field-restore whitelist, and — a consumer the
+spec named but did not schedule — **the type-2 objective latch, which was
+reading `bldgprm[f71].chain`**. That last one is a real behaviour change in
+retail's direction: a castle-CRUSHED chain building now COMPLETES a type-2
+objective, where the table read left it pending forever.
+One retail detail the spec missed and the decompile carries: on pool
+starvation the successor spawn fails and retail clears the DEAD building's own
+link before going dark (:28187-88) — ported.
+
+### B — the firestorm leader is the LOCK, gated on action 29 only
+`mc2_proj_impact`'s `e.f146 = victim` became
+`match act { 29 => lock, 0 => 0, _ => victim }`. The port already carries the
+retail action in `tick70` and already routes 0/1/29 apart, so the gate is
+exact. `mc2_aim_lists(0x1C)` was ALREADY building-free, so the upstream half of
+the law needed no change — only a fixture to pin it.
+⭐ ACCEPTANCE MET: the spec required the change introduce no `chase` rows.
+Measured on mc2l1 (18,632 pairs): `chase` = **0 before, 0 after**.
+
+### C — both halves
+Half 1: `Gen::relink_head` (`sub_41CC0_42000` / `sub_57D40`), called from the
+one ignition site in each game. Pure bookkeeping, and the corpus proves it:
+mc2_slice's RAW state hash moved on checkpoint E while its layout-independent
+OBSERVABLE projection did **not**.
+Half 2 (player-ruled fidelity): `LivePose::chain_depth` carries each pose's
+place in its tile chain — RELATIVE over the co-tile POSE set, per the verifier's
+correction, so no cap can restore the tie. It reaches both consumers the
+verifier named: the opaque pass via a `CHAIN_BIAS = 0.25/DEPTH_RANGE` depth
+nudge (a quarter of one tile's depth quantum — no co-tile nudge can cross a tile
+boundary), and the blend pass via its sort, which now keys back-to-front on the
+**anchor tile's** plan distance — the metric its own comment always claimed and
+the one the depth channel actually uses — so co-tile translucent pairs tie
+exactly and the chain rank breaks them. The `conceal` alpha demotion rides the
+blend path and is covered by the same sort; the mirror arm computes depth from
+the same tile center, so the nudge rides through unchanged. The comparison /
+replay paths (`push_billboard`, `ghost_billboard`) and the fire-preview poses
+have no chain and take the neutral `0.5`. No toggle, no DEVIATIONS entry — the
+player ruled this the faithful default.
+
+### ⛔ REFUTED BY THE CORPUS — the `mc2_castle_extents_ent` f78 lead
+§B above banked "a latent divergence: `mc2_castle_extents_ent` never writes f78
+where retail's `SetShiftByCastle_49EC0` writes `yaw = 0` explicitly". The
+decompile is right (EF:32891) and the field mapping is right
+(`f78` ← `ayaw` ← `array_0x52_82.yaw`) — **and the fix is still wrong.** Adding
+the write costs **469 mc2l0 fixtures** on the compared `field:3,2:applied_yaw`
+column: retail castles carry a NONZERO yaw across the ticks the port refreshes
+extents on, because the port's callers are not retail's callers (retail reaches
+the helper only at the level-up seams and around the pre-clear's temporary
+next-level box, EF:4399/4415) and the castle path's follow-up yaw/fov writes own
+the lane. Reverted, with a ⛔ comment at the site. ⭐ LESSON, and it is the same
+one the castle-pool "2x" reading taught in §THE MOB-SPEED RUNAWAY: a
+decompile-literal write is a HYPOTHESIS until the recording agrees. Recorded
+gameplay outranks the decompile.
+
+### Fixtures (5 new, 4 of them non-vacuous — checked by reverting the patch)
+- `a_firestorm_leaders_its_lock_never_the_thing_it_struck` (three ways: a
+  building struck but never lockable → leader 0; a castle LOCKED but never
+  touched, detonating on a creature → leader = the castle; action 0's splat →
+  leader 0 even with a live lock and a struck victim)
+- `a_building_collapse_branches_on_its_own_link_not_the_table` (both halves:
+  seeded link rebuilds — which pins the seed — cleared link demolishes)
+- `tree_ignition_re_heads_the_tree_mc1` / `_mc2`
+- `the_burning_tree_poses_behind_its_own_flame` (half 2 reaching the renderer)
+- `a_castle_preclear_cuts_the_building_degradation_link` — ⚠ passes BEFORE and
+  AFTER by design (that half was already correct): a regression guard, not a fix
+  witness, and labelled as such at the site.
+
+### Goldens re-pinned, both attributed by bisecting the patch
+- `mc2_cave` ALL FOUR — A's `f46` seed, hashed, moves the stream from t=0 for
+  every authored building with a nonzero byte_3. Behaviour in that window is
+  unchanged (no level-up, no quake grab ⇒ entity copy ≡ old table read).
+- `mc2_slice` checkpoint E only — C half 1's `next20`/`prev22`. OBSERVABLE held.
+
+### ⚠ WHAT THE CORPUS DOES NOT SHOW
+mc2l1 whole-take: 261,182 → **261,179** rows (−3), conforming pairs 370 → 370.
+These are correctness fixes for events the take never captures — no castle
+levels onto a chain building in the recorded window, and no charged fireball
+meets a house. **Do not read the flat number as "no effect"; read it as "no
+regression, and the corpus cannot see the fix."** The fixture suites and the
+five new pins are the evidence here, not the row count.
+
+### ▶ PLAYTESTS OWED (four, one pass)
+1. A castle levelling into a village building DEMOLISHES it — flat basalt, no
+   endless rebuild, and the castle's own mound stops being dragged back down.
+2. A charged fireball on a HOUSE leaves a compact ring floating where the ball
+   died (not an engulf); on a CASTLE it still engulfs and tracks.
+3. A burning tree's flame draws IN FRONT of the trunk.
+4. ⚠ THE BROAD ONE: half 2 re-rules co-tile ordering for EVERY sprite pair in
+   both games — a creature that walks onto a tree's tile becomes the chain head
+   and the tree covers it. That IS what retail did at 320x200 with no z-buffer,
+   and the player ruled for it knowingly, but it wants a real look.
 
 # THE MOB-SPEED RUNAWAY (2026-08-11) — ✅ RESOLVED: THE MISSING CHASE-EXIT RESTORES
 

@@ -1692,7 +1692,20 @@ fn import_ent_mc2(r: &RetailEntMc2, slot: u16, row156: u8, tr: &dyn Fn(u16) -> u
         f38: tr(r.f24 as u16),
         f40: tr(r.f26 as u16),
         f44: if ramp2c { r.f2c as u16 } else { r.f2a },
-        f46: if r.class3f == 5 { r.b3d as i16 } else { r.f2e },
+        // The (10,45) BUILDING keeps its DEGRADATION LINK in
+        // `fontTypeIndex_0x3D_61` (@0x3D, the same home the class-5
+        // column already imports) — seeded from `bldgprm[type].byte_3`
+        // by `sub_49A30` (EF:32795-98) and ZEROED in place by the
+        // castle level-up pre-clear / the quake grab, which is the
+        // whole point of it being per-entity. @0x2E is dead for
+        // buildings on both sides, so a replayed building used to
+        // import link 0 and demolish where retail rebuilds its
+        // successor ([`Gen::mc2_spawn_building`]).
+        f46: if r.class3f == 5 || (r.class3f == 10 && r.model40 == 45) {
+            r.b3d as i16
+        } else {
+            r.f2e
+        },
         // The (5,10) DOOMSDAY PYRAMID keeps its SUMMON-RING STRIDE in
         // `word_0x4A_74` (@0x4A = sv_timer): `sub_21850` stamps
         // 682 (creatures) / 256 (the m19 swarm) with the pick

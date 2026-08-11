@@ -9218,6 +9218,9 @@ fn run_screenshot(
             alt,
             yaw: 0.0,
             segment: false,
+            // Synthetic poses on no tile chain — the neutral co-tile
+            // rank (`LivePose::chain_depth`).
+            chain_depth: 0.5,
             life_frac: None,
             fire_life: None,
             player_owned: true,

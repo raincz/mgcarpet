@@ -44,6 +44,10 @@ struct Instance {
     // translucency raster modes. Only takes effect on the blend
     // pipeline (the opaque pipeline has blending disabled).
     @location(5) alpha: f32,
+    // Retail co-tile paint order in (0, 1): the sprite's place in its
+    // tile's entity chain, head->tail. Higher = later in retail's walk
+    // = ON TOP. See `Billboard::chain_depth`.
+    @location(6) chain: f32,
 };
 
 struct VsOut {
@@ -66,6 +70,13 @@ struct VsOut {
 };
 
 const DEPTH_RANGE: f32 = 768.0;
+// The co-tile chain nudge, in normalized depth. One tile of plan
+// distance is 1/DEPTH_RANGE, so a quarter of that keeps every chain
+// rank strictly inside its own tile's slot: co-tile sprites separate,
+// nothing crosses a tile boundary. The chain rank itself is already
+// normalized to (0, 1) over the tile's own members, so an arbitrarily
+// crowded tile still fits (see `LivePose::chain_depth`).
+const CHAIN_BIAS: f32 = 0.25 / DEPTH_RANGE;
 
 @vertex
 fn vs_main(@builtin(vertex_index) vid: u32, inst: Instance) -> VsOut {
@@ -104,8 +115,18 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: Instance) -> VsOut {
     out.flags = inst.flags;
     out.alpha = inst.alpha;
     let tile_center = floor(inst.pos.xz) + vec2<f32>(0.5, 0.5);
+    // ⭐ THE CO-TILE TIEBREAK. Keying depth to the anchor tile makes
+    // two sprites on one tile bit-identical, and the opaque pipeline
+    // then resolves them by submission = pool-allocation luck. Retail
+    // had no z-buffer at all: it walked the tile's entity chain
+    // head->tail and painted in that order, so the LAST member walked
+    // covers the rest. Pull the depth forward by the chain rank to
+    // reproduce it. CHAIN_BIAS is a fraction of ONE tile's depth
+    // quantum, so a co-tile pair can never cross its own tile
+    // boundary and no cross-tile ordering moves.
     out.anchor_depth = clamp(
-        (length(tile_center - globals.camera.xz) - 0.5) / DEPTH_RANGE,
+        (length(tile_center - globals.camera.xz) - 0.5) / DEPTH_RANGE
+            - inst.chain * CHAIN_BIAS,
         0.0,
         0.999999,
     );

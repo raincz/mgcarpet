@@ -188,6 +188,13 @@ impl Gen {
                     let e = &mut self.ent[i];
                     e.flags = (e.flags & !0x2_0008) | 0x2_0000;
                     e.tick70 = 1;
+                    // `sub_57D40(a1x, &a1x->position)` (EF:62443, the
+                    // fn's SOLE call site) — re-head the TREE so the
+                    // flame, head-linked an instruction ago, paints
+                    // after it and therefore in FRONT of it. Inert to
+                    // every scan: the line above cleared the burning
+                    // tree's target bit.
+                    self.relink_head(i);
                 }
             }
         }

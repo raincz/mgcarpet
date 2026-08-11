@@ -121,9 +121,9 @@ impl Gen {
     /// 1024 → 0; without it, 291 → 0).
     pub(crate) fn mc2_building_pad_reconstruct(&mut self, i: usize) {
         let (act, tick) = (self.ent[i].act_life, self.ent[i].tick70);
-        let (z, site_z, max_life, flags) = {
+        let (z, site_z, max_life, flags, chain) = {
             let e = &self.ent[i];
-            (e.z, e.site_z, e.max_life, e.flags)
+            (e.z, e.site_z, e.max_life, e.flags, e.f46)
         };
         // Ticks of the 30-frame construction already run, and the z the
         // lerp read while they ran.
@@ -191,7 +191,10 @@ impl Gen {
             self.t.height[t] = height;
         }
         // The import is the truth for every entity field — the replay
-        // touched terrain only.
+        // touched terrain only. `f46` is the degradation link
+        // ([`Gen::mc2_spawn_building`]): it must survive the replayed
+        // construction pass or the building demolishes at the end of
+        // its life where retail rebuilds its successor.
         {
             let e = &mut self.ent[i];
             e.act_life = act;
@@ -200,6 +203,7 @@ impl Gen {
             e.site_z = site_z;
             e.max_life = max_life;
             e.flags = flags;
+            e.f46 = chain;
         }
         self.sounds.truncate(sounds);
     }

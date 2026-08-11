@@ -561,6 +561,16 @@ fn mc2_slice_behaviors_and_goldens() {
     // footprint mask and lands. Behavior change toward retail by
     // design — mc2l4 t=2249 (an open `field:3,3:life` exemplar) went
     // conforming on the same patch.
+    // Re-pinned (E ONLY; post-init + A-D hold) for the TREE-IGNITION
+    // RE-LINK (`sub_57D40` EF:40306, sole call EF:62443 — the tree
+    // re-heads its tile chain so its flame paints in FRONT of it).
+    // ⭐ PURE BOOKKEEPING, not behavior: it moves `next20`/`prev22`,
+    // which are hashed `Ent` fields, and NOTHING else — the ignition
+    // branch clears the burning tree's target bit one line earlier, so
+    // the re-headed tree satisfies no scan predicate, and a relink
+    // preserves relative order for every other member of the tile. The
+    // proof is right below: the layout-independent OBSERVABLE
+    // projection does NOT move on this patch.
     const GOLDEN: [u64; 6] = [
         0x95c8d53f76cff370, // post-init (GenerateEvents + dis 0)
         0x11c7763c0e624f57, // A: 64 idle ticks afield
@@ -572,7 +582,7 @@ fn mc2_slice_behaviors_and_goldens() {
         // EF:3750; corpus pins: mc1l0 t=91 tent claim, mc2l0 t=7257
         // fixture conforming): an edge-tile victim in the provocation
         // window now gets its mail on retail's tick.
-        0x69a9de181f9f2731, // E: census + villager/archer provocation
+        0x2a4c2b347782216f, // E: census + villager/archer provocation
     ];
     assert_eq!(
         got, GOLDEN,

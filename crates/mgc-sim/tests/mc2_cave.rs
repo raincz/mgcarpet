@@ -443,13 +443,22 @@ fn mc2_cave_behaviors_and_goldens() {
     // perimeter. Verified attributable to the pass alone — reverting
     // the dome/scorch-ring writer re-bind in the same patch leaves
     // this hash unchanged. Behavior change toward retail by design.
+    // Re-pinned (ALL FOUR) for the BUILDING DEGRADATION LINK moving to
+    // its retail home, the PER-ENTITY `fontTypeIndex_0x3D_61` → `f46`
+    // (`sub_49A30` EF:32795-98 seeds it; `RemoveCastleStage_385C0`
+    // EF:28090 branches on it) — see [`Gen::mc2_spawn_building`]. `f46`
+    // is hashed, so every authored building whose `bldgprm` byte_3 is
+    // nonzero moves the stream from t=0; the LEVEL's own behavior is
+    // unchanged here (no castle level-up and no (10,67) quake grab in
+    // this window, and with neither the entity copy equals the table
+    // read the collapse used to do).
     assert_eq!(
         got,
         vec![
-            0x1557c9632897e7dbu64,
-            0x847583d974765156,
-            0x92f1329afce69d1a,
-            0xf0658c77ebc88e7f,
+            0x66b84698602039bau64,
+            0x5fd4f919696a3895,
+            0xcd56c1ccd481ce3b,
+            0x4b55a234c67f939c,
         ],
         "cave goldens moved — re-pin ONLY for an intended fidelity change"
     );

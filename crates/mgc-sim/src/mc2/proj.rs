@@ -436,10 +436,16 @@ impl Gen {
     /// debuff stamps (the (9,20)/(9,21) lobs' payloads). Unported
     /// effects apply the damage directly (deliberate) and count the
     /// misfit.
+    ///
+    /// ⚠ This seam folds THREE retail impact workers into one, and
+    /// they do NOT agree about the spawned effect's leader — see the
+    /// stamp block at the tail.
     fn mc2_proj_impact(&mut self, i: usize, victim: u16, ctx: &MobCtx) {
-        let (fc, fm, x, y, z, id, yaw, pitch, dmg) = {
+        let (fc, fm, x, y, z, id, yaw, pitch, dmg, act, lock) = {
             let e = &self.ent[i];
-            (e.f68, e.f69, e.x, e.y, e.z, e.id24, e.f30, e.f32, e.f44)
+            (
+                e.f68, e.f69, e.x, e.y, e.z, e.id24, e.f30, e.f32, e.f44, e.tick70, e.f146,
+            )
         };
         let spawned = match (fc, fm) {
             (10, 0) => self.mc2_spawn_fire(x, y, z),
@@ -640,14 +646,15 @@ impl Gen {
             // then LEADERS the hub (EF:63029) and stamps the owner id
             // onto all 25 satellites, swapping the local human's to
             // the star sprite 42 (`SetEntityIndex_49C90` — index
-            // only, the row-340 extent quad stays). The hub leader
-            // rides the generic f146 = victim stamp below: retail
-            // copies the projectile's homing LOCK, which for a homed
-            // hit IS the struck victim; the struck-write form also
-            // covers the struck castle brain, whose envelope the
-            // hub's phase-0 sizing stretches over — the adjudicated
-            // retail behavior remc2's `sub_65C20` under-transcribes
-            // (docs/traces/mc2-class10-m76-fire-spheres.md §7).
+            // only, the row-340 extent quad stays). The hub's leader
+            // is the PROJECTILE'S OWN LOCK, not the struck victim —
+            // the stamp block at the tail of this fn carries the law
+            // and the reason the two structure kinds behave
+            // differently. ⚠ `docs/traces/mc2-class10-m76-fire-
+            // spheres.md` §7 read the missing struck-write as a
+            // remc2 transcription gap; that is SUPERSEDED as the
+            // explanation (though not disproven — remc1's twin
+            // `sub_52ED0_53210` really does carry a struck-write).
             (10, 76) => {
                 let s = self.mc2_spawn_fire_orb(x, y, z);
                 if let Some(s) = s {
@@ -762,10 +769,48 @@ impl Gen {
             }
         };
         if let Some(s) = spawned {
+            // ⭐ THE LEADER STAMP IS NOT UNIVERSAL. Three retail impact
+            // workers fold into this seam and only two of them
+            // struck-stamp: `sub_65820` (the generic expiry, EF:62992)
+            // and `CastPosses_65F60` (EF:63557) hand the effect the
+            // STRUCK victim, but the FIREBALL worker `sub_65C20`
+            // (EF:63057) never writes the effect's leader at all — it
+            // only ZEROES the projectile's OWN homing lock when nothing
+            // was struck (EF:63195-96). Its action-29 wrapper
+            // `sub_65B50` then copies that lock onto the (10,76)
+            // firestorm hub (EF:63027-29); action 0's wrapper
+            // `CastPlayerFire_65B30` (EF:63005-09) copies nothing, so
+            // the plain (10,0) splat keeps its memset 0.
+            //
+            // ⭐ That upstream lock IS the structural distinction
+            // between a castle and a (10,45) building under a charged
+            // fireball: `sub_67CB0` case 0x1C walks the class-3 list
+            // (castles scored by `sub_685D0`, EF:54783/54790) and the
+            // class-5 buckets, and NEVER the building list
+            // `dword_38527` — which only the model 1/0x11 possession
+            // arm reaches (EF:55047). A fireball can LOCK a castle; it
+            // can never lock a building. [`Gen::mc2_aim_lists`] already
+            // has this exactly (model 0x1C = wizards + creatures, no
+            // buildings). Leader = a castle → the hub's phase-0 sizing
+            // takes the 3392/640 bounds off `leader.f80` (`sub_339B0`
+            // EF:24581-90) and the per-tick HARD SNAP re-centres the
+            // ring on `leader.pos.z + leader.f78` (`sub_33C70`
+            // EF:24722-45) = the engulf. Leader 0 → the AUTHORED
+            // 192/480 compact ring (EF:35950-51) floats where the ball
+            // died, riding the building's own stamped heightmap
+            // (EF:27341) = "spins and runs above the flag".
+            //
+            // Damage is untouched either way (`sub_33C00` EF:24700-14,
+            // 70 per satellite from the satellite's own quad).
+            let leader = match act {
+                29 => lock,
+                0 => 0,
+                _ => victim,
+            };
             let e = &mut self.ent[s];
             e.id24 = id;
             e.f30 = yaw;
-            e.f146 = victim;
+            e.f146 = leader;
             e.f140 = dmg as i32; // subSpellIndex rides onto the effect
         }
         // The impact XP award (`sub_6D8B0(id, spell, 1)` on a victim

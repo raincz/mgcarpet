@@ -1463,6 +1463,31 @@ impl Gen {
         }
     }
 
+    /// `sub_41CC0_42000` (:52460) / `sub_57D40` (EF:40306) — UNLINK +
+    /// LINK at the entity's OWN position. Nothing moves; the entity
+    /// simply becomes the HEAD of its tile chain.
+    ///
+    /// ⭐ That is a PAINT-ORDER operation. The sprite pass walks the
+    /// tile chain head→tail and is a pure painter with no z-buffer at
+    /// all, so the member drawn LAST — the tail, i.e. the one that has
+    /// been linked longest — ends up ON TOP. Re-heading an entity
+    /// therefore pushes it BEHIND everything already sharing its tile.
+    /// Neither existing primitive can express it: [`Gen::move_relink`]
+    /// no-ops within a tile, and `link` early-returns on the link bit.
+    ///
+    /// Both games call it from exactly one place — the tree IGNITION
+    /// block (:57698 / EF:62443), re-heading the tree one instruction
+    /// after the flame was head-linked, so the flame paints after it =
+    /// in front of it.
+    pub(crate) fn relink_head(&mut self, i: usize) {
+        let (x, y, z) = {
+            let e = &self.ent[i];
+            (e.x, e.y, e.z)
+        };
+        self.unlink(i);
+        self.link(i, x, y, z);
+    }
+
     /// sub_41CF0 (:52468): link into the per-tile list and set position.
     pub(crate) fn link(&mut self, i: usize, x: u16, y: u16, z: i16) {
         if self.ent[i].flags & 4 != 0 {

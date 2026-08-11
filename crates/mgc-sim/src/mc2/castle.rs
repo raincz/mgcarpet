@@ -417,6 +417,17 @@ impl Gen {
             return;
         };
         let e = &mut self.ent[i];
+        // ⛔ DO NOT add `e.f78 = 0` here. The retail helper really does
+        // write `array_0x52_82.yaw = 0` (EF:32891), and it was banked
+        // as a latent port divergence — but the CORPUS REFUTES IT:
+        // adding the write costs 469 mc2l0 fixtures on the compared
+        // `field:3,2:applied_yaw` column, i.e. retail castles carry a
+        // NONZERO yaw across the ticks the port refreshes extents on.
+        // The port's callers are not retail's callers (retail reaches
+        // SetShiftByCastle only at the level-up seams and around the
+        // pre-clear's temporary next-level box, EF:4399/4415), so the
+        // follow-up yaw/fov writes named below are what actually own
+        // this lane. Recorded gameplay outranks the decompile.
         e.f80 = (((def.w as u16) << 8).wrapping_add(1280)) >> 1;
         e.f82 = (((def.h as u16) << 8).wrapping_add(1280)) >> 1;
         e.f84 = 0x4000;
@@ -2279,5 +2290,84 @@ mod tests {
                 "level {lvl} piece list"
             );
         }
+    }
+
+    /// **THE CASTLE LEVEL-UP PRE-CLEAR DOES NOT JUST KILL THE
+    /// BUILDINGS IN ITS WAY — IT CUTS THEIR DEGRADATION LINK.**
+    /// `sub_11960` writes BOTH `life_0x8 = -1` and
+    /// `fontTypeIndex_0x3D_61 = 0` (EF:4410-11) on every class-10
+    /// model-45 entity overlapping the NEXT level's footprint. The
+    /// second write is what makes the kill permanent: the collapse
+    /// that follows branches on the entity's own link
+    /// (`RemoveCastleStage_385C0` EF:28090), so a cleared link
+    /// demolishes where a live one would rebuild the successor —
+    /// forever, under a castle that levels again next pass. Pinned
+    /// together with `a_building_collapse_branches_on_its_own_link_
+    /// not_the_table` in `engine::world`, which owns the other half.
+    /// ⚠ This half was ALREADY correct, so this fixture passes both
+    /// before and after that patch — a regression guard, not a fix
+    /// witness. The world-side twin is the non-vacuous one.
+    #[test]
+    fn a_castle_preclear_cuts_the_building_degradation_link() {
+        let mut g = flat_gen();
+        // One BUILD00 row for the castle's next level; the pre-clear
+        // sizes its box from it.
+        g.assets.build_tab = vec![
+            BuildDef {
+                offset: 0,
+                w: 3,
+                h: 3,
+            },
+            BuildDef {
+                offset: 0,
+                w: 3,
+                h: 3,
+            },
+        ];
+        let (cx, cy) = (100u16 << 8, 100u16 << 8);
+        let c = g.new_event().expect("castle slot");
+        {
+            let e = &mut g.ent[c];
+            e.class64 = 3;
+            e.model65 = 2;
+            e.f26 = 0; // level 0 → the pre-clear sizes level 1
+            e.id24 = 1;
+            e.act_life = 1;
+            e.f80 = 512;
+            e.f82 = 512;
+        }
+        g.link(c, cx, cy, g.ground_z(cx, cy) as i16);
+        // A self-chaining building standing on the castle's next
+        // footprint, and a second one well outside it.
+        let mk = |g: &mut Gen, x: u16, y: u16| -> usize {
+            let b = g.new_event().expect("building slot");
+            {
+                let e = &mut g.ent[b];
+                e.class64 = 10;
+                e.model65 = 45;
+                e.act_life = 30;
+                e.f46 = 7; // a live degradation link
+                e.f80 = 256;
+                e.f82 = 256;
+            }
+            g.link(b, x, y, g.ground_z(x, y) as i16);
+            b
+        };
+        let inside = mk(&mut g, cx, cy);
+        let outside = mk(&mut g, 140u16 << 8, 140u16 << 8);
+
+        g.mc2_castle_preclear(c);
+
+        assert_eq!(g.ent[inside].act_life, -1, "the overlapping building dies");
+        assert_eq!(
+            g.ent[inside].f46, 0,
+            "and its degradation link is CUT — this is what makes the \
+             castle's kill permanent instead of an endless rebuild"
+        );
+        assert_eq!(
+            g.ent[outside].act_life, 30,
+            "a building outside the next footprint is untouched"
+        );
+        assert_eq!(g.ent[outside].f46, 7, "so is its link");
     }
 }

@@ -316,6 +316,9 @@ pub fn billboards_from_poses(
             // frame's pixel aspect exactly as retail does.
             world_h: p.sprite_h_units.map_or(s.world_h, |u| u / UNITS_PER_TILE),
             blend: p.blend,
+            // Retail's co-tile paint order, read off the sim's live
+            // tile chains (`LivePose::chain_depth`).
+            chain_depth: p.chain_depth,
             // Retail proximity concealment (a 19..15-tile slant-
             // distance sphere, retail's own fog band — see
             // mgc_render::Billboard): the MC2 wraith (5,26)
@@ -1807,8 +1810,10 @@ pub fn ghost_billboard(
         frame: 0,
         world_h: s.world_h,
         blend: 2,
-        // An instrument, not a retail entity — never distance-hidden.
+        // An instrument, not a retail entity — never distance-hidden,
+        // and on no tile chain, so it takes the neutral co-tile rank.
         conceal: false,
+        chain_depth: 0.5,
     })
 }
 
@@ -1849,6 +1854,11 @@ fn push_billboard(
         world_h,
         blend: 0,
         conceal: false,
+        // The static THING-list path (`--no-terrain-features`
+        // comparison renders): no live pool, so no tile chain to
+        // read — every sprite takes the neutral co-tile rank and the
+        // co-tile tie falls back to submission order, as before.
+        chain_depth: 0.5,
     });
 }
 
@@ -2435,6 +2445,7 @@ mod tests {
             alt: 1.0,
             yaw: 0.0,
             segment: false,
+            chain_depth: 0.5,
             life_frac: None,
             fire_life: None,
             player_owned: owned,

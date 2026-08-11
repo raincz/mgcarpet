@@ -3816,6 +3816,17 @@ impl Gen {
                             self.ent[i].act_life = burn;
                             self.ent[i].flags &= !8; // no longer hittable
                             self.ent[i].tick70 = 1;
+                            // `sub_41CC0_42000(_, a1, a1 + 72)` (:57698,
+                            // the fn's SOLE call site) — re-head the
+                            // TREE so the flame, head-linked an
+                            // instruction ago, paints after it and
+                            // therefore in FRONT of it. Behaviour-inert
+                            // here: the line above just cleared the
+                            // tree's hittable bit, so the re-headed tree
+                            // satisfies no scan predicate, and a relink
+                            // preserves relative order for every other
+                            // member of the tile.
+                            self.relink_head(i);
                         }
                     }
                 }

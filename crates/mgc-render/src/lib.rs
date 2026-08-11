@@ -852,6 +852,15 @@ pub struct Billboard {
     pub frame: u8,
     /// World height of the quad (engine `var_8 / 256`).
     pub world_h: f32,
+    /// RETAIL CO-TILE PAINT ORDER, `(0, 1)`: this sprite's place in
+    /// its tile's entity chain, head→tail (higher = drawn later = on
+    /// top). See `mgc_sim::engine::world::LivePose::chain_depth` for
+    /// the law. The depth channel keys every sprite to its anchor
+    /// TILE, so co-tile sprites tie bit-for-bit and the tie would
+    /// otherwise fall to pool-allocation luck; this breaks it the way
+    /// retail's z-bufferless painter did. `0.5` = neutral, for
+    /// instruments and the comparison paths that have no chain.
+    pub chain_depth: f32,
     /// Retail translucency raster mode (MC2 DrawSprite_41BD3 modes;
     /// docs/traces/mc2-transparency-drawlist.md): 0 = opaque, 2 =
     /// 33%-opaque (smoke), 3 = 67%-opaque (glows/fades). The blend
@@ -1000,7 +1009,22 @@ struct BillboardInstance {
     /// Opacity: 1.0 opaque, 1/3 / 2/3 for the translucent raster
     /// modes (only consumed by the blend pipeline's fragment pass).
     alpha: f32,
+    /// Co-tile chain rank, `(0, 1)` — see [`Billboard::chain_depth`].
+    chain: f32,
 }
+
+/// The instance layout of [`BillboardInstance`], shared by BOTH
+/// billboard pipelines (opaque and blend) because they run the SAME
+/// shader and must agree with its `Instance` bindings exactly.
+/// ⚠ Kept in one place deliberately: when these were two inline
+/// `vertex_attr_array!`s, adding `chain` to one and not the other
+/// built cleanly and blew up at pipeline creation, on the launch path,
+/// where nothing but a real window can reach it.
+const BILLBOARD_ATTRS: [wgpu::VertexAttribute; 7] = wgpu::vertex_attr_array![
+    0 => Float32x3, 1 => Float32x2, 2 => Float32x2,
+    3 => Float32x2, 4 => Uint32x2, 5 => Float32,
+    6 => Float32,
+];
 
 /// Default sky/fog color, the classic hazy horizon (MC1's hand-picked
 /// approximation; kept until the sky presentation trace lands). MC2
@@ -2528,10 +2552,7 @@ impl Renderer {
                 buffers: &[wgpu::VertexBufferLayout {
                     array_stride: std::mem::size_of::<BillboardInstance>() as u64,
                     step_mode: wgpu::VertexStepMode::Instance,
-                    attributes: &wgpu::vertex_attr_array![
-                        0 => Float32x3, 1 => Float32x2, 2 => Float32x2,
-                        3 => Float32x2, 4 => Uint32x2, 5 => Float32,
-                    ],
+                    attributes: &BILLBOARD_ATTRS,
                 }],
             },
             fragment: Some(wgpu::FragmentState {
@@ -2575,10 +2596,7 @@ impl Renderer {
                     buffers: &[wgpu::VertexBufferLayout {
                         array_stride: std::mem::size_of::<BillboardInstance>() as u64,
                         step_mode: wgpu::VertexStepMode::Instance,
-                        attributes: &wgpu::vertex_attr_array![
-                            0 => Float32x3, 1 => Float32x2, 2 => Float32x2,
-                            3 => Float32x2, 4 => Uint32x2, 5 => Float32,
-                        ],
+                        attributes: &BILLBOARD_ATTRS,
                     }],
                 },
                 fragment: Some(wgpu::FragmentState {
@@ -4493,6 +4511,7 @@ impl Renderer {
                 uv_size: [w, h],
                 flags: [mirror as u32, 32],
                 alpha,
+                chain: b.chain_depth,
             };
             if alpha < 1.0 {
                 translucent.push(inst);
@@ -4501,14 +4520,21 @@ impl Renderer {
             }
         }
         let opaque = out.len() as u32;
-        // Back-to-front by plan distance (the depth channel's metric),
-        // so overlapping smoke composites like retail's painter order.
+        // Back-to-front by the DEPTH CHANNEL'S OWN metric — the anchor
+        // TILE's plan distance (billboard.wgsl's `anchor_depth`), not
+        // the sprite's raw position. The blend pipeline writes no
+        // depth, so this sort is the only thing ordering translucent
+        // sprites, and keying it to the tile is what lets co-tile pairs
+        // tie exactly so the retail chain rank can break them (the
+        // opaque pass gets the same resolution from the depth epsilon).
+        // Higher `chain` = later in retail's tile walk = drawn last.
         translucent.sort_by(|a, b| {
             let d = |i: &BillboardInstance| {
-                let (dx, dz) = (i.pos[0] - cam.x, i.pos[2] - cam.z);
+                let (tx, tz) = (i.pos[0].floor() + 0.5, i.pos[2].floor() + 0.5);
+                let (dx, dz) = (tx - cam.x, tz - cam.z);
                 dx * dx + dz * dz
             };
-            d(b).total_cmp(&d(a))
+            d(b).total_cmp(&d(a)).then(a.chain.total_cmp(&b.chain))
         });
         out.extend(translucent);
         (out, opaque)

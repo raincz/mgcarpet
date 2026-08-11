@@ -907,6 +907,30 @@ pub struct LivePose {
     /// Multipart body segment (state 120) — drawn but excluded from
     /// entity counts/lists like the original's map/behavior scans.
     pub segment: bool,
+    /// ⭐ RETAIL'S CO-TILE PAINT ORDER, in `(0, 1)`: this pose's place
+    /// in its tile's entity chain, head → tail, relative to the other
+    /// POSES sharing the tile. Higher = later in the walk = drawn
+    /// LAST = on top.
+    ///
+    /// Retail's sprite pass walks each tile's chain head→tail and is a
+    /// pure painter with no z-buffer at all, so chain position IS the
+    /// depth order for co-tile sprites — and chain order is LINK
+    /// RECENCY, so the longest-linked member wins. The port keys
+    /// billboard depth to the anchor TILE, which makes every co-tile
+    /// pair tie exactly; this is the tiebreak that resolves them the
+    /// way retail did. The visible case that motivated it is a burning
+    /// tree, whose ignition re-heads the tree so its flame paints in
+    /// front ([`crate::engine::features::Gen::relink_head`]) — but the
+    /// rule is general, and a creature that walks onto a tree's tile
+    /// becomes the head and is covered by the tree, exactly as at
+    /// 320x200. Player-ruled for fidelity 2026-08-11.
+    ///
+    /// RELATIVE, not an absolute hop count: a burning tree's tile
+    /// churns smoke puffs for the whole 130..189-tick burn, so any
+    /// fixed cap would be reached and would restore the very tie it
+    /// exists to break. `0.5` = neutral (an UNLINKED pose, which
+    /// retail's tile walk would never reach at all).
+    pub chain_depth: f32,
     /// Remaining life fraction (0..=1) for monsters (class-5 chain
     /// heads) — feeds the unfaithful debug health-bar overlay. None
     /// for everything the overlay shouldn't tag.
@@ -1579,6 +1603,8 @@ impl World {
                 alt: e.z as f32 / 256.0,
                 yaw: (e.f30 & 0x7FF) as f32 * (TAU / 2048.0),
                 segment: bits.segment,
+                chain_depth: 0.5, // ranked in the post-pass below
+
                 life_frac: bits.life_frac,
                 // (10,0/1) fire/explosion both games; (10,6) = the
                 // standing fire in BOTH games (MC1: Wall of Fire
@@ -1656,7 +1682,64 @@ impl World {
                     .then_some(self.mc2_doom_meter as f32),
             });
         }
+        self.rank_co_tile_poses(&mut out);
         out
+    }
+
+    /// Stamp [`LivePose::chain_depth`] — retail's co-tile paint order,
+    /// read straight off the live tile chains. One walk per occupied
+    /// tile, head→tail, ranking only the entities that actually posed:
+    /// the renderer's own filters (enhanced fire, unresolvable sprites)
+    /// drop members, and a rank over the RAW chain would leave the
+    /// survivors bunched at arbitrary values. Order is what matters and
+    /// dropping members preserves it.
+    fn rank_co_tile_poses(&self, out: &mut [LivePose]) {
+        use std::collections::HashSet;
+        if out.is_empty() {
+            return;
+        }
+        let mut pose_at = vec![u32::MAX; self.g.ent.len()];
+        for (k, p) in out.iter().enumerate() {
+            if (p.slot as usize) < pose_at.len() {
+                pose_at[p.slot as usize] = k as u32;
+            }
+        }
+        let mut done: HashSet<usize> = HashSet::new();
+        let mut members: Vec<u32> = Vec::new();
+        for k in 0..out.len() {
+            let slot = out[k].slot as usize;
+            let Some(e) = self.g.ent.get(slot) else {
+                continue;
+            };
+            // Not on any chain — retail's tile walk never reaches it,
+            // so it has no retail order to reproduce. Keep neutral.
+            if e.flags & 4 == 0 {
+                continue;
+            }
+            let t = crate::engine::features::tile((e.x >> 8) as u8, (e.y >> 8) as u8);
+            if !done.insert(t) {
+                continue;
+            }
+            members.clear();
+            let mut n = self.g.map_entity[t] as usize;
+            // The pool bounds a well-formed chain; the guard is for a
+            // corrupt one (a cycle would otherwise hang the frame).
+            let mut hops = 0;
+            while n != 0 && n < self.g.ent.len() && hops <= self.g.ent.len() {
+                if pose_at[n] != u32::MAX {
+                    members.push(pose_at[n]);
+                }
+                n = self.g.ent[n].next20 as usize;
+                hops += 1;
+            }
+            if members.len() < 2 {
+                continue; // alone on its tile: nothing to break
+            }
+            let denom = members.len() as f32 + 1.0;
+            for (rank, &k2) in members.iter().enumerate() {
+                out[k2 as usize].chain_depth = (rank as f32 + 1.0) / denom;
+            }
+        }
     }
 
     /// The MC1 (and Hidden Worlds) per-entity presentation rules for
@@ -7163,12 +7246,16 @@ impl World {
                 // slot swap: `mc2_house_collapse`'s chain branch spawns
                 // the byte_3 successor in a fresh slot and re-points
                 // this row's `bound` to it (`sub_59760`, EF:40921-54).
-                // A building's fontTypeIndex ≡ `bldgprm[type].byte_3`
-                // (sub_49A30 EF:32794-98), never written elsewhere, so
-                // the port reads the chain byte directly: a dead
-                // building with a successor PENDING (chain != 0, the
-                // pre-collapse window before the re-point runs) is not
-                // done; only the FINAL stage (chain == 0) completes.
+                // A dead building with a successor PENDING (link != 0,
+                // the pre-collapse window before the re-point runs) is
+                // not done; only the FINAL stage (link 0) completes.
+                // ⚠ The link is the ENTITY's `f46`, NOT `bldgprm[type]
+                // .byte_3`: the table read was right only while nothing
+                // could clear the link, and a castle level-up or a
+                // (10,67) quake grab does exactly that — under retail a
+                // castle-CRUSHED chain building completes this
+                // objective, where the table read left it pending
+                // forever ([`Gen::mc2_spawn_building`] carries the law).
                 // No `thing_slot` identity term here (unlike type 1):
                 // the re-point deliberately moves `bound` to successor
                 // slots whose thing_slot differs from the authored
@@ -7179,14 +7266,7 @@ impl World {
                     None => true,
                     Some(e) => {
                         let dead = e.class64 == 0 || e.flags & 0x400 != 0 || e.act_life <= -1;
-                        dead && (!(e.class64 == 10 && e.model65 == 45)
-                            || self
-                                .g
-                                .assets
-                                .bldgprm
-                                .get(e.f71 as usize)
-                                .map_or(0, |bp| bp.chain)
-                                == 0)
+                        dead && (!(e.class64 == 10 && e.model65 == 45) || e.f46 == 0)
                     }
                 }),
                 // Types 4/6 need the same bind seam plus (4) a
@@ -8197,7 +8277,11 @@ impl World {
     /// the chain rebuild is PORTED below.
     fn mc2_house_collapse(&mut self, i: usize) {
         let bldg = self.g.ent[i].f71 as usize;
-        let chain = self.g.assets.bldgprm.get(bldg).map_or(0, |b| b.chain);
+        // The ENTITY's own link (:28090), not `bldgprm[type].byte_3`:
+        // the castle pre-clear and the quake grab both zero it in
+        // place, and only the entity copy remembers that
+        // ([`Gen::mc2_spawn_building`] carries the law).
+        let chain = self.g.ent[i].f46;
         let Some(def) = self.g.assets.build_tab.get(bldg).copied() else {
             self.g.ent[i].flags |= 0x400;
             return;
@@ -8233,6 +8317,12 @@ impl World {
                         }
                     }
                 }
+            } else {
+                // Pool starvation: retail clears the DEAD building's
+                // own link before it goes dark (:28187-88), so the
+                // type-2 objective latch below sees a final stage
+                // rather than a successor that never arrived.
+                self.g.ent[i].f46 = 0;
             }
             // The footprint dirty-bit clear (:28225-33).
             for dy in 0..h {
@@ -15534,6 +15624,106 @@ mod tests {
         assert_eq!(count(&w, 10, 6), 0, "the fire burned out");
     }
 
+    /// **THE CO-TILE PAINT ORDER REACHES THE RENDERER.** The relink is
+    /// only half the fix: the port keys billboard depth to the anchor
+    /// TILE, so two sprites on one tile tie bit-for-bit and the opaque
+    /// pipeline resolves them by submission = pool-allocation luck.
+    /// [`LivePose::chain_depth`] carries retail's chain order out to
+    /// the billboard pass — head→tail, higher = drawn last = on top —
+    /// so the flame ends up in front of the tree it is burning.
+    #[test]
+    fn the_burning_tree_poses_behind_its_own_flame() {
+        let mut w = mc2_flat_world();
+        let (x, y) = mc2_pos(120, 120);
+        let gz = w.g.ground_z(x, y) as i16;
+        let t = w.g.mc2_spawn_tree(x, y, gz).expect("tree spawns");
+        // Alone on its tile: no tie to break, so the neutral rank.
+        let poses = w.live_poses();
+        let of = |ps: &[LivePose], slot: usize| -> f32 {
+            ps.iter()
+                .find(|p| p.slot as usize == slot)
+                .unwrap_or_else(|| panic!("slot {slot} poses"))
+                .chain_depth
+        };
+        assert_eq!(of(&poses, t), 0.5, "a lone sprite keeps the neutral rank");
+
+        let life = w.g.ent[t].act_life;
+        w.g.mail_write(
+            crate::mc1::combat::MailTarget::Pool(t),
+            0,
+            life as u32 + 1,
+            999,
+        );
+        w.tick(away(), PlayerCommand::default());
+        let flame = (1..w.g.ent.len())
+            .find(|&j| w.g.ent[j].class64 == 10 && w.g.ent[j].model65 == 6)
+            .expect("the standing fire ignited");
+        let poses = w.live_poses();
+        assert!(
+            of(&poses, t) < of(&poses, flame),
+            "the tree paints BEFORE its flame, so the flame covers it \
+             (tree {}, flame {})",
+            of(&poses, t),
+            of(&poses, flame)
+        );
+        // Bounded and strictly inside the tile's own depth slot, so no
+        // co-tile nudge can ever cross a tile boundary.
+        for p in &poses {
+            assert!(
+                p.chain_depth > 0.0 && p.chain_depth < 1.0,
+                "chain rank stays in (0, 1): {}",
+                p.chain_depth
+            );
+        }
+    }
+
+    /// The MC1 half of the ignition RE-LINK law — see
+    /// `tree_ignition_re_heads_the_tree_mc2` for the whole story.
+    /// `sub_41CC0_42000` (:52460), sole call at :57698.
+    #[test]
+    fn tree_ignition_re_heads_the_tree_mc1() {
+        use crate::mc1::combat::MailTarget;
+        let planes = Planes {
+            height: vec![100; 0x10000],
+            tile_type: vec![5; 0x10000],
+            shading: vec![32; 0x10000],
+            angle: vec![5; 0x10000],
+            ceiling: Vec::new(),
+        };
+        let things = vec![Thing {
+            slot: 0,
+            kind: ThingKind::Entity,
+            class: 2,
+            model: 0,
+            x: 112,
+            y: 110,
+            dis_id: 0,
+            swi_sz: 0,
+            swi_id: 0,
+            parent: 0,
+            child: 0,
+            par3: None,
+        }];
+        let mut w = World::new(planes, &things, 3, assets());
+        w.tick(away(), PlayerCommand::default());
+        let t = find_slot(&w, 2, 0);
+        let cell =
+            crate::engine::features::tile((w.g.ent[t].x >> 8) as u8, (w.g.ent[t].y >> 8) as u8);
+        w.g.mail_write(MailTarget::Pool(t), 0, 400, PLAYER_TARGET);
+        w.tick(away(), PlayerCommand::default());
+        let flame = (1..w.g.ent.len())
+            .find(|&j| w.g.ent[j].class64 == 10 && w.g.ent[j].model65 == 6)
+            .expect("the standing fire ignited");
+        assert_eq!(
+            w.g.map_entity[cell] as usize, t,
+            "the tree is re-headed onto its tile chain"
+        );
+        assert_eq!(
+            w.g.ent[t].next20 as usize, flame,
+            "the flame sits right behind the tree, so it paints after it"
+        );
+    }
+
     /// Retail's standing fire (`sub_3A730`, :46643) is spawned with a
     /// real damage AABB — `extents(272, 1536)`. MC1's ambient fires
     /// (burning trees, volcano lava) ARE that entity, so without the
@@ -18812,6 +19002,99 @@ mod tests {
         );
     }
 
+    /// **THE DEGRADATION LINK IS PER-ENTITY, AND THE COLLAPSE BRANCHES
+    /// ON THE ENTITY'S COPY — NOT ON `bldgprm[type].byte_3`.**
+    /// `sub_49A30` seeds `fontTypeIndex_0x3D_61` from the table once
+    /// (EF:32795-98); `RemoveCastleStage_385C0` reads the ENTITY
+    /// (EF:28090). The difference is the whole bug: two crush paths —
+    /// the castle level-up pre-clear `sub_11960` (EF:4410-11) and the
+    /// (10,67) quake grab `sub_3A090` (EF:29335-36) — zero the link in
+    /// place, and a table read cannot see that, so the 16 self-chaining
+    /// building ids resurrected under a levelling castle forever.
+    ///
+    /// Both halves in one pin: the seeded link still rebuilds (so the
+    /// seed cannot be dropped), the cleared link demolishes for good.
+    #[test]
+    fn a_building_collapse_branches_on_its_own_link_not_the_table() {
+        use crate::engine::features::{BldgParam, BuildDef};
+        const N: u8 = 3;
+        // A one-step chain: id 0 degrades into id 1, which is final.
+        let build = |w: &mut World| {
+            w.g.assets.build_tab = vec![
+                BuildDef {
+                    offset: 0,
+                    w: N,
+                    h: N,
+                },
+                BuildDef {
+                    offset: 0,
+                    w: N,
+                    h: N,
+                },
+            ];
+            w.g.assets.build_dat = (0..N as u32 * N as u32).flat_map(|_| [7u8, 40u8]).collect();
+            w.g.assets.bldgprm = vec![
+                BldgParam {
+                    rate: 20,
+                    flags: 0,
+                    chain: 1, // self-chaining: collapses into id 1
+                },
+                BldgParam {
+                    rate: 20,
+                    flags: 0,
+                    chain: 0, // the final stage
+                },
+            ];
+        };
+        let live_buildings = |w: &World| -> usize {
+            (1..w.g.ent.len())
+                .filter(|&j| {
+                    let e = &w.g.ent[j];
+                    e.class64 == 10 && e.model65 == 45 && e.flags & 0x400 == 0
+                })
+                .count()
+        };
+
+        // (a) An UNTOUCHED link rebuilds its successor — this is what
+        // pins the seed in `mc2_spawn_building`.
+        let mut w = mc2_flat_world();
+        build(&mut w);
+        let (x, y) = mc2_pos(100, 100);
+        let gz = w.g.ground_z(x, y) as i16;
+        let b = w.g.mc2_spawn_building(x, y, gz, 0).expect("the building");
+        assert_eq!(w.g.ent[b].f46, 1, "the ctor seeds the link off byte_3");
+        w.mc2_house_collapse(b);
+        assert_eq!(
+            live_buildings(&w),
+            1,
+            "an untouched link rebuilds the chain successor"
+        );
+        let n = (1..w.g.ent.len())
+            .find(|&j| {
+                let e = &w.g.ent[j];
+                e.class64 == 10 && e.model65 == 45 && e.flags & 0x400 == 0
+            })
+            .expect("the successor");
+        assert_eq!(
+            w.g.ent[n].f46, 0,
+            "the successor re-seeds off ITS OWN row — the chain ends here"
+        );
+
+        // (b) The same building with the link CLEARED — exactly the
+        // state a castle pre-clear or a quake grab leaves behind —
+        // demolishes for good.
+        let mut w = mc2_flat_world();
+        build(&mut w);
+        let b = w.g.mc2_spawn_building(x, y, gz, 0).expect("the building");
+        w.g.ent[b].f46 = 0;
+        w.mc2_house_collapse(b);
+        assert_eq!(
+            live_buildings(&w),
+            0,
+            "a crushed building demolishes instead of resurrecting forever"
+        );
+    }
+
     /// **AN AREA WRITER DAMAGES A BUILDING ANYWHERE INSIDE ITS
     /// FOOTPRINT, THROUGH THE MASK — NOT JUST AT ITS FLAG.**
     /// `sub_10C80`'s ch0 arm runs a middle pass the port never had: a
@@ -20789,6 +21072,60 @@ mod tests {
         );
     }
 
+    /// **AT IGNITION THE TREE RE-HEADS ITS TILE CHAIN, SO ITS FLAME
+    /// PAINTS IN FRONT OF IT.** `sub_57D40` (EF:40306) — unlink+link
+    /// at the tree's OWN position, called from exactly one place in
+    /// the whole engine: the ignition block (EF:62443), one
+    /// instruction after the flame was head-linked. The sprite pass
+    /// walks the tile chain head→tail with no z-buffer at all, so the
+    /// member drawn LAST ends up on top; re-heading the tree pushes it
+    /// behind the flame in the walk and therefore behind it on screen.
+    /// MC1 is line-for-line identical (`sub_41CC0_42000` :52460, sole
+    /// call :57698) — see `tree_ignition_re_heads_the_tree_mc1`.
+    ///
+    /// The state is `next20`/`prev22` only: the ignition branch clears
+    /// the burning tree's target bit one line earlier, so nothing
+    /// scans it, and a relink preserves relative order for every other
+    /// member of the tile.
+    #[test]
+    fn tree_ignition_re_heads_the_tree_mc2() {
+        let mut w = mc2_flat_world();
+        let (x, y) = mc2_pos(120, 120);
+        let gz = w.g.ground_z(x, y) as i16;
+        let t = w.g.mc2_spawn_tree(x, y, gz).expect("tree spawns");
+        let cell = crate::engine::features::tile((x >> 8) as u8, (y >> 8) as u8);
+        assert_eq!(
+            w.g.map_entity[cell] as usize, t,
+            "the healthy tree starts as its tile's only member"
+        );
+        let life = w.g.ent[t].act_life;
+        w.g.mail_write(
+            crate::mc1::combat::MailTarget::Pool(t),
+            0,
+            life as u32 + 1,
+            999,
+        );
+        w.tick(away(), PlayerCommand::default());
+        let flame = (1..w.g.ent.len())
+            .find(|&j| w.g.ent[j].class64 == 10 && w.g.ent[j].model65 == 6)
+            .expect("the (10,6) standing fire spawned");
+        // The flame is head-linked at spawn; the relink then puts the
+        // TREE back in front of it in the walk order.
+        assert_eq!(
+            w.g.map_entity[cell] as usize, t,
+            "the tree is re-headed onto its tile chain"
+        );
+        assert_eq!(
+            w.g.ent[t].next20 as usize, flame,
+            "the flame sits right behind the tree, so it paints after it"
+        );
+        assert_eq!(w.g.ent[t].prev22, 0, "the head has no predecessor");
+        assert_eq!(
+            w.g.ent[flame].prev22 as usize, t,
+            "the chain is doubly linked through the re-headed tree"
+        );
+    }
+
     /// The (10,6) standing ground fire (sub_31760): the 6-step
     /// sprite ramp-up, per-tick channel-0 area heat (a tree standing
     /// in it takes the sub_11400 tenth), and the water extinguish.
@@ -21814,6 +22151,13 @@ mod tests {
         {
             let e = &mut w.g.ent[m];
             e.id24 = PLAYER_TARGET;
+            // The CHARGED fireball is (9,28) under action 29 (the
+            // cast table's `(28, 29, 384, 21, 64, 340)`) — and the
+            // action is load-bearing now that the hub's leader is
+            // `sub_65B50`'s copy of the projectile's LOCK rather than
+            // a universal struck-stamp (`mc2_proj_impact`).
+            e.model65 = 28;
+            e.tick70 = 29;
             e.f146 = t as u16;
             e.f68 = 10;
             e.f69 = 76;
@@ -21970,6 +22314,191 @@ mod tests {
             w.g.mc2_fire_orb_tick(h, &ctx);
         }
         assert!(w.g.ent[h].flags & 0x400 != 0, "the chain tore down early");
+    }
+
+    /// **A FIRESTORM CAN ENGULF A CASTLE AND CAN NEVER ENGULF A
+    /// BUILDING — AND THE DISTINCTION IS THE LOCK, NOT THE HIT.**
+    /// The impact seam folds three retail workers into one and only
+    /// two of them struck-stamp the effect they spawn. The fireball
+    /// worker `sub_65C20` (EF:63057) writes no leader at all; its
+    /// action-29 wrapper `sub_65B50` copies the PROJECTILE'S OWN homing
+    /// lock onto the (10,76) hub (EF:63027-29), and action 0's wrapper
+    /// copies nothing. Upstream, `sub_67CB0` case 0x1C walks the
+    /// class-3 list and the class-5 buckets but never the building list
+    /// `dword_38527` — so the lock can be a castle and can never be a
+    /// (10,45) building. Leader 0 leaves the hub on its AUTHORED
+    /// 192/480 ring, floating where the ball died: the player's
+    /// "it spins and runs above the flag".
+    ///
+    /// Pinned three ways, because the old unconditional
+    /// `f146 = victim` passed the first and failed the other two.
+    #[test]
+    fn a_firestorm_leaders_its_lock_never_the_thing_it_struck() {
+        use crate::engine::features::{BldgParam, BuildDef, Gen};
+        use crate::mc1::mobs::MobCtx;
+        use crate::mc2::proj::{AimProbe, F_AIMED};
+
+        let ctx = |x: u16, y: u16, z: i16| MobCtx {
+            px: x,
+            py: y,
+            pz: z,
+            pyaw: 0,
+            pmana: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        // A projectile flown into a victim from 10 tiles out. `act` is
+        // the retail ACTION it carries (29 = the (9,28) charged body,
+        // 0 = the plain (9,0) bolt) and `lock` is the one-shot
+        // acquisition's verdict, pre-applied — `F_AIMED` suppresses
+        // the re-scan so the fixture, not the scan, owns the lock.
+        let fire = |w: &mut World,
+                    act: u8,
+                    model: u8,
+                    payload: (u8, u8),
+                    lock: u16,
+                    tgt: (u16, u16, i16)| {
+            let (mx, my) = mc2_pos(100, 100);
+            let mz = w.g.ground_z(mx, my) as i16 + 512;
+            let m = w.g.mc2_spawn_bolt(mx, my, mz).expect("the projectile");
+            let dh = Gen::isqrt(Gen::dist2_sq(mx, my, tgt.0, tgt.1) as u32) as i32;
+            {
+                let e = &mut w.g.ent[m];
+                e.id24 = PLAYER_TARGET;
+                e.model65 = model;
+                e.tick70 = act;
+                e.f68 = payload.0;
+                e.f69 = payload.1;
+                e.f44 = 70;
+                e.f30 = Gen::angle_between(mx, my, tgt.0, tgt.1);
+                e.f32 = Gen::pitch_toward(mz, tgt.2, dh);
+                e.flags |= F_AIMED;
+                e.f146 = lock;
+            }
+            let c = ctx(mx, my, mz);
+            for _ in 0..60 {
+                if w.g.ent[m].flags & 0x400 != 0 {
+                    break;
+                }
+                w.g.mc2_flyer_tick(m, &c);
+            }
+            assert!(w.g.ent[m].flags & 0x400 != 0, "the projectile detonated");
+            m
+        };
+        let find = |w: &World, class: u8, model: u8| -> Option<usize> {
+            (1..w.g.ent.len()).find(|&j| {
+                let e = &w.g.ent[j];
+                e.class64 == class && e.model65 == model && e.flags & 0x400 == 0
+            })
+        };
+
+        // (a) A charged fireball into a BUILDING: struck, but never
+        // locked — so the hub gets NO leader and keeps the authored
+        // ring instead of engulfing the house.
+        let mut w = mc2_flat_world();
+        w.g.assets.build_tab = vec![BuildDef {
+            offset: 0,
+            w: 3,
+            h: 3,
+        }];
+        w.g.assets.build_dat = (0..9u32).flat_map(|_| [7u8, 40u8]).collect();
+        w.g.assets.bldgprm = vec![BldgParam {
+            rate: 20,
+            flags: 0,
+            chain: 0,
+        }];
+        let (bx, by) = mc2_pos(110, 100);
+        let bgz = w.g.ground_z(bx, by) as i16;
+        let b = w.g.mc2_spawn_building(bx, by, bgz, 0).expect("the house");
+        let (bx, by, bz) = (w.g.ent[b].x, w.g.ent[b].y, w.g.ent[b].z);
+        // The upstream half of the law, stated directly: the charged
+        // fireball's candidate lists have no building in them, so the
+        // lock below can only ever be 0.
+        let (mx, my) = mc2_pos(100, 100);
+        let probe = AimProbe {
+            x: mx,
+            y: my,
+            z: bgz + 512,
+            yaw: Gen::angle_between(mx, my, bx, by),
+            pitch: 0,
+            model: 0x1C,
+            own: PLAYER_TARGET,
+            reach: 0x2000,
+        };
+        assert_ne!(
+            w.g.mc2_aim_scan(&probe, None),
+            Some(b as u16),
+            "sub_67CB0 case 0x1C never walks the building list"
+        );
+        fire(&mut w, 29, 0x1C, (10, 76), 0, (bx, by, bz));
+        let hub = find(&w, 10, 76).expect("the firestorm hub spawned");
+        assert_eq!(
+            w.g.ent[hub].f146, 0,
+            "no lock ⇒ no leader: the ring floats where the ball died \
+             instead of engulfing the house"
+        );
+
+        // (b) The same charged fireball LOCKED on a castle it never
+        // touches, detonating on a creature in the way. The hub must
+        // follow the CASTLE — the lock, not the hit.
+        let mut w = mc2_flat_world();
+        let creature = |w: &mut World, x: u16, y: u16, z: i16| -> usize {
+            let v = w.g.new_event().unwrap();
+            {
+                let e = &mut w.g.ent[v];
+                e.class64 = 5;
+                e.model65 = 16;
+                e.act_life = 60000;
+                e.max_life = 60000;
+                e.f58 = 64;
+                e.flags |= 8;
+                e.f28 = 1;
+                e.f80 = 128;
+                e.f82 = 128;
+                e.f84 = 300;
+            }
+            w.g.link(v, x, y, z);
+            v
+        };
+        let (kx, ky) = mc2_pos(140, 140);
+        let kgz = w.g.ground_z(kx, ky) as i16;
+        let k = w.g.new_event().unwrap();
+        {
+            let e = &mut w.g.ent[k];
+            e.class64 = 3;
+            e.model65 = 2;
+            e.act_life = 20000;
+            e.f80 = 640;
+            e.f82 = 640;
+        }
+        w.g.link(k, kx, ky, kgz);
+        let (vx, vy) = mc2_pos(110, 100);
+        let vgz = w.g.ground_z(vx, vy) as i16 + 512;
+        let v = creature(&mut w, vx, vy, vgz);
+        fire(&mut w, 29, 0x1C, (10, 76), k as u16, (vx, vy, vgz));
+        let hub = find(&w, 10, 76).expect("the firestorm hub spawned");
+        assert_eq!(
+            w.g.ent[hub].f146 as usize, k,
+            "the hub leaders the LOCKED castle, not the creature it hit"
+        );
+        assert_ne!(w.g.ent[hub].f146 as usize, v, "…and never the victim");
+
+        // (c) The plain (10,0) splat under action 0 never takes a
+        // leader either — `CastPlayerFire_65B30` copies nothing
+        // (EF:63005-09), so it keeps the memset 0 even with a live
+        // lock AND a struck victim.
+        let mut w = mc2_flat_world();
+        let (vx, vy) = mc2_pos(110, 100);
+        let vgz = w.g.ground_z(vx, vy) as i16 + 512;
+        let v = creature(&mut w, vx, vy, vgz);
+        fire(&mut w, 0, 0, (10, 0), v as u16, (vx, vy, vgz));
+        let splat = find(&w, 10, 0).expect("the (10,0) splat spawned");
+        assert_eq!(
+            w.g.ent[splat].f146, 0,
+            "action 0's wrapper writes no lock at all"
+        );
     }
 
     /// The class-11 slot-condition switch (sub_6F300): a model-13
