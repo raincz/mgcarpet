@@ -8880,13 +8880,169 @@ stay green with 0 regressions and 0 drifts.
 
 ⚠ **ONE HONEST REGRESSION, and it is a pre-existing bug now UNMASKED.** mc1l5's
 class-9 model-13 (bolt) field rows rise ~1600 because the mound now *stays* in
-its chase and fires the bolts retail fires, at slots that desync. The residual
-94 m9 `speed` rows all have the same shape: the port promotes the mound to CHASE
-where retail declines — `chase: retail 0 port 650` at t=4804 is the port's m9
-**wizard scan** (`sub_1D060` :23796-23833) acquiring the human when retail does
-not. That row is present in the BASE take too, unchanged: the over-acquisition
-predates this work and was previously invisible because the mound flapped
-straight back out. ⭐ **NEXT DIG in this lane = m9's state-55 wizard scan.**
+its chase and fires the bolts retail fires, at slots that desync.
+
+### ⚖ CORRECTED 2026-08-11 — THE RESIDUAL IS THE CASTLE, NOT THE MOUND
+
+The first reading of the 94 residual m9 `speed` rows blamed m9's state-55 wizard
+scan, off ONE sampled row (t=4804, `chase: retail 0 port 650`). **That sample
+was unrepresentative and the reading was wrong** — it is one of only 3 rows in
+the group carrying `rule = pose-phase`, i.e. row-clean under the other
+`--pin-pose` sample. Checking the `rule` column before generalising would have
+caught it; a residual set must be characterised across its clusters, never off
+its first row.
+
+The real story: the 94 rows sit in **7 tick clusters, and 5 of the 6 largest are
+one castle dying** (slot 312). Retail kills it; the port does not, so every mound
+besieging it keeps a live target, never breaks the chase, and never runs the exit
+trailer. The SAME cause produces the extra bolts — the mounds keep shooting a
+castle retail already destroyed, and the extras land in exactly the t≈4000-8000
+window the castle is contested in.
+
+| t | unrestored m9 rows | castle 312 `life` retail / port |
+|---|---|---|
+| 6335 | 28 | −400 / 39600 |
+| 6518 | 16 | −400 / 39600 |
+| 5966 | 12 | −750 / 19250 |
+| 5757 | 12 | −350 / 39650 |
+| 6874 | 11 | −400 / 39600 |
+| 7321 | 8 | −800 / 59200 |
+
+Two crisp constants sit under it, both with exact witnesses in the take:
+- **A steady 400-damage delta.** Across the siege the two sides track each other
+  and the port is consistently 400 LOWER — 38 of the 46 in-siege `life` rows are
+  exactly +400 (retail − port), 3 more are +800 (two of them). The port applies
+  one 400-damage event retail does not. `mob_death`'s own corpse path is a
+  400-damage fire, and *"village-corpse damage guard"* is already an open item
+  in the village-churn lane — the obvious first suspect.
+- **The castle life POOL is 2x off**: `mana_max` retail 20000 / port 10000 for
+  slot 312 (and the same 20000/10000 on a class-12 model-16). That is what makes
+  the death/rebuild boundary diverge by ~20000 instead of by 400, and it is why
+  the port's castle refills where retail's dies. No DEVIATIONS entry rules this
+  (the castle entries there are about COST and the latch bug), so it is fair
+  game.
+
+⭐ **NEXT DIG in this lane = castle 312's life pool and the 400-damage delta,
+NOT m9's wizard scan.** The m9 acquisition question is unresolved but accounts
+for at most 3 pose-phase rows here and should not be prioritised off this take.
+
+---
+
+## ✅ FOLLOW-UP 2026-08-11 — THE CASTLE DIES A TICK LATE, AND THE MOUND'S UNGATED PROLOGUE
+
+Both fell out of the table above, and neither was what the two constants looked
+like from a distance.
+
+### 1. THE CASTLE DEATH IS A **TWO-TICK** SEQUENCE (`engine/features.rs`)
+Lethal damage does NOT downgrade the castle on the tick it lands.
+`sub_47EC0` returning 2 only parks it: :56003 does `+70 = 6` and **nothing
+else**, so the castle sits at its NEGATIVE life for that whole tick, and the
+leveler `sub_470E0` (:56138) runs at the top of the next dispatch — downgrade,
+`+70 = 4`, eject, repaint, `+50 = 5`. Retail is directly observable doing it —
+mc1l5 slot 312: `act_life` 450 at t=5757, **−350 at t=5758**, 39650 (level 3 →
+2) at t=5759. The port called `castle_downgrade` inline from the ch0 intake, so
+its castle skipped the negative tick entirely and was always a step ahead on the
+ladder. MC2's castle already modelled this on the same field (`mc2::castle`,
+actions 4/5/6); MC1's `f59` sub-state machine is the action-4 body, and MC1's
+own ctor was already writing `tick70 = 5`, so the field was there and unread.
+
+⭐ **The "castle life pool is 2x off" reading was WRONG, and fixing the
+deferral proved it.** The `mana_max` retail 20000 / port 10000 rows were the
+port's ladder standing one level ahead, not a bad table — `CASTLE_HP` and
+`CASTLE_CAP` are correct as written (they match retail's `sub_47BD0(a1, _, max,
+cap)` pairs at :56586-601). Every one of those rows vanished with the deferral,
+and no table was touched. **Measure the mechanism before "fixing" the
+constant.**
+
+### 2. THE LURKING MOUND HAS NO CLASS GATE ON ITS ATTACKER (`mc1/mobs.rs`)
+`sub_1D060` :23732-38 and its buried twin `sub_1D6D0` :24004-07 both do a bare
+`+146 = +40; state 0x38` — no `class == 3` test, where everything sharing
+`sub_19B10`/`sub_1A120` has one, **and m9's own CHASE prologue (:24177-79) keeps
+it.** So a mound that is still hiding turns on ANY attacker, a militiaman
+included; a mound already chasing does not. mc1l5 t=4655 slot 819 is the
+witness: 250 damage from the class-5 model-4 in slot 776, and retail retaliates
+straight onto it. The port's shared inbox gated every model on
+`attacker_is_wizard`, so our mounds simply absorbed it.
+
+### MEASURED (mc1l5, cumulative with the trailer work above)
+
+| | HEAD | trailers | + castle | + mound |
+|---|---|---|---|---|
+| creature `speed` rows | 722 | 148 | 86 | **70** |
+| conforming pairs | 1427 | 1436 | 1436 | **1437** |
+| castle-312 `life` rows | 55 | 55 | 43 | **43** |
+| `mana_max` rows | 410 | — | 368 | **368** |
+| castle-ownership rows (`rival/player/wizard0.castle`) | 12 | 12 | 2 | **2** |
+
+Other takes vs HEAD: mc1l0 conforming 5168 → 5171, field 4292 → 4163; mc1l32
+field 1887744 → 1886446; mc1hwl0 conforming 10494 → 10496, field 199637 →
+198892. 484 unit tests and all 10 fixture suites green, 0 regressions/drifts.
+
+### THE 400-DELTA IS A **PHASE**, NOT A MISSING GUARD
+All 43 surviving castle-`life` rows are the same shape — 40 at exactly +400, 3
+at +800. Retail takes 400-damage hits on its own clock (slot 312: 30850 at
+t=5525, 30450 at t=5527, 30050 at t=5530 — one every ~3 ticks), and 400 is the
+**m9 bolt's damage** (`sub_1AA40` :21935, 400 without body segments). So this is
+not an extra damage source and not the village-corpse guard: it is the mound
+bolts landing on neighbouring ticks, i.e. the same (9,13) slot/cadence desync as
+the bolt lane below. Roughly a quarter of the siege's ~76 hits are one tick out.
+⚠ **The "one 400-damage event the port applies and retail does not" reading in
+the table above is therefore superseded — it is a timing spread, not a missing
+guard.**
+
+## ✅ THE BOLT LANE, CLOSED 2026-08-11 — TWO MORE m9 LAWS
+
+Chasing "why do the mound's bolts land on the wrong tick" found nothing about
+timing and two things about the bolts themselves. Both were found by dumping
+retail's own (9,13) entities out of the take rather than by reading more
+decompile: at t=5727 ten mound bolts spawn in one volley, every one of them
+carrying `f30` = a real bearing on the castle, `f126 = f128 = 384`, and
+**`f66 = 3, f67 = 2`**.
+
+### 3. EVERY THUNK STAMPS THE **SHOOTER'S** FILTER PAIR (`mc1/mobs.rs`)
+`sub_1A8E0` :21895-98, `sub_1A990` :21952-55, `sub_1AB70` :22005-06, `sub_1AE30`
+:22122-25, `sub_1AA40` :21951-52 and m15's :25857-58 all write `+66/+67 =
+a1x->+66/+67`. Only m8's `sub_1AEE0` :22155-60 takes the TARGET's, and m11's
+`sub_1E380` writes none at all. The port hardcoded `(3, 0xFF)` in every arm.
+For most creatures that IS the shooter's pair — the ctor sets `+66 = 3`, NewEvent
+defaults `+67 = 0xFF` — but **m4 and m9 NARROW the pair to their target's
+class/model on the chase-entry trailer** (`sub_1BC50` / `sub_1DCD0`), and the
+narrowed filter rides their shots. `filter_admits` tests the human as (3, 0), so
+the hardcoded wild card let a castle-aimed mound bolt collide with the wizard
+flying past it, with a rival carpet, and with a mana balloon — none of which
+retail's (3, 2) bolt can touch. ⭐ This also closes the OPEN boulder-filter note
+that sat on the m7 thunk.
+
+### 4. THE MOUND RE-BEARS ON A **DECIMAL** PERIOD (`mc1/mobs.rs`)
+`sub_1DA60` :24197 is `+63 % 10`, not the shared chase's `(+63 & 3) == 0`
+(:21654). m9 drives its own chase in retail, so routing it through the shared one
+gave our rooted mounds a 4-tick swing where retail's take 10.
+
+### MEASURED — the bolt lane went from a COST to a NET WIN
+
+| mc1l5 | HEAD | after trailers+castle+mound | + filter | + re-bear |
+|---|---|---|---|---|
+| conforming pairs | 1427 | 1437 | 1437 | **1449** |
+| total diff rows | 235335 | 236579 | 234603 | **233833** |
+| (9,13) `field` rows | 33354 | 34967 | 32688 | **32688** |
+| m9 `heading`+`target_yaw` | 855 | 855 | 855 | **86** |
+| creature `speed` rows | 722 | 70 | 70 | **70** |
+
+Every column the bolt lane had pushed up is now paid for: against HEAD, `smodel`
+−1239, `sclass` −921, `speed` −597, `target_yaw` −273, `mana_max` −42, and the
+whole take is **1502 rows below baseline**. Other takes: mc1l0 conforming
+5168 → 5171, mc1l32 field 1887744 → 1885682, mc1hwl0 conforming 10494 → 10500.
+486 unit tests, all 10 fixture suites green, 0 regressions/drifts.
+
+### WHAT IS LEFT, HONESTLY
+The 43 castle-`life` rows (40 at +400, 3 at +800) and the 70 creature-`speed`
+rows did NOT move on either fix, so the ~25% bolt-arrival spread is neither the
+filter nor the re-bear cadence. (9,13) `extra` is still 848 against HEAD's 672 —
+the port holds bolts retail has already retired — which sits inside the take's
+pre-existing 10.4k extra-entity population, a whole-pool lifetime question rather
+than an m9 one. ⭐ **NEXT, if this lane reopens: projectile LIFETIME/retirement,
+not m9.** Fixtures: `a_mounds_castle_bolt_carries_the_castles_filter_not_the_wild_card`,
+`a_rooted_mound_re_bears_every_tenth_tick_not_every_fourth` (both non-vacuous).
 
 ### ⛔ STILL RULED — DO NOT RE-OPEN
 The `+=` (empirically ruled out by the recording, see above) and any `.min(+128)`

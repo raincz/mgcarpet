@@ -1078,8 +1078,18 @@ impl Gen {
             let c = &self.ent[t];
             (c.x, c.y, c.z, c.f66, c.f67)
         };
+        // Re-aim cadence. The shared chase re-bears every 4th tick
+        // (:21654 `(+63 & 3) == 0`); m9, which drives its own chase in
+        // retail, uses a DECIMAL period instead (sub_1DA60 :24197
+        // `+63 % 10`) — a rooted mound therefore swings onto a moving
+        // target noticeably more slowly than the shared families do.
         let e = &self.ent[i];
-        if e.f63 & 3 == 0 {
+        let rebear = if model == 9 {
+            (e.f63 as i16) % 10 == 0
+        } else {
+            e.f63 & 3 == 0
+        };
+        if rebear {
             self.ent[i].f34 = Self::angle_between(e.x, e.y, tx, ty);
         }
         // m6's buffet drag (:23215-31): the counter +26 cycles 1..41
@@ -2327,12 +2337,31 @@ impl Gen {
             (e.x, e.y, e.z, e.id24, e.f44, e.f84)
         };
         let launch_z = z.wrapping_add(f84 as i16);
+        // The SHOOTER's own filter pair rides every thunk in the
+        // engine except m8's, which takes the TARGET's (sub_1AEE0
+        // :22155-60): sub_1A8E0 :21895-98, sub_1A990 :21952-55,
+        // sub_1AB70 :22005-06, sub_1AE30 :22122-25, sub_1AA40
+        // :21951-52, m15 :25857-58 all write `+66/+67 = a1x->+66/+67`.
+        // For most creatures that IS the shared (3, 0xFF) the port
+        // used to hardcode — the ctor sets +66 = 3 and NewEvent
+        // defaults +67 = 0xFF — but m4 and m9 OVERWRITE the pair with
+        // their target's class/model on the chase-entry trailer
+        // (sub_1BC50 / sub_1DCD0), so their shots inherit a NARROWED
+        // filter. A mound besieging a castle fires (3, 2) bolts that
+        // pass straight through the player, a rival carpet and a mana
+        // balloon; ours were (3, 0xFF) and collided with all three —
+        // `filter_admits` explicitly tests the human as (3, 0), so the
+        // port let a castle-aimed bolt hit the wizard flying past.
+        let (sf66, sf67) = {
+            let e = &self.ent[i];
+            (e.f66, e.f67)
+        };
         match model {
             // sub_1A8E0 (:21874): the 500-damage straight fireball.
             0 | 3 => {
                 if let Some(p) = self.spawn_fireball(x, y, launch_z) {
                     self.ent[p].row156 = 6; // turn 0: no homing
-                    self.arm_projectile(p, owner, 3, 0xFF, tgt, tx, ty, tz, 500, 0);
+                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 500, 0);
                     self.snd(8, i); // :22182/:22406
                     return true;
                 }
@@ -2366,7 +2395,7 @@ impl Gen {
             // sub_1A990 (:21907): the 250-damage straight bolt.
             4 | 10 => {
                 if let Some(p) = self.spawn_bolt(x, y, launch_z) {
-                    self.arm_projectile(p, owner, 3, 0xFF, tgt, tx, ty, tz, 250, 0);
+                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 250, 0);
                     return true;
                 }
                 false
@@ -2390,7 +2419,7 @@ impl Gen {
                         for k in 0..n {
                             if let Some(p) = self.spawn_fireball(x, y, launch_z) {
                                 self.ent[p].row156 = (6 - k).max(0) as u8;
-                                self.arm_projectile(p, owner, 3, 0xFF, tgt, tx, ty, tz, 400, 0);
+                                self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 400, 0);
                                 fired = true;
                             }
                         }
@@ -2398,7 +2427,7 @@ impl Gen {
                     1 | 2 => {
                         for _ in 0..(n - 1).max(0) {
                             if let Some(p) = self.spawn_zigzag(x, y, launch_z) {
-                                self.arm_projectile(p, owner, 3, 0xFF, tgt, tx, ty, tz, 800, 23);
+                                self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 800, 23);
                                 fired = true;
                             }
                         }
@@ -2406,7 +2435,7 @@ impl Gen {
                     _ => {
                         if let Some(p) = self.spawn_trail_bolt(x, y, launch_z) {
                             self.ent[p].row156 = 3;
-                            self.arm_projectile(p, owner, 3, 0xFF, tgt, tx, ty, tz, 8000, 17);
+                            self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 8000, 17);
                             fired = true;
                         }
                     }
@@ -2422,7 +2451,7 @@ impl Gen {
             // (3, 0xFF).
             7 => {
                 if let Some(p) = self.spawn_slow_bolt(x, y, launch_z) {
-                    self.arm_projectile(p, owner, 3, 0xFF, tgt, tx, ty, tz, 780, 0);
+                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 780, 0);
                     self.ent[p].row156 = 6;
                     return true;
                 }
@@ -2450,7 +2479,7 @@ impl Gen {
             9 => {
                 let dmg = if self.ent[i].f144 != 0 { 600 } else { 400 };
                 if let Some(p) = self.spawn_bolt(x, y, launch_z) {
-                    self.arm_projectile(p, owner, 3, 0xFF, tgt, tx, ty, tz, dmg, 0);
+                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, dmg, 0);
                     // m9 alone re-skins its bolt (:21957): row 203 =
                     // sprite family base 215 where 195 is base 193 —
                     // same 45x60 size, same 5-view fold, so this is
@@ -2463,6 +2492,9 @@ impl Gen {
             }
             // sub_1E380 (:24554): m11's 3000-payload wizard-seeker
             // (explodes into the ch3 mana-steal flash, wizards only).
+            // The lone thunk that writes NO filter at all — the seeker
+            // keeps its ctor pair, so the shared (3, 0xFF) stays here
+            // rather than the genie's own +66/+67.
             11 => {
                 if let Some(p) = self.spawn_seeker(x, y, launch_z) {
                     self.ent[p].f26 = 20;
@@ -2477,7 +2509,7 @@ impl Gen {
             15 => {
                 if let Some(p) = self.spawn_bolt(x, y, launch_z) {
                     let dflt = self.ent[p].f44;
-                    self.arm_projectile(p, owner, 3, 0xFF, tgt, tx, ty, tz, dflt, 0);
+                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, dflt, 0);
                     return true;
                 }
                 false
@@ -3289,7 +3321,21 @@ impl Gen {
                 // wizard griffon straight into attack (sub_1CA50
                 // :23455-58); only the villager families merely mark
                 // the attacker (:25057-63) without chasing.
-                if self.attacker_is_wizard(src) && !matches!(model, 12 | 13 | 14) {
+                //
+                // The m9 mound's HIDDEN slot is the one prologue in
+                // the family with NO class gate: sub_1D060 :23732-38
+                // and its buried twin sub_1D6D0 :24004-07 both do a
+                // bare `+146 = +40; state 0x38`, where everything
+                // sharing sub_19B10/sub_1A120 first tests the
+                // attacker's class for 3 (and m9's own CHASE prologue
+                // :24177-79 keeps that test). So a lurking mound turns
+                // on ANY attacker, a militiaman included — mc1l5
+                // t=4655 slot 819 takes 250 and retaliates onto the
+                // class-5 model-4 in slot 776, which the port, gated
+                // on wizards, simply ignored.
+                let mound_hidden = model == 9 && role == 1;
+                if (mound_hidden || self.attacker_is_wizard(src)) && !matches!(model, 12 | 13 | 14)
+                {
                     match role {
                         0 | 1 => {
                             self.ent[i].f146 = src;

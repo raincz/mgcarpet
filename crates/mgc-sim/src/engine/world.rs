@@ -13380,6 +13380,22 @@ mod tests {
         // carries (capped at half), the spill flies out as balls.
         w.g.ent[c].f140 = 30_000;
         w.g.mail_write(crate::mc1::combat::MailTarget::Pool(c), 0, 45_000, 1);
+        // The lethal tick only PARKS the castle in action 6 (:56003);
+        // it holds its negative life for this whole tick and the
+        // leveler runs at the top of the next (sub_470E0 :56138).
+        // Retail is directly observable here — mc1l5 slot 312 sits at
+        // act_life = -350 for exactly one tick before the ladder reset.
+        w.tick(pose, PlayerCommand::default());
+        assert_eq!(
+            (w.g.ent[c].tick70, w.g.ent[c].act_life),
+            (6, -5_000),
+            "one tick parked at the overkill, not yet downgraded"
+        );
+        assert_eq!(
+            w.loadout().castle.map(|(_, _, l)| l),
+            Some(2),
+            "the level does not drop until the leveler runs"
+        );
         w.tick(pose, PlayerCommand::default());
         let (_, cap, lvl) = w.loadout().castle.expect("downgraded, not dead");
         assert_eq!((lvl, cap), (1, 10_000), "one level per lethal event");
@@ -13895,7 +13911,12 @@ mod tests {
         );
         // The demolish word lands at the WIZARD PASS (above the
         // castle's slot in the walk) — the castle tick reacts the
-        // next frame, retail's own ordering.
+        // next frame, retail's own ordering — and that reaction is
+        // only the action-6 park; the leveler that actually razes the
+        // footprint runs the frame after (sub_470E0 :56138).
+        w.tick(away(), PlayerCommand::default());
+        assert_eq!(w.g.ent[c].tick70, 6, "parked for the leveler");
+        assert!(!w.terrain_dirty, "nothing razed on the park tick");
         w.tick(away(), PlayerCommand::default());
         assert!(
             w.terrain_dirty,

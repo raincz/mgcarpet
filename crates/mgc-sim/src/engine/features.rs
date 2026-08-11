@@ -3823,6 +3823,25 @@ impl Gen {
     /// cases 1/4/6 :56073-78) — the flag rides the painted tower;
     /// the build-site datum lives in f28 (+154).
     pub(crate) fn castle_tick(&mut self, i: usize, patches: crate::patches::WorldPatches) {
+        // ACTION 6, the LEVELER (sub_470E0 :56138). Lethal damage does
+        // NOT downgrade on the tick it lands: `sub_47EC0` returning 2
+        // only parks the castle here (:56003 `+70 = 6`) and the tick
+        // ends; the downgrade runs on the NEXT dispatch. That is why
+        // retail's castle is observably NEGATIVE for exactly one tick
+        // — mc1l5 slot 312: act_life 450 at t=5757, −350 at t=5758,
+        // 39650 (level 3 → 2) at t=5759. Collapsing the two into one
+        // tick made the port skip the negative tick entirely, so a
+        // besieged castle never died at the moment retail's did and
+        // every mound holding it as a chase target kept chasing.
+        // MC2's castle already models this on the same field
+        // (mc2::castle, actions 4/5/6); the `f59` sub-state machine
+        // below is MC1's ACTION-4 body. No ground refresh here —
+        // sub_470E0 does none.
+        if self.ent[i].tick70 == 6 {
+            self.ent[i].tick70 = 4;
+            self.castle_downgrade(i, patches);
+            return;
+        }
         // The ground refresh belongs to the established tick and the
         // pure waits ONLY (:56013 + cases 1/4/6 :56073-78) — the
         // action cases keep the stale z: the level-up commit tick
@@ -3981,21 +4000,24 @@ impl Gen {
                     return;
                 }
                 // sub_47EC0's first line (:56683): already below
-                // zero → straight to the downgrade. This is also
-                // the demolish path — Shift+L writes life = −1 with
-                // no mail at all (:55846-50).
+                // zero → the leveler. This is also the demolish path
+                // — Shift+L writes life = −1 with no mail at all
+                // (:55846-50). Both lethal arms return 2, and :56003
+                // turns a 2 into `+70 = 6` and NOTHING else: the
+                // castle sits at its negative life for this whole
+                // tick and the downgrade runs at the top of the next.
                 if self.ent[i].act_life < 0 {
-                    self.castle_downgrade(i, patches);
+                    self.ent[i].tick70 = 6;
                     return;
                 }
                 // sub_47EC0: HP -= pending ch0; lethal → the
-                // one-level downgrade (state 6 → sub_47A70).
+                // one-level downgrade, deferred through action 6.
                 if self.ent[i].mail[0].1 != 0 {
                     let amt = self.ent[i].mail[0].0;
                     self.ent[i].mail[0] = (0, 0);
                     self.ent[i].act_life -= amt as i32;
                     if self.ent[i].act_life < 0 {
-                        self.castle_downgrade(i, patches);
+                        self.ent[i].tick70 = 6;
                         return;
                     }
                     // "Castle under attack" flash (Type_160+391=4).
@@ -6271,6 +6293,137 @@ mod tests {
         assert_eq!(
             g.ent[follower].f126, 30,
             "the kraken's tail write outlives the catch-up"
+        );
+    }
+
+    /// Every attack thunk in the engine stamps its projectile with the
+    /// SHOOTER's own `+66`/`+67` filter pair (sub_1A8E0 :21895-98,
+    /// sub_1A990 :21952-55, sub_1AB70 :22005-06, sub_1AE30 :22122-25,
+    /// sub_1AA40 :21951-52, m15 :25857-58) — m8's sub_1AEE0 :22155-60
+    /// alone takes the TARGET's, and m11's sub_1E380 writes none. For
+    /// most creatures that pair IS the shared (3, 0xFF) the port used
+    /// to hardcode, but m4 and m9 NARROW it to their target's
+    /// class/model on the chase-entry trailer, and the narrowed filter
+    /// rides their shots: a mound besieging a castle fires (3, 2)
+    /// bolts that pass through the player, a rival carpet and a mana
+    /// balloon alike. `filter_admits` tests the human as (3, 0), so
+    /// the hardcoded pair let a castle-aimed bolt hit the wizard
+    /// flying past it.
+    #[test]
+    fn a_mounds_castle_bolt_carries_the_castles_filter_not_the_wild_card() {
+        let mut g = mob_gen();
+        let mound = g.spawn_creature(9, 0x4000, 0x4000, 0).unwrap();
+        let castle = g.spawn_castle(0x4100, 0x4000).unwrap();
+        g.ent[castle].id24 = 7; // a rival's, so the mound will take it
+        let away = ctx_at(0x7F00, 0x7F00, 0);
+
+        // Lurking, on the castle-hunt cadence: it surfaces into CHASE
+        // and the entry trailer narrows the filter on that tick.
+        g.ent[mound].tick70 = 55;
+        g.ent[mound].f26 = 200;
+        g.ent[mound].f58 = 16;
+        g.ent[mound].f63 = 0;
+        g.creature_tick(mound, &away);
+        assert_eq!(g.ent[mound].tick70, 56, "surfaced at the castle");
+        assert_eq!(
+            (g.ent[mound].f66, g.ent[mound].f67),
+            (3, 2),
+            "the mound takes the castle's own class/model"
+        );
+        let before: Vec<usize> = (1..g.ent.len())
+            .filter(|&j| g.ent[j].class64 == 9 && g.ent[j].model65 == 13)
+            .collect();
+        g.ent[mound].f63 = 0; // the fire cadence
+        g.creature_tick(mound, &away);
+        let bolt = (1..g.ent.len())
+            .find(|j| g.ent[*j].class64 == 9 && g.ent[*j].model65 == 13 && !before.contains(j))
+            .expect("the mound loosed a bolt");
+        assert_eq!(
+            (g.ent[bolt].f66, g.ent[bolt].f67),
+            (3, 2),
+            "and the bolt inherits it — NOT the (3, 0xFF) wild card"
+        );
+        assert!(
+            !Gen::filter_admits(g.ent[bolt].f66, g.ent[bolt].f67, 3, 0),
+            "so it cannot collide with the human wizard (class 3, model 0)"
+        );
+        assert!(
+            Gen::filter_admits(g.ent[bolt].f66, g.ent[bolt].f67, 3, 2),
+            "but it still admits the castle it was aimed at"
+        );
+    }
+
+    /// The mound re-bears on a DECIMAL period — `sub_1DA60` :24197 uses
+    /// `+63 % 10`, not the shared chase's `(+63 & 3) == 0` (:21654).
+    /// m9 drives its own chase in retail, so routing it through the
+    /// shared one gave our mounds a 4-tick swing where retail's take
+    /// 10; the mc1l5 take scores it heavily on the mound's `heading`
+    /// and `target_yaw`.
+    #[test]
+    fn a_rooted_mound_re_bears_every_tenth_tick_not_every_fourth() {
+        let hits = |model: u16, state: u8| {
+            let mut g = mob_gen();
+            let i = g.spawn_creature(model, 0x4000, 0x4000, 0).unwrap();
+            g.ent[i].tick70 = state;
+            g.ent[i].f146 = crate::mc1::mobs::PLAYER_TARGET;
+            let mut n = 0;
+            for phase in 0..40u8 {
+                g.ent[i].f63 = phase;
+                g.ent[i].f34 = 0;
+                g.creature_tick(i, &ctx_at(0x4100, 0x4100, 0));
+                if g.ent[i].f34 != 0 {
+                    n += 1;
+                }
+            }
+            n
+        };
+        assert_eq!(hits(9, 56), 4, "the mound re-bears 4 times in 40 ticks");
+        assert_eq!(hits(10, 62), 10, "a shared-chase family re-bears 10");
+    }
+
+    /// The m9 mound's HIDDEN prologue is the one in the family with NO
+    /// class gate on the attacker: `sub_1D060` :23732-38 and its buried
+    /// twin `sub_1D6D0` :24004-07 both do a bare `+146 = +40; state
+    /// 0x38`, where everything sharing `sub_19B10`/`sub_1A120` first
+    /// tests the attacker's class for 3 — and m9's OWN chase prologue
+    /// (:24177-79) keeps that test. So a lurking mound turns on any
+    /// attacker, a militiaman included, and surfaces rooted; a mound
+    /// already CHASING ignores a non-wizard hit exactly as before.
+    /// mc1l5 t=4655 slot 819 is the witness: 250 damage from a
+    /// class-5 model-4 and retail retaliates onto its slot.
+    #[test]
+    fn lurking_mound_retaliates_against_any_attacker_chasing_one_does_not() {
+        // `held` = the target the mound already carries, so the CHASE
+        // case can show a non-wizard hit failing to steal it.
+        let run = |state: u8, held: u16| {
+            let mut g = mob_gen();
+            let i = g.spawn_creature(9, 0x4000, 0x4000, 0).unwrap();
+            let m = g.spawn_creature(4, 0x4100, 0x4000, 0).unwrap(); // militia
+            let max = g.ent[i].f128;
+            g.ent[i].tick70 = state;
+            g.ent[i].f26 = 200;
+            g.ent[i].f58 = 16;
+            g.ent[i].f146 = held;
+            g.ent[i].f126 = max;
+            g.ent[i].mail[0] = (250, m as u16);
+            g.creature_tick(i, &ctx_at(0x4080, 0x4000, 0));
+            (g.ent[i].tick70, g.ent[i].f146, g.ent[i].f126, m as u16, max)
+        };
+
+        let (state, tgt, speed, militia, _) = run(55, 0);
+        assert_eq!(state, 56, "the lurking mound surfaces at its attacker");
+        assert_eq!(tgt, militia, "and takes the MILITIAMAN as its target");
+        assert_eq!(speed, 0, "rooted by the entry trailer on the same tick");
+
+        // The CHASE slot keeps retail's class-3 test (:24177-79), so a
+        // non-wizard hit there cannot steal the target it already has.
+        let (state, tgt, _, militia, _) = run(56, crate::mc1::mobs::PLAYER_TARGET);
+        assert_eq!(state, 56, "a chasing mound stays in its chase");
+        assert_ne!(tgt, militia, "and does NOT retarget onto the militiaman");
+        assert_eq!(
+            tgt,
+            crate::mc1::mobs::PLAYER_TARGET,
+            "it keeps the wizard it was already after"
         );
     }
 

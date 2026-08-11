@@ -138,7 +138,7 @@ impl Gen {
     }
 
     /// The writer's +66/+67 target filter (-1/-1 = wildcard).
-    fn filter_admits(f66: u8, f67: u8, class: u8, model: u8) -> bool {
+    pub(crate) fn filter_admits(f66: u8, f67: u8, class: u8, model: u8) -> bool {
         (f66 == 0xFF || f66 == class) && (f67 == 0xFF || f67 == model)
     }
 
