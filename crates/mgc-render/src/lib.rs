@@ -867,6 +867,13 @@ pub struct Billboard {
     /// matrix `T[0x4000+…]` is `nearest_palette(⅓·src + ⅔·dst)`, so
     /// modes 2/3 render as plain alpha 1/3 / 2/3, back-to-front with
     /// depth writes off (retail draws them inline in painter order).
+    ///
+    /// ⚠ **4 IS NOT A RETAIL MODE.** It is the INSTRUMENT alpha (1/6),
+    /// used by the replay ghost alone: deliberately fainter than any
+    /// raster mode retail can produce, so an overlay can never be
+    /// mistaken for a sprite that belongs in the world. Keep it out of
+    /// every entity path — if a retail sprite ever wants this alpha,
+    /// it wants mode 2 and a trace to justify it.
     pub blend: u8,
     /// RETAIL PROXIMITY CONCEALMENT: the sprite materializes only
     /// inside retail's OWN fog band, independent of the configured
@@ -4494,6 +4501,8 @@ impl Renderer {
             let mut alpha = match b.blend {
                 2 => 1.0 / 3.0,
                 3 => 2.0 / 3.0,
+                // The instrument alpha — see `Billboard::blend`.
+                4 => 1.0 / 6.0,
                 _ => 1.0,
             };
             if b.conceal {

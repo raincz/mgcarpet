@@ -1786,10 +1786,23 @@ pub fn rival_markers(
 
 /// Resolve one type index to a billboard at a world position; skips
 /// rows whose size cannot be resolved (missing sprite dims).
-/// The replay GHOST (`--replay`): the recorded pose drawn as a
-/// translucent billboard (blend 2 — the 33%-opaque raster mode) of
-/// the wizard-carpet sprite, feet at the recorded altitude like any
-/// flying pose.
+/// The replay GHOST (`--replay`): **RETAIL's recorded carpet pose**,
+/// read straight out of the take each tick, drawn as a translucent
+/// wizard-carpet billboard with its feet at the recorded altitude like
+/// any flying pose.
+///
+/// It is a DRIFT INSTRUMENT, not the player's own carpet: at t=0 it
+/// sits exactly under the viewport, and the gap that opens up from
+/// there IS the replay's divergence from retail, rendered live. That
+/// made it read as "my carpet, in the wrong place" — it is the
+/// opposite, retail's carpet in the RIGHT place with our viewport
+/// drifting off it (player-reported 2026-08-12, and it is how the
+/// mc1l0 pose.z divergence was spotted from the cockpit).
+///
+/// Alpha is the non-retail INSTRUMENT mode 4 (1/6) rather than the
+/// retail 33% smoke mode: faint enough that it never reads as a
+/// sprite belonging to the world, solid enough to stay useful —
+/// player-ruled, having proved its worth.
 pub fn ghost_billboard(
     game: GameId,
     type_index: u16,
@@ -1809,7 +1822,7 @@ pub fn ghost_billboard(
         draw_type: s.draw_type,
         frame: 0,
         world_h: s.world_h,
-        blend: 2,
+        blend: 4,
         // An instrument, not a retail entity — never distance-hidden,
         // and on no tile chain, so it takes the neutral co-tile rank.
         conceal: false,
