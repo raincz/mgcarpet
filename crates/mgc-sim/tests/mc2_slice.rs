@@ -571,18 +571,30 @@ fn mc2_slice_behaviors_and_goldens() {
     // preserves relative order for every other member of the tile. The
     // proof is right below: the layout-independent OBSERVABLE
     // projection does NOT move on this patch.
+    // Re-pinned (ALL SIX) for the BUILDING-LIFE FIELD HOME — the
+    // production rate moving from the mana word to `subSpellIndex_
+    // 0x2A_42` → `f44`, and the derived mana from `maxMana_0x8C_140`
+    // (f136, dead on a building) to `mana_0x90_144` → `f140`
+    // (`sub_49A30` EF:32793/32796/32808; the construction finish parks
+    // `life = 1000 * subSpellIndex`, EF:27291). Level-000 is a village
+    // map, so every authored house moves the hashed stream from t=0.
+    // ⭐ PURE BOOKKEEPING here, not behavior: the parked life comes out
+    // identical in fresh play (the two words only diverge once a
+    // conformance import supplies them separately) — proof right
+    // below, the layout-independent OBSERVABLE projection does NOT
+    // move on this patch.
     const GOLDEN: [u64; 6] = [
-        0x95c8d53f76cff370, // post-init (GenerateEvents + dis 0)
-        0x11c7763c0e624f57, // A: 64 idle ticks afield
-        0x13c47d537b40b07d, // B: the type-5 fly-to latched
-        0x04d5b5e68a47426d, // C: goat awake/flee window
-        0x6c03faaea22402d6, // D: fireball combat over the goat
+        0x7633ac8b22e56968, // post-init (GenerateEvents + dis 0)
+        0x762e54b645d0a2de, // A: 64 idle ticks afield
+        0x9d1880b7d8735f24, // B: the type-5 fly-to latched
+        0x3179eded279d02e0, // C: goat awake/flee window
+        0x02ac09150e281be7, // D: fireball combat over the goat
         // E re-pinned for the AREA-BROADCAST TILE ROUNDING
         // (`area_write` centers on the nearest tile — sub_120B0 /
         // EF:3750; corpus pins: mc1l0 t=91 tent claim, mc2l0 t=7257
         // fixture conforming): an edge-tile victim in the provocation
         // window now gets its mail on retail's tick.
-        0x2a4c2b347782216f, // E: census + villager/archer provocation
+        0x1983685c164e2cb2, // E: census + villager/archer provocation
     ];
     assert_eq!(
         got, GOLDEN,

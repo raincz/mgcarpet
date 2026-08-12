@@ -1974,7 +1974,18 @@ impl Gen {
             e.f84 = 256;
             e.f71 = bldg as u8;
             e.act_life = 30;
-            e.f140 = prm.rate as i32; // subSpellIndex = production
+            // ⭐ THE PRODUCTION RATE IS `subSpellIndex_0x2A_42` (f44),
+            // NOT the mana word: `subSpellIndex = bldgprm[a2].word_0`
+            // (EF:32793), and the construction finish parks the
+            // building's LIFE at `1000 * subSpellIndex` (EF:27291).
+            // f140 is retail's `mana_0x90_144`, which the same ctor
+            // zeroes and then re-derives FROM the rate below. Parking
+            // the rate in f140 gave the right life in fresh play by
+            // coincidence and 1000x the MANA under import, where the
+            // importer faithfully restores @0x2A → f44 and @0x90 →
+            // f140 (mc2l1 t=888 slot 161: retail life 190,000,
+            // port 0 — the imported building's mana was 0).
+            e.f44 = prm.rate;
             // ⭐ THE DEGRADATION LINK IS PER-ENTITY, NOT A TABLE READ:
             // `fontTypeIndex_0x3D_61 = bldgprm[a2].byte_3` (:32795-98).
             // Two crush paths ZERO it on the live entity — the castle
@@ -1988,11 +1999,16 @@ impl Gen {
             // castle. Second consumer: the type-2 objective latch
             // (EF:40771-79) — a castle-crushed building COMPLETES it.
             e.f46 = prm.chain as i16;
-            e.f136 = 0;
+            // `mana_0x90_144 = 0` (EF:32796), then the productive kind
+            // (`byte_2 & 8 == 0`) re-derives it off the rate at
+            // EF:32808. Retail leaves `maxMana_0x8C_140` (f136)
+            // untouched on a building — the uniform import restores it
+            // as the dead 0 it is.
+            e.f140 = 0;
             if prm.flags & 8 == 0 {
                 e.f56 |= 2;
                 e.f28 |= 2; // claim channel, writer-gate mirror
-                e.f136 = (1000 * prm.rate as i32) >> 7;
+                e.f140 = (1000 * prm.rate as i32) >> 7;
             }
         }
         Some(i)
@@ -2113,7 +2129,9 @@ impl Gen {
             }
             let e = &mut self.ent[i];
             e.tick70 = 52;
-            e.act_life = 1000 * e.f140;
+            // `life_0x8 = 1000 * subSpellIndex_0x2A_42` (EF:27291) —
+            // the production rate, f44 (see `mc2_spawn_building`).
+            e.act_life = 1000 * e.f44 as i32;
             // The flag protocol (:27292-97): owned → bit 0 cleared
             // (the flag flies), unowned → set (no flag).
             if e.f144 != 0 {

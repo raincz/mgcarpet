@@ -1192,11 +1192,7 @@
     },
     {
       "t": 4177,
-      "status": "open",
-      "sig": "be5915f250aad2d3",
-      "atoms": [
-        "field:5,3:life"
-      ],
+      "status": "conforming",
       "note": "auto-triage vs known-deviations: roster: mc1l0-cast-impacts-extra; 1 row(s) unexplained"
     },
     {

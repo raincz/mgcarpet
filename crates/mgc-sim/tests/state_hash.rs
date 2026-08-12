@@ -491,8 +491,21 @@ fn level_005_golden_state_hashes() {
         // sub_120B0/EF:3750 — corpus: mc1l0 t=91 tent claim): the
         // D-window explosion mail reaches edge-tile bees on retail's
         // tick.
-        0xa46d319e3301b8b0, // D: 64 ticks of two-hand fireball combat
-        0xa2b204802eb5113b, // E: 100 aftermath ticks
+        // D/E re-pinned AGAIN for THE CHANNEL-0 WINDOW BIAS: that
+        // nearest-tile rounding is right for channels 1+ and WRONG for
+        // channel 0, which retail centres one tile BACK at
+        // `(pos - 128) / 256` — byte-identical in all three MC1
+        // variants (sub_120B0 :17339/17352, sub_124F0 :17427/17439,
+        // sub_127E0 :17535/17547) and NOT shared by MC2 (sub_10C80's
+        // ch0 arm rounds like every other channel, EF:4118-19). Every
+        // MC1 area DAMAGE window therefore moves one tile in x and y;
+        // the D/E fireball combat is exactly where that shows.
+        // Corpus: mc1l0 whole take 5,171 -> 5,174 conforming pairs and
+        // 4,163 -> 4,090 unexplained field rows, fixture t=4177
+        // (`field:5,3:life`) promoted. Behavior change toward retail
+        // by design. A-C hold — no ch0 area write lands in them.
+        0x619a5f02a8edd46b, // D: 64 ticks of two-hand fireball combat
+        0x8b5bbe3b1fd37e1b, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,
@@ -601,8 +614,14 @@ fn level_005_golden_state_hashes() {
         // LAW + the area-broadcast tile rounding): the D-window
         // fireballs launch at arm+1 with the corpus f140 stamp and
         // their explosion mail lands edge-true — A-C unmoved.
-        0x9fc27d77ba8095cd, // D
-        0x0e3e299e5a48bd1e, // E
+        // D/E re-pinned again with THE CHANNEL-0 WINDOW BIAS (see the
+        // GOLDEN note): OBSERVABLE moving here is the CORRECT signal —
+        // this is a behavior change, not a layout one, because which
+        // bees an explosion's ch0 mail reaches is exactly what the
+        // window decides. Post-init..C hold, which is the evidence
+        // that the shift is confined to the ch0 damage windows.
+        0x28d75fabaf40029f, // D
+        0x6b1ecf73a7b0962a, // E
     ];
     assert_eq!(
         obs, OBSERVABLE,

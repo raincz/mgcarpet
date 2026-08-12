@@ -452,13 +452,26 @@ fn mc2_cave_behaviors_and_goldens() {
     // unchanged here (no castle level-up and no (10,67) quake grab in
     // this window, and with neither the entity copy equals the table
     // read the collapse used to do).
+    // Re-pinned (ALL FOUR) for the BUILDING-LIFE FIELD HOME — the
+    // production rate moving from the mana word to its retail home
+    // `subSpellIndex_0x2A_42` → `f44`, and the derived mana from
+    // `maxMana_0x8C_140` (f136, dead on a building) to
+    // `mana_0x90_144` → `f140` (`sub_49A30` EF:32793/32796/32808; the
+    // construction finish parks `life = 1000 * subSpellIndex`,
+    // EF:27291) — see [`Gen::mc2_spawn_building`]. f44/f136/f140 are
+    // all hashed, so every authored building moves the stream from
+    // t=0. This level's own BEHAVIOR is unchanged: the parked life
+    // comes out identical (the two words are only independent once a
+    // conformance import supplies them separately), which is exactly
+    // what the layout-independent companion golden below shows by
+    // holding.
     assert_eq!(
         got,
         vec![
-            0x66b84698602039bau64,
-            0x5fd4f919696a3895,
-            0xcd56c1ccd481ce3b,
-            0x4b55a234c67f939c,
+            0x72fd48f32a649b5au64,
+            0xd9af6f5b96602295,
+            0x2a8d084fdc6aa6ab,
+            0xda01463b0d5eb030,
         ],
         "cave goldens moved — re-pin ONLY for an intended fidelity change"
     );

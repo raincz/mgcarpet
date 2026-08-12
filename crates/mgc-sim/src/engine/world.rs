@@ -1860,8 +1860,8 @@ impl World {
             // retail CompareEvent08 drains the SAME field on damage):
             // the bar denominates against the parked value, so damage
             // visibly eats it.
-            let denom = if e.class64 == 10 && e.model65 == 45 && e.tick70 == 52 && e.f140 > 0 {
-                (1000 * e.f140) as f32
+            let denom = if e.class64 == 10 && e.model65 == 45 && e.tick70 == 52 && e.f44 > 0 {
+                (1000 * e.f44 as i32) as f32
             } else {
                 e.max_life as f32
             };
@@ -19095,6 +19095,100 @@ mod tests {
         );
     }
 
+    /// **A BUILDING'S PRODUCTION RATE LIVES IN `subSpellIndex_0x2A_42`
+    /// (f44) AND ITS MANA IN `mana_0x90_144` (f140) — THE PARKED LIFE
+    /// IS 1000x THE RATE, NEVER 1000x THE MANA.**
+    /// The ctor writes both, off the one table word: `subSpellIndex =
+    /// bldgprm[type].word_0` (EF:32793), `mana = 0` (EF:32796) and
+    /// then, for the productive kind only (`byte_2 & 8 == 0`), `mana =
+    /// 1000 * subSpellIndex >> 7` (EF:32808). The construction finish
+    /// parks `life = 1000 * subSpellIndex` (EF:27291).
+    ///
+    /// The port parked the rate in the MANA home and the mana in
+    /// `maxMana_0x8C_140` (f136, dead on a building), which reads the
+    /// right life in fresh play by pure coincidence — the two words
+    /// are independent on the wire. A conformance import restores
+    /// @0x2A → f44 and @0x90 → f140 faithfully, so the finish read a
+    /// mana it had never written: mc2l1 t=888 slot 161, retail life
+    /// 190,000 vs port 0.
+    ///
+    /// Both halves pinned: the ctor's field homes, and a finish whose
+    /// two words DISAGREE.
+    #[test]
+    fn a_buildings_life_is_a_thousand_times_its_rate_not_its_mana() {
+        use crate::engine::features::{BldgParam, BuildDef};
+        const N: u8 = 3;
+        const RATE: u16 = 190;
+        let build = |w: &mut World| {
+            w.g.assets.build_tab = vec![BuildDef {
+                offset: 0,
+                w: N,
+                h: N,
+            }];
+            // Paint code 0xff = no texture band (the test world carries
+            // no MC2 texture tables); pad height 40 so the height lerp
+            // still runs the real construction.
+            w.g.assets.build_dat = (0..N as u32 * N as u32)
+                .flat_map(|_| [0xffu8, 40u8])
+                .collect();
+            w.g.assets.bldgprm = vec![BldgParam {
+                rate: RATE,
+                flags: 0, // productive: bit 3 clear
+                chain: 0,
+            }];
+        };
+
+        // (a) The ctor's field homes, and the finish that reads them.
+        let mut w = mc2_flat_world();
+        build(&mut w);
+        let (x, y) = mc2_pos(100, 100);
+        let gz = w.g.ground_z(x, y) as i16;
+        let b = w.g.mc2_spawn_building(x, y, gz, 0).expect("the building");
+        assert_eq!(
+            w.g.ent[b].f44, RATE,
+            "subSpellIndex_0x2A_42 = bldgprm[type].word_0"
+        );
+        assert_eq!(
+            w.g.ent[b].f140,
+            (1000 * RATE as i32) >> 7,
+            "mana_0x90_144 = 1000 * subSpellIndex >> 7 on the productive kind"
+        );
+        assert_eq!(
+            w.g.ent[b].f136, 0,
+            "maxMana_0x8C_140 is dead on a building — retail never writes it"
+        );
+        for _ in 0..30 {
+            w.g.mc2_building_tick(b);
+        }
+        assert_eq!(w.g.ent[b].tick70, 52, "the 30-tick build parks the house");
+        assert_eq!(
+            w.g.ent[b].act_life,
+            1000 * RATE as i32,
+            "life = 1000 * subSpellIndex"
+        );
+
+        // (b) THE IMPORT SHAPE: the two words disagree. A stone-kind
+        // template carries mana 0 while its rate still sets the life —
+        // reading the mana home parks the house dead on arrival.
+        let mut w = mc2_flat_world();
+        build(&mut w);
+        let b = w.g.mc2_spawn_building(x, y, gz, 0).expect("the building");
+        {
+            let e = &mut w.g.ent[b];
+            e.f44 = RATE;
+            e.f140 = 0;
+            e.tick70 = 51;
+            e.act_life = 1;
+        }
+        w.g.mc2_building_tick(b);
+        assert_eq!(w.g.ent[b].tick70, 52);
+        assert_eq!(
+            w.g.ent[b].act_life,
+            1000 * RATE as i32,
+            "the parked life follows the RATE, never the mana"
+        );
+    }
+
     /// **AN AREA WRITER DAMAGES A BUILDING ANYWHERE INSIDE ITS
     /// FOOTPRINT, THROUGH THE MASK — NOT JUST AT ITS FLAG.**
     /// `sub_10C80`'s ch0 arm runs a middle pass the port never had: a
@@ -20368,6 +20462,121 @@ mod tests {
             w.g.ent[rival].mail[0].1 != 0,
             "the fire's ch0 area damage reached the rival's mailbox"
         );
+    }
+
+    /// **MC1's CHANNEL-0 AREA WINDOW SITS ONE TILE BACK — AND MC2's
+    /// DOES NOT.**
+    /// Channels 1+ centre the broadcast window on the NEAREST tile,
+    /// `(pos + 128) >> 8`. MC1's channel 0 does not: it centres on
+    /// `(pos - 128) / 256`, one tile back, byte-identical in all three
+    /// variants (`sub_120B0` :17339/17352, `sub_124F0` :17427/17439,
+    /// `sub_127E0` :17535/17547). MC2's `sub_10C80` ch0 arm rounds like
+    /// every other channel (EF:4118-19) — the `my_sign32` fixup written
+    /// around it is dead, `axis_3d::x` being uint16.
+    ///
+    /// The port rounded on every channel in both games, so every MC1
+    /// area DAMAGE window sat one tile +x/+y of retail's.
+    ///
+    /// Pinned as the pair that separates the two windows: a writer at
+    /// x = 100·256 + 200 truncates to tile 100 and rounds to 101, so at
+    /// radius 1 retail's MC1 ch0 window is 99..=101 and the rounded one
+    /// is 100..=102. A victim chained at tile 99 is reachable only
+    /// through MC1's, one at 102 only through MC2's — and both sit well
+    /// inside the AABB, so the overlap test admits either.
+    #[test]
+    fn the_mc1_channel_zero_area_window_sits_one_tile_back() {
+        let ctx = MobCtx {
+            px: 0,
+            py: 0,
+            pz: 0,
+            pyaw: 0,
+            pmana: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        // 100·256 + 200: truncated tile 100, nearest tile 101.
+        let (wx, wy) = (100u16 << 8 | 200, 100u16 << 8 | 200);
+        let back = (99u16 << 8 | 128, 99u16 << 8 | 128);
+        let fwd = (102u16 << 8 | 128, 102u16 << 8 | 128);
+
+        // radius 1, and a box wide enough that the overlap test is not
+        // what decides either case.
+        let arm = |g: &mut Gen, writer: usize, victim: usize| {
+            let e = &mut g.ent[writer];
+            e.id24 = 1;
+            e.f66 = 0xFF;
+            e.f67 = 0xFF;
+            e.f78 = 0;
+            e.f80 = 256;
+            e.f82 = 256;
+            e.f84 = 8192;
+            let e = &mut g.ent[victim];
+            e.id24 = 2;
+            e.f28 |= 1;
+            e.flags |= 8;
+            e.f78 = 0;
+            e.f80 = 2048;
+            e.f82 = 2048;
+            e.f84 = 8192;
+            e.mail[0] = (0, 0);
+        };
+
+        // ---- MC1: reaches BACK to tile 99, not forward to 102 -------
+        for (target, reached) in [(back, true), (fwd, false)] {
+            let mut w = flat_world();
+            let gz = w.g.ground_z(wx, wy) as i16;
+            let writer = w.g.spawn_creature(16, wx, wy, gz).expect("writer");
+            let victim =
+                w.g.spawn_creature(16, target.0, target.1, gz)
+                    .expect("victim");
+            arm(&mut w.g, writer, victim);
+            w.g.area_write(writer, 0, 400, &ctx, false, false);
+            assert_eq!(
+                w.g.ent[victim].mail[0].1 != 0,
+                reached,
+                "MC1 ch0 window centres on (pos - 128) / 256 = tile 100, \
+                 covering 99..=101"
+            );
+        }
+
+        // ---- MC2: the mirror image, its ch0 rounding intact ---------
+        for (target, reached) in [(back, false), (fwd, true)] {
+            let mut w = mc2_flat_world();
+            let gz = w.g.ground_z(wx, wy) as i16;
+            let writer = w.g.mc2_spawn_archers(wx, wy, gz).expect("writer");
+            let victim =
+                w.g.mc2_spawn_archers(target.0, target.1, gz)
+                    .expect("victim");
+            arm(&mut w.g, writer, victim);
+            w.g.area_write(writer, 0, 400, &ctx, false, false);
+            assert_eq!(
+                w.g.ent[victim].mail[0].1 != 0,
+                reached,
+                "MC2 ch0 window rounds like every other channel = tile 101, \
+                 covering 100..=102"
+            );
+        }
+
+        // ---- and channel 1 rounds in BOTH games ---------------------
+        for (target, reached) in [(back, false), (fwd, true)] {
+            let mut w = flat_world();
+            let gz = w.g.ground_z(wx, wy) as i16;
+            let writer = w.g.spawn_creature(16, wx, wy, gz).expect("writer");
+            let victim =
+                w.g.spawn_creature(16, target.0, target.1, gz)
+                    .expect("victim");
+            arm(&mut w.g, writer, victim);
+            w.g.ent[victim].f28 |= 2;
+            w.g.ent[victim].mail[1] = (0, 0);
+            w.g.area_write(writer, 1, 400, &ctx, false, false);
+            assert_eq!(
+                w.g.ent[victim].mail[1].1 != 0,
+                reached,
+                "the ch1 window keeps the nearest-tile rounding in MC1 too"
+            );
+        }
     }
 
     fn one_rival_world(start_spell: usize) -> World {

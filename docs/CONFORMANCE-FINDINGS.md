@@ -9188,3 +9188,180 @@ the file), the seventh is the ⛔ guard above:
   connecting attack (:23555-60); the port has the cadence screech but not the
   attack-gated pair. Now trivially reachable — `mob_chase` returns the thunk
   verdict.
+
+# THE MC2 BUILDING-LIFE FIELD HOME (2026-08-12) — ✅ LANDED
+
+The top open item banked by the mc2l1 intake, and the other half of the
+`sub_49A30` field-home audit that the round-2 report **A** (the degradation
+link → `Ent::f46`) started. Same ctor, two lines apart.
+
+## THE LAW (decompile, verified line by line)
+`sub_49A30` EF:32793-32808 writes the building's two production words off the
+SAME table row:
+
+```
+a1x->subSpellIndex_0x2A_42 = str_D93C0_bldgprmbuffer[a2].word_0;   // EF:32793
+a1x->mana_0x90_144         = 0;                                    // EF:32796
+if (!(str_D93C0_bldgprmbuffer[a2].byte_2 & 8)) {
+    a1x->byte_0x38_56 |= 2u;
+    a1x->mana_0x90_144 = 1000 * a1x->subSpellIndex_0x2A_42 >> 7;   // EF:32808
+}
+```
+
+and the construction finish (action 51 → 52) parks the LIFE off the first of
+them: `event->life_0x8 = 1000 * event->subSpellIndex_0x2A_42;` (EF:27291).
+`maxMana_0x8C_140` is never written on a building at all.
+
+## THE DEFECT
+`Gen::mc2_spawn_building` parked the RATE in `f140` (the port's
+`mana_0x90_144` home — see the mc2/mobs.rs module header alias table) and the
+derived mana in `f136` (`maxMana_0x8C_140`, dead on a building), and the finish
+read `1000 * f140`. In FRESH PLAY that is the right number by pure coincidence,
+because the port itself had written the rate into the field it then read back.
+
+The two words are **independent on the wire**, and a conformance import
+restores them independently — the uniform alias map already carries @0x2A →
+`f44` and @0x90 → `f140` faithfully (`import_ent_mc2`, no (10,45) arm needed).
+So a replayed building's finish read a mana word it had never authored:
+**mc2l1 t=888 slot 161, retail life 190,000 vs port 0** (that building's retail
+mana was 0). The MC1 column had it right all along — `spawn_creator`'s model-45
+arm seeds `f44 = 100` and `tick_building`'s finish parks `act_life = f44`; MC2
+was the outlier.
+
+## THE FIX (4 sites, one lane)
+- `mc2_spawn_building`: `f44 = bldgprm.rate`, `f140 = 0` then
+  `f140 = (1000 * rate) >> 7` on the productive kind; the `f136` writes are
+  gone (retail leaves that word alone).
+- `mc2_building_tick`'s finish: `act_life = 1000 * f44`.
+- `World::live_poses_mc2`: the parked-dwelling health-bar denominator reads
+  `f44` (it now matches `live_poses_mc1`, which already denominated on `f44`).
+
+No importer change and no pad-reconstruct whitelist change: `f44` is not
+touched by the replayed construction, and `act_life` is restored from the
+import afterward either way.
+
+## MEASURED
+- **10/10 fixture suites, 0 regressions, 0 drifts — and 2 FIXED**: mc2l0
+  t=3318 and mc2l30 t=21, whose open atom was in both cases exactly
+  `field:10,45:life`. Promoted in this change.
+- mc2l1 whole take: rows 261,255 → 261,169 (−86); the **(10,45) `life`**
+  family 204 → 147 rows and **(10,45) `mana`** 4 → 1. The t=888 slot-161
+  exemplar is gone. Residual on that family is the ±160 one-tick damage
+  phase on slot 161 (107 of the 147) — the known one-frame capture class,
+  not this lane.
+- 721 workspace tests green under `MGC_REQUIRE_GOLDENS=1`, fmt + clippy clean.
+
+## GOLDENS
+`mc2_cave` (all four) and `mc2_slice` (all six, post-init included) re-pinned:
+`f44`/`f136`/`f140` are hashed and every authored building moves the stream
+from t=0. ⭐ **Both layout-INDEPENDENT companion goldens HELD** — which is the
+proof that this is pure bookkeeping in fresh play, exactly as the law predicts:
+the parked life is unchanged there, and only an import can make the two words
+disagree.
+
+## FIXTURE
+`a_buildings_life_is_a_thousand_times_its_rate_not_its_mana` (world.rs), both
+halves — the ctor's three field homes, and a finish whose two words DISAGREE
+(the import shape). Non-vacuity checked by restoring the old two lines in
+place: it fails on the first assert (`f44` reads `new_event`'s default 100,
+which is precisely why nothing noticed).
+
+## ⭐ CONFIRMED IN PASSING (no defect)
+MC2's parked-house tick is `AddHouse0A_2D_38330` (EF:27959) and is correctly
+split from MC1's `sub_28DC0` (:30767) in the port — `world.rs` dispatches
+`mc2_house_tick` for MC2 before the shared `tick_building_live` arm. The MC1
+function's `%40` gate carries `+140 = occupants << 8` (:30819); MC2's `& 0x1F`
+gate carries **no mana write at all**, so the banked worry that
+`tick_building_live` would clobber the relocated mana word every 40 ticks does
+not apply to MC2. `mc2_house_tick`'s own APPROX register (the mana-sphere
+production roll EF:28040-58 and `SetMaxDistance_5C8D0`) is unchanged and still
+open on the economy track.
+
+# THE HELD-BACK AREA FIXES (2026-08-12) — ⚖ ONE LANDED, TWO HELD BACK WITH RECEIPTS
+
+The mc2l1 intake banked three "held-back area fixes, land AFTER re-measuring
+mc2l1". Re-measured, and the bank was **partly wrong about what retail does**.
+Reading all six broadcast/probe variants across both decompiles settled it.
+
+## THE FULL GEOMETRY, MEASURED OFF THE DECOMPILE
+| | window centre | radius | shape |
+|---|---|---|---|
+| MC1 `sub_120B0` ch≥1 (:17260-72) | `(pos + 128) >> 8` | `(+80 + 255) >> 8` | square ±r |
+| MC1 `sub_120B0` ch0 (:17339-52) | **`(pos − 128) / 256`** | same | square ±r |
+| MC1 `sub_124F0` ch0 (:17427-39) | **`(pos − 128) / 256`** | same | square ±r |
+| MC1 `sub_127E0` ch0 (:17535-47) | **`(pos − 128) / 256`** | same | square ±r |
+| MC2 `sub_10C80` ch0 (EF:4118-20) | `(pos + 128) >> 8` | same | square ±r |
+| MC1 `sub_11980` / MC2 `sub_10780`, `sub_108B0` | `(pos + 128) >> 8` | same | **SEARCH.DAT ring walk** |
+
+Two things the bank had backwards. The radius is **not** `f80 >> 8` — it is
+`(f80 + 255) >> 8` everywhere, which the port already had. And the `−128` ch0
+bias is **MC1-only**: MC2's ch0 arm rounds like every other channel. Every
+`__CFSHL__` / `my_sign32` fixup wrapped around these expressions is DEAD code —
+`axis_3d::x` and the extent are both `uint16`, so the sums never go negative.
+(`my_sign32` is a −1/0 indicator, not a signum; the idiom is signed division by
+256, i.e. truncation, which only bites in the first half-tile of the map.)
+
+## ✅ LANDED — MC1's CHANNEL-0 WINDOW BIAS
+`area_write`'s centre is now per-channel and per-game: `(pos − 128) / 256` on
+MC1 channel 0, `(pos + 128) >> 8` everywhere else. Every MC1 area DAMAGE window
+had been sitting exactly one tile +x and +y of retail's (`(x+128)>>8` and
+`(x−128)>>8` differ by exactly 1 for every x).
+
+⭐ This is the other half of the AREA-BROADCAST TILE ROUNDING fix: that one
+generalised the ch1 rounding — corpus-pinned on the mc1l0 t=91 tent CLAIM,
+a **channel-1** write — to channel 0, where it does not belong.
+
+**MEASURED:** mc1l0 whole take **5,171 → 5,174 conforming pairs**, unexplained
+field rows **4,163 → 4,090** (−73), missing 72 → 71; fixture mc1l0 **t=4177
+(`field:5,3:life`) promoted**; 10/10 suites, 0 regressions. Goldens:
+`state_hash` level-005 D/E only, and **OBSERVABLE moved with them, correctly** —
+which bees an explosion's ch0 mail reaches is precisely what the window decides.
+Post-init/A-C hold, so the shift is confined to the ch0 damage windows.
+Fixture: `the_mc1_channel_zero_area_window_sits_one_tile_back` (three ways —
+MC1 reaches back and not forward, MC2 the mirror image, MC1 ch1 still rounds).
+
+## ⏸ HELD BACK #1 — THE `.max(1)` RADIUS FLOOR
+Retail has no floor: a zero-extent writer runs `for i = -0; i <= 0` and scans
+its OWN TILE, where the port's `.max(1)` hands it a 3x3. **Removing it buys
+NOTHING** — mc1l0 whole take is identical to the pair with it in or out — and it
+BREAKS `mc2_arrow_direct_hits_the_first_filter_matching_creature`. Comment left
+at the site.
+
+## ⏸ HELD BACK #2 — THE PROBE RING GEOMETRY (and it is the bigger prize)
+`victim_scan` (`sub_11980` :16999-17001) and `claim_victim_scan` (`sub_108B0`
+EF:3798-3802) both walk `sub_11410(0, r)` / `AddE7EE0x_10080(0, r)` — the
+SEARCH.DAT ring iterator, over a rounded centre — exactly like the already-ported
+`sub_11AC0` sibling beside them. The port walks a truncated-centre square with
+the `.max(1)` floor. Ported both, then held them back:
+
+- ⭐ **the corpus WANTS them**: on top of the ch0 fix, mc1l0 goes a further
+  **5,174 → 5,180 conforming and 4,090 → 3,976 unexplained rows** (−114);
+  mc2l4 +1 and mc2l30 +2 conforming with one fewer spurious (10,12) claim pulse.
+- ⛔ but they cost **five pinned unit fixtures** (the fools-trap muzzle, the
+  meteor homing lock, the arrow's collateral direct hit, two muzzle-admission
+  guards) and mc2l4 t=621.
+
+**WHY, and it is not a decompile error.** Measured the real ring table
+(`baked/assets/*/search.bin`): ring 0 is the 2x2 block {(0,0),(1,0),(0,1),(1,1)}
+and the iterator DROPS the last cell of the last ring, so `r == 0` probes three
+forward-biased cells — while `AddEventToMap_57D70` (EF:40315-20) chains every
+entity at plain `x >> 8`. Retail's probe window is therefore genuinely
+forward-biased and narrow, and retail gets away with it because it probes ONCE,
+at the end of the move. **The port does not**: it ray-marches the chord in
+≤128-unit sub-steps (a documented anti-tunnel deviation invented because several
+projectile sprites carry a zero-width box). Instrumented the arrow: f80 = 0,
+384 units per tick, ONE probe per tick — that path never engages the march at
+all, so the tight window simply drops the hit.
+
+⇒ The port's window inflation and its chord march are ONE compensating family
+and have to come out together. The dig this wants is the **projectile probe
+cadence** — which paths march, at what sub-step, and what each carries for f80 —
+and only then the three geometry arms in one patch. Filed as the next area-lane
+dig; the two held-back arms are the payoff (~+120 rows on mc1l0 alone).
+
+## METHOD NOTE
+Every arm was attributed by BISECTING the patch against the whole take, not the
+sparse suites — and it mattered twice. The suites credited the ch0 fix with the
+one mc1l0 fixture but hid its whole-take +3; and they reported the probe lane as
+"1 regression" when the whole take says +9. Conversely the whole take is what
+proved the `.max(1)` removal inert. **Sparse fixtures rank; whole takes decide.**

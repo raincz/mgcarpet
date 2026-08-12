@@ -175,11 +175,11 @@ impl Gen {
             let e = &self.ent[i];
             (e.x, e.y, e.id24, e.f66, e.f67)
         };
+        let mc2 = matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2);
         // Does this call run MC2's BUILDING FOOTPRINT pass (below)?
         // It is `sub_10C80`'s ch0 arm alone — and where it runs, the
         // tile scan must skip (10,45) so the two never double up.
-        let fp_pass =
-            ch == 0 && !shake && matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2);
+        let fp_pass = ch == 0 && !shake && mc2;
         // The castle pre-pass (ch0 only).
         if ch == 0 {
             let mut hits: Vec<usize> = Vec::new();
@@ -296,6 +296,23 @@ impl Gen {
                 count += 1;
             }
         }
+        // THE SCAN RADIUS. Retail is the x half-extent rounded UP,
+        // `(+80 + 255) >> 8`, in every variant of both games (MC1
+        // sub_120B0 :17267 and :17342, sub_124F0 :17431, sub_127E0
+        // :17539; MC2 sub_10C80 EF:3995/4032/4120) — the `__CFSHL__`
+        // / `my_sign32` fixups wrapped around them are DEAD, the
+        // extent field is uint16 so the sum never goes negative.
+        //
+        // ⚠ The `.max(1)` is OURS and it is NOT retail: a zero-extent
+        // writer runs `for i = -0; i <= 0` there and scans its OWN
+        // TILE ALONE, where we hand it a 3x3. HELD BACK deliberately
+        // 2026-08-12, with the projectile-probe geometry it belongs
+        // to — see docs/CONFORMANCE-FINDINGS.md §THE HELD-BACK AREA
+        // FIXES. Measured: removing it buys NOTHING on the corpus
+        // (mc1l0 whole take identical to the tick) and it breaks the
+        // MC2 arrow's direct hit, because the port's compensating
+        // window inflation and its anti-tunnel chord march are one
+        // family and have to come out together.
         let r = ((self.ent[i].f80 as i32 + 255) >> 8).max(1);
         // Pass 2 OWNS the buildings, so the tile scan must not also
         // find them: `&& (class != 10 || model != 45)` sits at
@@ -303,15 +320,38 @@ impl Gen {
         // reason. Only in the variant that runs pass 2 — `sub_116A0`
         // carries neither, and MC1 has neither.
         let mut victims: Vec<(usize, u32)> = Vec::new();
-        // The broadcast window centers on the NEAREST tile — retail's
-        // sub_120B0 rounds (`(+72 + 128) >> 8`) where the truncation
-        // dropped the advancing edge: the l0 t=91 tent claim needs
-        // the flash at y=70.63 to sweep tile row 73 (its big-extent
-        // victim overlaps from outside a truncated window).
+        // THE WINDOW CENTRE, AND IT IS NOT THE SAME ON CHANNEL 0.
+        // Channels 1+ round to the NEAREST tile, `(pos + 128) >> 8`
+        // (MC1 sub_120B0 :17260-72, MC2 sub_10C80 EF:3995-96) — that
+        // rounding is what the l0 t=91 tent claim needs, its flash at
+        // y=70.63 sweeping tile row 73.
+        //
+        // MC1's ch0 arm biases the window one tile BACK instead:
+        // `(pos - 128) / 256`, a TRUNCATING divide (the `__CFSHL__`
+        // idiom is signed division by 256, and `pos - 128` does go
+        // negative in the first half-tile of the map, where it
+        // truncates to 0 rather than −1). Byte-identical in all three
+        // MC1 variants — sub_120B0 :17339/17352, sub_124F0
+        // :17427/17439, sub_127E0 :17535/17547 — so it is the law,
+        // not a decompiler artifact of one function.
+        //
+        // MC2 does NOT do this: `sub_10C80`'s ch0 arm centres on
+        // `(pos + 128) >> 8` like every other channel (EF:4118-19).
+        // The `my_sign32` fixup written around it there is dead for
+        // the same reason as the radius fixups — `axis_3d::x` is
+        // uint16, so `x + 128` is never negative.
+        let centre = |p: u16| -> i32 {
+            if ch == 0 && !mc2 {
+                (p as i32 - 128) / 256
+            } else {
+                (p as i32 + 128) >> 8
+            }
+        };
+        let (ctx_, cty_) = (centre(wx), centre(wy));
         for dy in -r..=r {
             for dx in -r..=r {
-                let tx = (((wx as i32 + 128) >> 8) + dx) as u8;
-                let ty = (((wy as i32 + 128) >> 8) + dy) as u8;
+                let tx = (ctx_ + dx) as u8;
+                let ty = (cty_ + dy) as u8;
                 let mut j = self.map_entity[tile(tx, ty)] as usize;
                 while j != 0 {
                     let c = &self.ent[j];
@@ -973,6 +1013,16 @@ impl Gen {
     /// sub_11980 (:16988) from a projectile: first overlapped victim
     /// in the surrounding cells passing the filter/owner/damageable
     /// gates. Also probes the out-of-pool player.
+    ///
+    /// Geometry identical to its `sub_11AC0` sibling below, and for
+    /// the same reason — both walk the SEARCH.DAT ring iterator, not
+    /// a square: `sub_11410(0, (+80 + 255) >> 8)` at :16999 over a
+    /// centre rounded to the NEAREST tile, `(+72 + 128) >> 8`
+    /// (:17000-01). The MC2 twin `sub_10780` is byte-identical
+    /// (`AddE7EE0x_10080(0, …)`, EF:3700-04). The port truncated the
+    /// centre and walked a square with a `.max(1)` floor, so a
+    /// zero-extent bolt swept nine tiles instead of its own, and
+    /// every probe sat up to a tile behind the shot.
     fn victim_scan(&self, i: usize, ctx: &MobCtx) -> Option<MailTarget> {
         let (wx, wy, id, f66, f67) = {
             let e = &self.ent[i];
@@ -1086,7 +1136,9 @@ impl Gen {
     /// tile-chain sweep as [`Self::victim_scan`] but under the
     /// claim whitelist ([`Self::claim_admits`]) — and with NO player
     /// probe (sub_108B0 never reaches the human wizard; you cannot
-    /// possess a wizard).
+    /// possess a wizard). Same ring-iterator geometry as
+    /// [`Self::victim_scan`], verbatim: `AddE7EE0x_10080(0, (+82 +
+    /// 255) >> 8)` over the `(pos + 128) >> 8` centre (EF:3798-3801).
     fn claim_victim_scan(&self, i: usize) -> Option<MailTarget> {
         let (wx, wy, id) = {
             let e = &self.ent[i];
