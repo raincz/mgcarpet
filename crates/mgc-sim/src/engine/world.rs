@@ -13521,7 +13521,17 @@ mod tests {
             "20000 max minus the 5000 overkill carry"
         );
         assert!(count(&w, 10, 39) >= 2, "the spill scattered as mana balls");
-        assert_eq!(count(&w, 10, 54), 4, "the four collapse magnets");
+        // TWO ejector passes on a spilling downgrade (retail law):
+        // sub_47A70's haircut pass (spill above 90% of the OLD cap),
+        // then the state-6 wrapper's pass at the NEW cap (sub_470E0
+        // :56147) — 30000 banked spills 12000 then 8000 here, each
+        // pass with its own 4 magnets, and the bank parks exactly at
+        // the new cap.
+        assert_eq!(count(&w, 10, 54), 8, "both ejector passes' magnets");
+        assert_eq!(
+            w.g.ent[c].f140, 10_000,
+            "the wrapper pass drains the bank to the new cap"
+        );
 
         // Let the repaint cycle finish, then demolish: level 1 → 0
         // = total destruction, castle-less.
@@ -13540,6 +13550,74 @@ mod tests {
         }
         assert!(w.loadout().castle.is_none(), "the demolish razed it");
         assert_eq!(count(&w, 3, 2), 0, "the entity is gone");
+    }
+
+    /// The total-death scatter, arithmetic-exact (RETAIL LAW via the
+    /// state-6 wrapper, sub_470E0 :56147-50 — corrected 2026-08-12;
+    /// docs/DEVIATIONS.md "total-death scatter + fleet demolition").
+    /// Corpus pin: mc1l0 t=2217, castle slot 107 dies holding 8302 —
+    /// 8 balls of 8302/8 = 1037 (count = spill/1000), residual
+    /// 8302 % 8 = 6 stays on the freed record, the flag re-caps to
+    /// CAP[0] = 5000 with NO life re-stamp (sub_47BD0 row 0 carries
+    /// hp 0), the ejector's 4 magnets spawn, and the level-0 fleet
+    /// quota culls the balloon.
+    #[test]
+    fn castle_death_scatters_the_whole_bank_arithmetic_exact() {
+        let mut w = bare_creature_world(2);
+        w.g.move_relink(1, 30 << 8, 30 << 8, 3200);
+        let pose = PlayerPose::level(90 << 8, 90 << 8, 3400, 0);
+        let c = w.g.spawn_castle(140 << 8, 140 << 8).unwrap();
+        w.g.ent[c].id24 = PLAYER_TARGET;
+        w.g.ent[c].f144 = PLAYER_TARGET;
+        for _ in 0..80 {
+            w.tick(pose, PlayerCommand::default());
+        }
+        assert_eq!(count(&w, 3, 3), 1, "the level-1 fleet balloon stands");
+        w.g.ent[c].f140 = 8302;
+        // The demolish write lands after the entity pass, so the
+        // castle sees its −1 on the NEXT dispatch and parks in
+        // action 6 for one tick…
+        w.tick(
+            pose,
+            PlayerCommand {
+                demolish: true,
+                ..Default::default()
+            },
+        );
+        w.tick(pose, PlayerCommand::default());
+        assert_eq!(w.g.ent[c].tick70, 6, "parked, not yet torn down");
+        // …and the teardown runs on the next dispatch. The record is
+        // soft-killed but still readable this tick (the reap collects
+        // it at the NEXT tick top) — exactly the frame the corpus
+        // observes.
+        w.tick(pose, PlayerCommand::default());
+        assert!(w.g.ent[c].flags & 0x400 != 0, "soft-killed");
+        assert_eq!(w.g.ent[c].f140, 6, "residual = 8302 % 8");
+        assert_eq!(w.g.ent[c].f136, 5000, "the CAP[0] re-stamp");
+        assert!(w.g.ent[c].act_life < 0, "row 0 hp = 0: no life re-stamp");
+        let balls: Vec<usize> = (1..w.g.ent.len())
+            .filter(|&j| {
+                let e = &w.g.ent[j];
+                e.class64 == 10 && e.model65 == 39 && e.flags & 0x400 == 0
+            })
+            .collect();
+        assert_eq!(balls.len(), 8, "count = spill/1000");
+        for &b in &balls {
+            let e = &w.g.ent[b];
+            assert_eq!(e.f140, 1037, "share = 8302/8");
+            assert_eq!(e.f144, PLAYER_TARGET, "owner-tagged");
+            assert_eq!((e.f66, e.f67), (10, 39), "the ctor source stamp");
+            assert!((16..64).contains(&e.f126), "the ejector speed draw");
+        }
+        assert_eq!(count(&w, 10, 54), 4, "the ejector's four magnets");
+        // The culled balloon carries 0x400 for one more snapshot (the
+        // reap collects it next tick-top) — the corpus's flags-1036
+        // frame exactly.
+        let culled = (1..w.g.ent.len()).filter(|&j| {
+            let e = &w.g.ent[j];
+            e.class64 == 3 && e.model65 == 3 && e.flags & 0x400 != 0
+        });
+        assert_eq!(culled.count(), 1, "the level-0 quota culled the fleet");
     }
 
     /// Mana Magnet (spell 19), the full retail chain: the c9 m17
@@ -13782,16 +13860,18 @@ mod tests {
 
     /// Total castle destruction DEMOLISHES the fleet through the
     /// cull's spill: each owned balloon dies and its cargo drops as
-    /// an owned (10,39) ball, so the census total is conserved
-    /// (player-ruled deviation, docs/DEVIATIONS.md — retail's !level
-    /// arm never touches the fleet, leaving the balloons flying at
-    /// the freed castle slot forever). A bare despawn without the
-    /// spill would erase in-flight cargo from the per-tick census:
-    /// the old destroy/rebuild "disappearing mana" leak.
+    /// an owned (10,39) ball, so the census total is conserved.
+    /// RETAIL LAW, not a patch (corrected 2026-08-12): the state-6
+    /// wrapper (sub_470E0 :56147-50) runs sub_47400 AFTER the
+    /// teardown, and the level-0 quota culls every balloon with the
+    /// cargo drop (:56399-411) — the mc1l0 corpus pins it (t=1363/
+    /// 2217 balloon flags 1036 on the death tick). A bare despawn
+    /// without the spill would erase in-flight cargo from the
+    /// per-tick census: the old destroy/rebuild "disappearing mana"
+    /// leak.
     #[test]
     fn castle_total_death_demolishes_balloons_spilling_cargo() {
         let mut w = bare_creature_world(2);
-        w.set_patches(crate::patches::WorldPatches::LEGACY);
         w.g.move_relink(1, 30 << 8, 30 << 8, 3200);
         let pose = PlayerPose::level(90 << 8, 90 << 8, 3400, 0);
         let c = w.g.spawn_castle(140 << 8, 140 << 8).unwrap();

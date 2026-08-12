@@ -233,11 +233,7 @@
     },
     {
       "t": 588,
-      "status": "open",
-      "sig": "c82601d277fa8a1d",
-      "atoms": [
-        "field:10,39:flags"
-      ],
+      "status": "conforming",
       "note": "auto-triage vs known-deviations: roster: mc1l0-cast-impacts-extra; 2 row(s) unexplained"
     },
     {
@@ -533,11 +529,7 @@
     },
     {
       "t": 1364,
-      "status": "open",
-      "sig": "85b61e945da26986",
-      "atoms": [
-        "field:10,39:heading"
-      ],
+      "status": "conforming",
       "note": "mana magnet (10,54) lifecycle + ball pull — untriaged"
     },
     {

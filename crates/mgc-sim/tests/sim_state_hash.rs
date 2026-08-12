@@ -232,11 +232,20 @@ fn flight_tier_golden_state_hashes() {
     // enhanced mover flies a different track (no crossing), and
     // A/B/post-init precede any gate edge. Behavior change toward
     // retail by design (mc1l0 replay horizon 413 → 561).
+    // Re-pinned (ALL FOUR, both modes — post-init included) for the
+    // MANA-BALL CTOR STAMPS (mc1l0 (10,39) dig): `spawn_mana_ball`
+    // now stamps +66/+67 = 10/39 and +126 = 32 like retail's ctor
+    // (sub_3B5A0 :47456-57/:47463), and the level's authored balls
+    // load through that ctor — three hashed fields shift on every
+    // ball from tick 0. Motion-inert (ball physics reads none of
+    // them; no magnet/claim/corpse event fires in these windows), so
+    // the flight tracks are untouched — bookkeeping toward retail's
+    // byte image.
     const FAITHFUL: [u64; 4] = [
-        0x66111d2420b92e5c, // post-init
-        0xf8441d9f701f1bde, // A: 40 ticks of forward thrust
-        0x78acc542d59e3181, // B: 30 ticks of banked turn + strafe
-        0x2dc376652ae35846, // C: 40 ticks of coast
+        0x4403f4de7cb7d9bc, // post-init
+        0x54edc7d9dbdb0ccd, // A: 40 ticks of forward thrust
+        0xa8e4433259426643, // B: 30 ticks of banked turn + strafe
+        0x3b002b11c8e54298, // C: 40 ticks of coast
     ];
     // Re-pinned for the enhanced-bank strafe fix (2026-07-27): the
     // proportional camera bank no longer gates off while strafing — it
@@ -249,11 +258,13 @@ fn flight_tier_golden_state_hashes() {
     // FAITHFUL array is untouched (the Mc1 mover never runs this bank).
     // ENHANCED A-C re-pinned with the same ball vertical-law fix —
     // the background balls evolve identically under both movers.
+    // ENHANCED re-pinned with the same ball-ctor stamps — the
+    // background balls carry them under either mover.
     const ENHANCED: [u64; 4] = [
-        0x5510cd23ecac11a5, // post-init
-        0x03e8b185731d568e, // A
-        0xdc8edbbe0144c351, // B: strafe+turn now banks on forward speed
-        0x08f345b13efbd37f, // C
+        0xc65df7802e319e51, // post-init
+        0xa90885428f750630, // A
+        0xba715c67f1a1cb8e, // B: strafe+turn now banks on forward speed
+        0x8a6dd7ff3b629b82, // C
     ];
     assert_eq!(
         (faithful, enhanced),

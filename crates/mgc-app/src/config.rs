@@ -907,14 +907,6 @@ pub struct GameplayPatches {
     /// and defenders spawn walled-in ON the roof and their corpse
     /// flames destroy the house you just possessed.
     pub possessed_footprint: PatchArm,
-    /// Total castle destruction scatters the residual mana bank.
-    /// Retail frees the castle without running the ejector — the
-    /// banked mana vanishes from the world (a shipped mana leak).
-    pub castle_death_mana: PatchArm,
-    /// Total castle destruction demolishes the balloon fleet (cargo
-    /// spills as owned balls). Retail leaves the orphaned balloons
-    /// flying at the freed castle slot's stale coordinates forever.
-    pub castle_death_balloons: PatchArm,
     /// MC2 castle downgrade's 10% mana haircut, computed safely.
     /// Retail's i32 math overflows at the level-7 rung — a maxed
     /// castle downgrade RAISES its capacity and scatters nothing.
@@ -959,8 +951,6 @@ impl Default for GameplayPatches {
             ball_ground_track: PatchArm::Patched,
             map_wide_ball_rolling: PatchArm::Patched,
             possessed_footprint: PatchArm::Patched,
-            castle_death_mana: PatchArm::Patched,
-            castle_death_balloons: PatchArm::Patched,
             mc2_downgrade_overflow: PatchArm::Patched,
             mc2_magic_mine: PatchArm::Patched,
             mc2_dweller_invisibility: PatchArm::Patched,
@@ -980,8 +970,6 @@ impl GameplayPatches {
             ball_ground_track: PatchArm::Retail,
             map_wide_ball_rolling: PatchArm::Retail,
             possessed_footprint: PatchArm::Retail,
-            castle_death_mana: PatchArm::Retail,
-            castle_death_balloons: PatchArm::Retail,
             mc2_downgrade_overflow: PatchArm::Retail,
             mc2_magic_mine: PatchArm::Retail,
             mc2_dweller_invisibility: PatchArm::Retail,

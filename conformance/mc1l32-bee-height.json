@@ -127,11 +127,7 @@
     },
     {
       "t": 207,
-      "status": "open",
-      "sig": "c82601d277fa8a1d",
-      "atoms": [
-        "field:10,39:flags"
-      ],
+      "status": "conforming",
       "note": "(10,39) balloon flags bit 0x20000000 (l32 known balloon family)"
     },
     {
@@ -150,9 +146,8 @@
     {
       "t": 230,
       "status": "open",
-      "sig": "75c3f97e45cb9f4c",
+      "sig": "4d1985660553dfb4",
       "atoms": [
-        "field:10,39:flags",
         "field:9,1:flags"
       ],
       "note": "(10,39) balloon flags + (9,1) flags"

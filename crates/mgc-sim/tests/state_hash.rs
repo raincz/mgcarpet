@@ -475,11 +475,21 @@ fn level_005_golden_state_hashes() {
     // leg's hash shifts; the poverty-gate READ (`rival_castle_price`)
     // resolves to the same 1000 the old static gate used, so no
     // decision moves. See the OBSERVABLE verdict below.
+    // A-E re-pinned (post-init INCLUDED) for the MANA-BALL SPAWN
+    // STAMPS (mc1l0 (10,39) dig): the ball ctor now stamps +66/+67 =
+    // 10/39 and +126 = 32 (sub_3B5A0 :47456-57/:47463) — the level's
+    // authored balls carry them from load — and the corpse drop
+    // persists its speed draw in +126 (sub_27690 :29689) with the
+    // signed +46 launch lift (:29692), so every kill's ball in the
+    // combat windows shifts three hashed fields. Motion-inert in
+    // these windows (ball physics reads none of them; no magnet,
+    // possess claim or castle teardown fires here). See the
+    // OBSERVABLE verdict below.
     const GOLDEN: [u64; 6] = [
-        0xebb26ffc9347eb7a, // post-init (feature pass + disposition 0)
-        0x9b268228d1fda151, // A: 32 idle ticks far afield
-        0xd1fa31b4c60ec9a1, // B: crater trigger fired + 120 dig ticks
-        0x7770b764bae3bd65, // C: ambush disposition fired
+        0xfd3092a200982040, // post-init (feature pass + disposition 0)
+        0x7566954183a4ce47, // A: 32 idle ticks far afield
+        0x8de8cfcd4ab56b53, // B: crater trigger fired + 120 dig ticks
+        0x989e1d28b3c608a6, // C: ambush disposition fired
         // D/E previously re-pinned for THE CAST-PHASE LAW (the MC1
         // arm→token-fire restructure): every hand cast now arms its
         // spell token at the wizard pass and the token's own tick
@@ -538,8 +548,8 @@ fn level_005_golden_state_hashes() {
         // hashed `player_mail` word where it used to memset the block.
         // The behavioral half of this law is melee, which the corpus
         // above pins and this slice never exercises.
-        0x0f951b0288b9106a, // D: 64 ticks of two-hand fireball combat
-        0x2e89eff0e117cdbc, // E: 100 aftermath ticks
+        0x6da333573d15c7eb, // D: 64 ticks of two-hand fireball combat
+        0xdb8821ba4c066089, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,

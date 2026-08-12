@@ -3479,15 +3479,24 @@ impl Gen {
 
     /// sub_3B5A0 (:47443): the mana ball (state 41). Callers override
     /// +140/+144; the tick re-derives the size sprite every turn.
+    /// Both games' ctors stamp the source pair AND a base speed —
+    /// MC1 +66/+67 = 10/39, +126 = 32 (:47456-57, :47463); MC2
+    /// xtype/xsubtype = 10/39, actSpeed = 32 (CreateManaSphere
+    /// EF:36614-17). The mc1l0 corpus pins both: every corpse-drop
+    /// ball reads sclass/smodel 10/39, and an unstamped port ball
+    /// sat at the NewEvent default 16 where retail's varied.
     pub(crate) fn spawn_mana_ball(&mut self, x: u16, y: u16, z: i16) -> Option<usize> {
         let b = self.new_event()?;
         {
             let e = &mut self.ent[b];
             e.class64 = 10;
             e.model65 = 39;
+            e.f66 = 10;
+            e.f67 = 39;
             e.tick70 = 41;
             e.f140 = 512;
             e.f46 = 128;
+            e.f126 = 32;
             e.f28 = 3;
             e.f58 = 0x80;
         }
@@ -4478,12 +4487,20 @@ impl Gen {
         if !is_fool && self.ent[i].mail[1].1 != 0 {
             let (force, src) = self.ent[i].mail[1];
             self.ent[i].mail[1] = (0, 0);
+            // The force/lock protocol is MC2's alone (the ball twin
+            // EF:26069-94 reads `dword_0x64_100` and stamps byte[2] |=
+            // 0x20). Retail MC1's intake (:29439-48) reads the SOURCE
+            // only — the possess flash parks a nonzero ch1 amount that
+            // nothing consumes, and a claim on owner change is
+            // unconditional. Reading the amount as force here locked
+            // MC1 balls with a port-only flag bit (the mc1l0 (10,39)
+            // flags family, want 12 got 0x2000000C).
             if src != self.ent[i].f144
-                && (force != 0 || self.ent[i].flags & crate::mc2::mobs::F_CLAIM_LOCK == 0)
+                && (!mc2 || force != 0 || self.ent[i].flags & crate::mc2::mobs::F_CLAIM_LOCK == 0)
             {
                 self.ent[i].f144 = src;
                 self.ent[i].flags &= !0x40;
-                if force != 0 {
+                if mc2 && force != 0 {
                     self.ent[i].flags |= crate::mc2::mobs::F_CLAIM_LOCK;
                 }
                 // The chime anchors at the CLAIMANT, not the ball
@@ -4517,9 +4534,20 @@ impl Gen {
             if m < self.ent.len() {
                 let (bx, by) = (self.ent[i].x, self.ent[i].y);
                 let (mx, my) = (self.ent[m].x, self.ent[m].y);
-                // Mask to 0..2047 — `angle_of` can return 2048 (full-
-                // turn wrap) and SIN/COS are len 2048.
-                let dir = (Self::angle_between(bx, by, mx, my) & 0x7FF) as usize;
+                // The aim IS a heading write (:29453 `+30 =
+                // sub_42150(...)`; the MC2 twin's attract intake
+                // writes yaw_0x1C the same way, EF:26101). The mc1l0
+                // (10,39) heading family — 1,279 rows in ~128-tick
+                // windows after each castle teardown — is this write
+                // tracking the ball→magnet bearing while the pull
+                // lasts; the port only applied the impulse. Stored
+                // RAW: retail's atan2 returns 0..2048 INCLUSIVE and
+                // +30 keeps the full-turn 2048 (corpus t=1385/2336).
+                // Masked only for the table index — SIN/COS are len
+                // 2048.
+                let raw = Self::angle_between(bx, by, mx, my);
+                self.ent[i].f30 = raw;
+                let dir = (raw & 0x7FF) as usize;
                 let ivx = ((4 * crate::mc1::tables::SIN[dir]) >> 16) as i16;
                 let ivy = (-((4 * crate::mc1::tables::COS[dir]) >> 16)) as i16;
                 let e = &mut self.ent[i];
@@ -4969,12 +4997,20 @@ impl Gen {
             let speed = (d2 % 0x30 + 16) as i16;
             self.ent[b].f30 = yaw;
             self.ent[b].f34 = yaw;
+            // The launch speed persists in +126 (:29689 `v2[63]`) —
+            // the mc1l0 corpus pins it: every castle-preclear house
+            // drop carries 16..63 where the unstamped port ball read
+            // the NewEvent 16.
+            self.ent[b].f126 = speed;
             let vx = ((speed as i32 * crate::mc1::tables::SIN[yaw as usize]) >> 16) as i16;
             let vy = (-((speed as i32 * crate::mc1::tables::COS[yaw as usize]) >> 16)) as i16;
             self.ent[b].dest_x = vx as u16;
             self.ent[b].dest_y = vy as u16;
             let ground = self.ground_z(x, y) as i16;
-            self.ent[b].f46 = (1024 - (z.wrapping_sub(ground)) as i32).max(0) as i16 >> 3;
+            // Signed /8 toward zero (:29692's CFSHL ritual) — a death
+            // more than 1024 above ground launches the ball DOWNWARD;
+            // the old `.max(0)` flattened that to a zero lift.
+            self.ent[b].f46 = ((1024 - (z.wrapping_sub(ground)) as i32) / 8) as i16;
         }
         self.ent[i].f144 = 0;
     }

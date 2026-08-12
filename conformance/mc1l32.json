@@ -116,20 +116,15 @@
     {
       "t": 156,
       "status": "open",
-      "sig": "75c3f97e45cb9f4c",
+      "sig": "4d1985660553dfb4",
       "atoms": [
-        "field:10,39:flags",
         "field:9,1:flags"
       ],
       "note": "[carried from bee-height take] (10,39) balloon flags + (9,1) flags"
     },
     {
       "t": 182,
-      "status": "open",
-      "sig": "c82601d277fa8a1d",
-      "atoms": [
-        "field:10,39:flags"
-      ],
+      "status": "conforming",
       "note": "[carried from bee-height take] (10,39) balloon flags bit 0x20000000 (l32 known balloon family)"
     },
     {
@@ -1729,7 +1724,7 @@
     {
       "t": 39509,
       "status": "open",
-      "sig": "f99de9bb4e7f2a38",
+      "sig": "dafaada1744fd878",
       "atoms": [
         "extra:10,0",
         "field:10,0:flags",
@@ -1754,6 +1749,9 @@
         "field:10,1:max_life",
         "field:10,1:model",
         "field:10,1:rand",
+        "field:10,1:sclass",
+        "field:10,1:smodel",
+        "field:10,1:speed",
         "field:10,1:target_yaw",
         "field:10,1:x",
         "field:10,1:y",

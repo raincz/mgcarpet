@@ -9509,3 +9509,102 @@ open-coded branches before touching the shared one.
 ⭐ **Attribution note**: the corpus win is FOUR rows. The law is right and
 decompile-pinned, but mc1l0 barely exercises melee — mc1l5 gave up a
 fixture, so look for the payoff in takes with real creature contact.
+
+## 🏆 THE (10,39) MANA-BALL DIG — ONE FAMILY, FIVE LAWS, −51% OF THE WHOLE TAKE (2026-08-12)
+
+**The banked "castle established-tick ball collection" family (pair
+564, 57% of mc1l0's unexplained rows) resolved into FIVE independent
+port bugs sharing one entity family — none of them the absorption
+machinery the ledger note guessed.** The heading lane and the stamp
+lane are SEPARATE laws (the memory's ⚠ CONFIRM FIRST was right to
+doubt one dig), and the three big spawn events (t=1363/1830/2217) are
+neither corpse drops nor overflow ejections but CASTLE TEARDOWNS.
+
+**THE FIVE LAWS (all decompile-pinned + corpus-proven):**
+
+**1. The ball ctor stamps (sclass/smodel + base speed).** BOTH games'
+ctors stamp the source pair and a base speed the port skipped: MC1
+`sub_3B5A0` +66/+67 = 10/39, +126 = 32 (:47456-57, :47463); MC2
+`CreateManaSphere` xtype/xsubtype + actSpeed = 32 (EF:36614-17).
+`spawn_mana_ball` now stamps all three. → the 256-row sclass/smodel
+family at 0.
+
+**2. The corpse drop persists its speed draw.** `sub_27690` writes the
+launch speed INTO +126 (:29689 `v2[63] = draw % 0x30 + 16`) — the port
+computed the same draw, fed it to the velocity, and dropped it; every
+corpse/house-preclear ball then read the NewEvent default 16 where
+retail reads 16..63. Also the +46 launch lift is a SIGNED /8 (:29692)
+— the port's `.max(0)` flattened deaths >4 tiles above ground.
+→ the 127-row speed family at 0. (The t=564 lane = the castle
+UPGRADE PRE-CLEAR demolishing houses; each drop is sub_27690.)
+
+**3. The ch4 magnet-attract intake writes the HEADING.** Retail's ball
+tick stamps `+30 = sub_42150(ball, magnet)` (:29453; the MC2 twin
+writes yaw_0x1C at EF:26101) every tick a (10,54) magnet's ch4 mail
+lands, so a pulled ball's heading tracks the bearing for the magnet's
+128-tick life. The port applied the impulse and never wrote f30.
+Stored RAW — retail's atan2 returns 0..2048 INCLUSIVE and +30 keeps
+the full-turn 2048 (corpus t=1385/2336). → the 1,279-row heading
+family at 8.
+
+**4. MC1 ball claims are SOURCE-only — the force/lock protocol is
+MC2's.** Retail MC1's ch1 intake (:29439-48) reads the source, claims
+unconditionally on owner change, and never reads the amount; the port
+ran MC2's force/lock arm (EF:26069-94) for both games, so retail's
+parked nonzero ch1 amounts (imported per pair) set the port-only
+claim-lock bit 29 on MC1 balls. → the 48-row flags family
+(want 12 got 0x2000000C) at 0. Also the fresh-magnet flags: the
+magnet ctor sets +16 |= 1 (:47697) — the port didn't (want 5 got 4).
+
+**5. ⭐ THE CASTLE TEARDOWN WRAPPER — two "retail leak" patches were
+WRONG and are RETIRED.** `castle_death_mana` / `castle_death_balloons`
+were premised on sub_47A70's `!level` arm never scattering the bank or
+touching the fleet. The premise missed the state-6 WRAPPER: `sub_470E0`
+(:56147-50) calls `sub_47130` + `sub_47400` AFTER the teardown returns,
+so retail ALWAYS re-runs the ejector at the post-downgrade level
+(death: f26==0 → the whole bank, :56189-90; survivor: the spill above
+the new cap) and re-quotas the fleet (death: level-0 quota culls every
+balloon with the cargo drop, :56399-411). CORPUS PROOF, arithmetic-
+exact: t=2217 castle slot 107 dies holding 8302 → 8 balls of
+8302/8 = 1037, residual 6 = 8302 % 8, 4 magnets, balloon flags 1036;
+t=1363 = 3000 → 3×1000 residual 0. Also pinned: the 10% haircut is
+RESTORED after ejector #1 (:56513, port kept it — the observed stale
+9000 cap), and the death runs the LADDER RESET (sub_47C60 → sub_47BD0
+row 0: **cap unconditional = 5000, HP row-gated at 0** — mana_max
+9000 → 5000 with NO life rows). `castle_downgrade` now follows the
+wrapper flow unconditionally; the two patches are deleted from
+patches.rs/config.rs/settings.rs/defaults, DEVIATIONS.md entries
+retired-with-refutation. A spilling DOWNGRADE now runs TWO ejector
+passes (haircut pass + wrapper pass at the new cap) — the corpus's own
+"leftover bank parks exactly at the new cap" shape.
+
+**RECEIPTS (mc1l0 verify-deltas):**
+- Unexplained field rows **3,340 → 1,624 (−51%)**; missing 72 → 48
+  (exactly the 13 scatter balls + 11 magnets); (10,39) family
+  **1,738 → 37**; (10,54) at 0.
+- Conforming pairs **5,319 → 5,687 (+368)**; first unexplained pair
+  564 → **581**.
+- Free-replay horizon HOLDS at 562 — the wall is the pose.z t=563
+  mover ground-sample phase (the mid-walk restructure lane), not this
+  family.
+- **6 fixtures FIXED + promoted** across mc1l0 (t=1364 + 1), mc1l5
+  (t=1390 + 1), mc1hwl0 (t=1698), mc1l32; 2 drift re-annotations
+  (t=156/230 LOST their (10,39) flags diff — the claim-lock fix; l32
+  t=39509 gained knock-on stamp rows inside a pre-existing
+  model-mismatched slot). All 9 suites green, 0 regressions;
+  workspace 724 tests green; clippy + fmt clean.
+- Goldens re-pinned with attribution: mc2_cave (4), sim_state_hash
+  FAITHFUL+ENHANCED (stamps ride from load in level 001), state_hash
+  L005 A-F (authored balls + combat-window corpse drops). ⭐ EVERY
+  OBSERVABLE COMPANION HELD — the stamp lanes are motion-inert
+  bookkeeping in those windows. New pin:
+  `castle_death_scatters_the_whole_bank_arithmetic_exact` (the 8302
+  law end to end); `castle_downgrade_ejects_mana_and_demolish_razes`
+  re-pinned for the two-pass eject (8 magnets, bank parks at cap).
+
+**REMAINING (10,39) RESIDUE (37 rows, small laws):** x/y 28 rows
+(sub-tile deltas at pull/teleport ticks — polar/rounding lane, undug);
+heading 8 (same-tick ch4 phase on freshly-scattered balls at the
+spawn boundary + double-magnet last-writer at t=1869); mana 1
+(t=2371, rides the one slot-swap pair). The (9,0)/(9,1) projectile
+families (1,135 rows) are now the take's top block.

@@ -8823,8 +8823,6 @@ fn world_patches(p: &config::GameplayPatches) -> mgc_sim::WorldPatches {
         ball_ground_track: p.ball_ground_track.on(),
         map_wide_ball_rolling: p.map_wide_ball_rolling.on(),
         possessed_footprint: p.possessed_footprint.on(),
-        castle_death_mana: p.castle_death_mana.on(),
-        castle_death_balloons: p.castle_death_balloons.on(),
         mc2_downgrade_overflow: p.mc2_downgrade_overflow.on(),
         mc2_magic_mine: p.mc2_magic_mine.on(),
         castle_latch_bug: p.castle_latch_bug.on(),

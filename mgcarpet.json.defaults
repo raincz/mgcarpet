@@ -40,8 +40,6 @@
     },
     "patches": {
       "ball_ground_track": "patched",
-      "castle_death_balloons": "patched",
-      "castle_death_mana": "patched",
       "castle_latch_bug": "patched",
       "castle_recast_cost": "retail",
       "jar_ground_snap": "patched",

@@ -50,15 +50,6 @@ pub struct WorldPatches {
     /// defender spawns onto the roof — a walled-in corpse-flame loop
     /// that destroys the possessed house from the inside.
     pub possessed_footprint: bool,
-    /// Total castle destruction routes the residual mana bank
-    /// through the ejector's level-0 scatter. Retail's `!level` arm
-    /// (:56531-37) frees the castle without ever calling the ejector
-    /// — the bank vanishes with the entity (a shipped mana leak).
-    pub castle_death_mana: bool,
-    /// Total castle destruction demolishes the balloon fleet through
-    /// the cull's cargo spill. Retail leaves the balloons flying at
-    /// the freed slot's stale coordinates forever.
-    pub castle_death_balloons: bool,
     /// MC2 downgrade's 10% capacity haircut computed in i64. Retail's
     /// i32 `10 * x / 100` overflows at the level-7 rung (10 × 300M)
     /// into a NEGATIVE cut — a maxed castle downgrade *raises* its
@@ -95,8 +86,6 @@ impl WorldPatches {
         ball_ground_track: false,
         map_wide_ball_rolling: false,
         possessed_footprint: false,
-        castle_death_mana: false,
-        castle_death_balloons: false,
         mc2_downgrade_overflow: false,
         mc2_magic_mine: false,
         castle_latch_bug: false,
@@ -113,8 +102,6 @@ impl WorldPatches {
         ball_ground_track: true,
         map_wide_ball_rolling: false,
         possessed_footprint: true,
-        castle_death_mana: true,
-        castle_death_balloons: true,
         mc2_downgrade_overflow: true,
         mc2_magic_mine: true,
         castle_latch_bug: true,

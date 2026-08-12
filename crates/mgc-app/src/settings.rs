@@ -1798,56 +1798,6 @@ pub fn registry() -> Vec<Spec> {
         Spec {
             domain: Gameplay,
             group: "gameplay · patches",
-            label: "castle_death_mana",
-            class: Patch,
-            key: None,
-            cli: None,
-            cfg_path: "gameplay.patches.castle_death_mana",
-            read: |c| Val::Toggle {
-                on: c.gameplay.patches.castle_death_mana.on(),
-                faithful: false,
-            },
-            desc: "Total castle destruction scatters the residual mana bank as \
-                   balls (MC1). Retail frees the castle without running the \
-                   ejector - the banked mana vanishes from the world.",
-            ctl: Ctl::Toggle {
-                set: |c, v| {
-                    c.gameplay.patches.castle_death_mana = crate::config::PatchArm::from_on(v)
-                },
-                descs: [
-                    "The residual bank vanishes - a mana leak, as retail.",
-                    "The bank scatters; the world's mana is conserved (default).",
-                ],
-            },
-        },
-        Spec {
-            domain: Gameplay,
-            group: "gameplay · patches",
-            label: "castle_death_balloons",
-            class: Patch,
-            key: None,
-            cli: None,
-            cfg_path: "gameplay.patches.castle_death_balloons",
-            read: |c| Val::Toggle {
-                on: c.gameplay.patches.castle_death_balloons.on(),
-                faithful: false,
-            },
-            desc: "Total castle destruction demolishes the balloon fleet, cargo \
-                   spilling as owned balls (MC1). Retail leaves the orphans \
-                   flying at the dead castle's coordinates forever.",
-            ctl: Ctl::Toggle {
-                set: |c, v| {
-                    c.gameplay.patches.castle_death_balloons = crate::config::PatchArm::from_on(v)
-                },
-                descs: [
-                    "Orphaned balloons circle the ruin forever, as retail.",
-                    "The fleet is demolished; cargo spills (default).",
-                ],
-            },
-        },
-        Spec {
-            domain: Gameplay,
-            group: "gameplay · patches",
             label: "mc2_downgrade_overflow",
             class: Patch,
             key: None,
@@ -2174,7 +2124,10 @@ mod tests {
         assert_eq!(verdict, Fidelity::Faithful);
         // The default-on retail patches count apart and never flip
         // the verdict (castle_recast_cost ships on its retail arm).
-        assert_eq!(patches, 11, "eleven of the twelve patches ship on");
+        // castle_death_mana/balloons retired 2026-08-12 — the mc1l0
+        // corpus proved the scatter + fleet cull are retail law
+        // (sub_470E0's wrapper), so they are unconditional now.
+        assert_eq!(patches, 9, "nine of the ten patches ship on");
     }
 
     #[test]

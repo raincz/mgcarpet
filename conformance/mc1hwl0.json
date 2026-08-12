@@ -195,11 +195,7 @@
     },
     {
       "t": 1698,
-      "status": "open",
-      "sig": "85b61e945da26986",
-      "atoms": [
-        "field:10,39:heading"
-      ],
+      "status": "conforming",
       "note": "auto-triage vs known-deviations: roster: mc1hw-speed-contrail-extra, mc1hwl0-terrain-z; 14 row(s) unexplained"
     },
     {

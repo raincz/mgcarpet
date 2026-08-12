@@ -3847,7 +3847,7 @@ impl Gen {
     /// refreshes to live ground every tick (idle :56014 + wait
     /// cases 1/4/6 :56073-78) — the flag rides the painted tower;
     /// the build-site datum lives in f28 (+154).
-    pub(crate) fn castle_tick(&mut self, i: usize, patches: crate::patches::WorldPatches) {
+    pub(crate) fn castle_tick(&mut self, i: usize, _patches: crate::patches::WorldPatches) {
         // ACTION 6, the LEVELER (sub_470E0 :56138). Lethal damage does
         // NOT downgrade on the tick it lands: `sub_47EC0` returning 2
         // only parks the castle here (:56003 `+70 = 6`) and the tick
@@ -3864,7 +3864,7 @@ impl Gen {
         // sub_470E0 does none.
         if self.ent[i].tick70 == 6 {
             self.ent[i].tick70 = 4;
-            self.castle_downgrade(i, patches);
+            self.castle_downgrade(i);
             return;
         }
         // The ground refresh belongs to the established tick and the
@@ -4107,18 +4107,35 @@ impl Gen {
 
     /// sub_47A70 (:56498) + the state-6 wrapper (sub_470E0 :56138):
     /// lethal damage knocks the castle DOWN one level — collapse
-    /// rumble (sound 30), ~10% of capacity ejected as mana balls,
-    /// the footprint un-stamped to rough ground (the collapse
-    /// walker's zeroed fake event, :56515-24), then the ladder reset
-    /// with the overkill carry and a 5-tick timer into the repaint.
-    /// At level 1 the whole castle dies instead (:56531-37): the
-    /// balloon is released, the ENTIRE bank scatters, the entity is
-    /// freed — the player is castle-less (die now = restart).
-    fn castle_downgrade(&mut self, i: usize, patches: crate::patches::WorldPatches) {
+    /// rumble (sound 30), the over-cap spill ejected at a 10%
+    /// capacity haircut, the footprint un-stamped to rough ground
+    /// (the collapse walker's zeroed fake event, :56515-24), the
+    /// ladder reset with the overkill carry, and then the WRAPPER
+    /// TAIL (:56147-50): the ejector runs AGAIN at the new level and
+    /// the fleet dispatch re-quotas the balloons, before the 5-tick
+    /// timer into the repaint. At level 1 the whole castle dies
+    /// instead (:56531-37) and the same tail is what scatters the
+    /// ENTIRE bank (the ejector's level-0 all-stored arm, :56189-90)
+    /// and demolishes the fleet (the level-0 quota cull, :56399-411)
+    /// — the player is castle-less (die now = restart).
+    ///
+    /// ⚠ HISTORY: the tail was long mis-modeled as two opt-in
+    /// patches (`castle_death_mana` / `castle_death_balloons`)
+    /// claiming retail leaked the bank and orphaned the balloons —
+    /// derived from sub_47A70's `!level` arm alone, missing that
+    /// sub_470E0 calls sub_47130 + sub_47400 AFTER the teardown
+    /// returns. The mc1l0 corpus refuted both in one tick: t=2217,
+    /// castle slot 107 dies holding 8302 — retail scatters 8 balls
+    /// of 1037 leaving residual 6 (= 8302 % 8, the ejector's own
+    /// count/share arithmetic), spawns the ejector's 4 magnets,
+    /// soft-kills the balloon (flags 0x400 with a cargo drop), and
+    /// re-caps the dead flag's +136 to CAP[0] = 5000; t=1363 is the
+    /// same law at 3000 → 3×1000, residual 0.
+    fn castle_downgrade(&mut self, i: usize) {
         let lvl0 = self.ent[i].f26;
-        let (x, y, site_z, own) = {
+        let (x, y, site_z) = {
             let e = &self.ent[i];
-            (e.x, e.y, e.site_z, e.id24)
+            (e.x, e.y, e.site_z)
         };
         // EVERYTHING down to the ladder reset sits inside retail's
         // `if (level > 0)` (:56506). A level-0 castle is a bare flag —
@@ -4129,11 +4146,14 @@ impl Gen {
         let lvl = if lvl0 > 0 {
             self.terrain_dirty = true; // the synchronous un-stamp below
             self.snd(30, i);
-            // 10% capacity haircut before the ejector (:56507-09) —
-            // the ejector spills everything above the reduced ceiling.
+            // 10% capacity haircut scoped to THIS ejector call
+            // (:56507-09, restored :56513) — it only widens the
+            // collapse spill; the ladder reset below re-derives the
+            // standing cap.
             let cut = 10 * self.ent[i].f136 / 100;
             self.ent[i].f136 -= cut;
             self.castle_eject(i);
+            self.ent[i].f136 += cut;
             // The footprint un-stamp: a fake collapse event over the
             // CURRENT level's build row, run synchronously (sub_28FE0
             // direct call, :56524). The row is the level VERBATIM
@@ -4168,65 +4188,62 @@ impl Gen {
             lvl0
         };
         self.ent[i].f26 = lvl;
+        // Ladder reset at the new level (sub_37150 :56527 + sub_47C60
+        // → sub_47BD0) — INSIDE the `level > 0` guard, so it runs for
+        // the death case too (level 1 → 0), but never for a bare
+        // level-0 flag's death. The castle's own +136 write is
+        // unconditional in the rung (:56567 `a1[34] = cap`), while
+        // the HP arm is row-gated (:56547 `if (hp)`) and ROW 0
+        // CARRIES HP 0 (:56586) — a dying castle re-caps to CAP[0] =
+        // 5000 and keeps its negative life. Corpus: mc1l0 t=2217
+        // castle 107 mana_max 9000 → 5000 with NO life rows.
+        if lvl0 > 0 {
+            self.ent[i].f136 = Self::CASTLE_CAP[(lvl as usize).min(7)];
+            if lvl > 0 {
+                let new_max = Self::CASTLE_HP[(lvl as usize).min(7)];
+                let deficit = (-self.ent[i].act_life).clamp(0, new_max as i32 / 2);
+                self.ent[i].max_life = new_max;
+                self.ent[i].act_life = new_max as i32 - deficit;
+            }
+            let def = self.assets.build_tab[lvl as usize % self.assets.build_tab.len()];
+            {
+                let e = &mut self.ent[i];
+                e.f78 = 0xE000; // sub_37150's z-center marker
+                e.f80 = (((def.w as u16) << 8).wrapping_add(1280)) >> 1;
+                e.f82 = (((def.h as u16) << 8).wrapping_add(1280)) >> 1;
+            }
+        }
         if lvl <= 0 {
-            // Total destruction (:56531-37). The full-bank scatter is
-            // the `castle_death_mana` patch (docs/DEVIATIONS.md):
-            // retail's !level arm frees the castle without ever
-            // calling the ejector, so the residual bank (whatever the
-            // level-1 downgrade eject left, ≤ ~90% of cap) vanishes
-            // with the entity — a shipped-engine mana leak. The
-            // patched arm routes it through the ejector's own level-0
-            // all-stored rule (:56172), conserving the census total.
-            if patches.castle_death_mana {
-                self.ent[i].f136 = 0;
-                self.castle_eject(i);
-            }
-            // The fleet demolition is the `castle_death_balloons`
-            // patch (docs/DEVIATIONS.md): the castle-less fleet quota
-            // is zero, so the patched arm demolishes every owned
-            // balloon through the cull's spill — cargo drops as an
-            // owned ball (sub_27690 shape, nothing for an empty
-            // balloon), conserving the census total. Retail's !level
-            // arm never touches the fleet — the balloons fly at the
-            // freed slot's stale coordinates forever, culled only if
-            // a rebuilt castle's dispatcher re-adopts them. (The
-            // sub_46D20(a1, 0) call in that arm is the spell-16
-            // charge-pin clear on the owner's Create Castle
+            // Total destruction (:56531-37): the owner's castle
+            // binding drops (ours is registry/scan-derived) and the
+            // entity soft-kills — the wrapper tail below still runs
+            // on it this tick, exactly like retail's freed-but-live
+            // record. (The sub_46D20(a1, 0) call in that arm is the
+            // spell-16 charge-pin clear on the owner's Create Castle
             // manifestation slot — wizext +708 — not a balloon
-            // release; an earlier port comment misglossed it.)
-            if patches.castle_death_balloons {
-                for j in 1..self.ent.len() {
-                    if self.ent[j].class64 == 3
-                        && self.ent[j].model65 == 3
-                        && self.ent[j].id24 == own
-                        && self.ent[j].flags & 0x400 == 0
-                    {
-                        self.corpse_drop(j);
-                        self.ent[j].flags |= 0x400;
-                    }
-                }
-            }
+            // release; the world-side death stamp handles the token.)
             self.ent[i].flags |= 0x400;
-            return;
         }
-        // Ladder reset at the new level (sub_47C60 → sub_47BD0): the
-        // overkill deficit carries, capped at half the new max.
-        let new_max = Self::CASTLE_HP[(lvl as usize).min(7)];
-        let deficit = (-self.ent[i].act_life).clamp(0, new_max as i32 / 2);
-        self.ent[i].max_life = new_max;
-        self.ent[i].act_life = new_max as i32 - deficit;
-        self.ent[i].f136 = Self::CASTLE_CAP[(lvl as usize).min(7)];
-        let def = self.assets.build_tab[lvl as usize % self.assets.build_tab.len()];
-        {
-            let e = &mut self.ent[i];
-            e.f78 = 0xE000; // sub_37150's z-center marker
-            e.f80 = (((def.w as u16) << 8).wrapping_add(1280)) >> 1;
-            e.f82 = (((def.h as u16) << 8).wrapping_add(1280)) >> 1;
+        // The state-6 wrapper's tail (sub_470E0 :56147-50) — BOTH
+        // outcomes: the ejector runs AGAIN at the post-teardown
+        // level (death: f26 == 0 → the WHOLE bank scatters through
+        // the all-stored arm, :56189-90; survivor: the spill above
+        // the new cap), then the fleet dispatch re-quotas the
+        // balloons (death: the level-0 quota culls every one, cargo
+        // dropped as an owned ball, :56399-411 — the corpus balloon
+        // flags 1036). Order matters for the castle's LCG stream:
+        // ejector draws (2 per ball + 4 magnet yaws) precede the
+        // dispatch.
+        self.castle_eject(i);
+        self.castle_balloons(i);
+        if lvl > 0 {
+            // 5 ticks, then the repaint re-stamps the smaller castle
+            // (:56158 +48=0/+50=5 → the state-4 countdown →
+            // sub-state 3). A dead castle skips the timer — the
+            // tick-top reap collects it first.
+            self.ent[i].f50 = 5;
+            self.ent[i].f59 = 4;
         }
-        // 5 ticks, then the repaint re-stamps the smaller castle
-        // (:56158 +48=0/+50=5 → the state-4 countdown → sub-state 3).
-        self.ent[i].f50 = 5;
-        self.ent[i].f59 = 4;
     }
 
     /// sub_47130 (:56162): the castle mana EJECTOR. Spill = stored −
@@ -4319,7 +4336,11 @@ impl Gen {
             e.f126 = 256;
             e.f44 = 100;
             e.f26 = 0;
+            // :47689 clears bit 3, :47697 sets bit 0 (the mc1l0
+            // teardown corpus pins the spawn flags at 5 with the
+            // caller's relink bit).
             e.flags &= !8;
+            e.flags |= 1;
             e.id24 = own;
             let d = lcg32(&mut e.rand);
             e.f30 = (d & 0x7FF) as u16;

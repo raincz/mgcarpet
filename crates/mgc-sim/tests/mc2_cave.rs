@@ -465,13 +465,23 @@ fn mc2_cave_behaviors_and_goldens() {
     // conformance import supplies them separately), which is exactly
     // what the layout-independent companion golden below shows by
     // holding.
+    // Re-pinned (ALL FOUR) for the MANA-SPHERE CTOR STAMPS (mc1l0
+    // (10,39) dig): `spawn_mana_ball` now stamps the source pair
+    // 10/39 and the base speed 32 like both retail ctors (MC1
+    // sub_3B5A0 :47456-57/:47463; MC2 CreateManaSphere EF:36614-17
+    // xtype/xsubtype + actSpeed). All three are hashed fields, so
+    // every native sphere — the cave drips included — moves the
+    // stream from its spawn tick. The fields are motion-inert for
+    // MC2 spheres (nothing in TransformArcherToMana reads them), so
+    // this is bookkeeping toward retail's byte image; see the
+    // OBSERVABLE verdict below.
     assert_eq!(
         got,
         vec![
-            0x72fd48f32a649b5au64,
-            0xd9af6f5b96602295,
-            0x2a8d084fdc6aa6ab,
-            0xda01463b0d5eb030,
+            0xd73f49abfb15d3c6u64,
+            0xfe5ebe96a6f529d1,
+            0xc1c0fa09ce5b635e,
+            0x972d86d49b9e681b,
         ],
         "cave goldens moved — re-pin ONLY for an intended fidelity change"
     );
