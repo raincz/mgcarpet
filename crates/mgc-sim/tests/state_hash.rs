@@ -514,8 +514,32 @@ fn level_005_golden_state_hashes() {
         // most affects. Corpus: mc1l0 5,174 -> 5,319 conforming pairs
         // and 4,090 -> 3,344 unexplained field rows; three fixtures
         // promoted. Behavior change toward retail by design.
-        0x256de1a6396c2506, // D: 64 ticks of two-hand fireball combat
-        0xc07f2502d4d49984, // E: 100 aftermath ticks
+        // D/E re-pinned once more for THE MC1 MAILBOX RESIDUE LAW.
+        // MC1 has TWO write protocols, not one: the area writers
+        // (`sub_120B0`/`sub_124F0`/`sub_127E0` :17466-70) accumulate
+        // while a source is pending and overwrite a stale amount, but
+        // `sub_12B50` (:17604-07) — the SINGLE-target writer, with
+        // exactly two callers in the binary, the creature melee thunk
+        // `sub_1AB10` (:21970) and the death field's class-3 arm
+        // (:31296) — does the exact INVERSE. Since every reader clears
+        // the SOURCE and never the amount (:55734 / :21337), MC1 point
+        // damage SNOWBALLS onto the residue of the previous hit. The
+        // port ran the area order everywhere and under-damaged.
+        // Corpus (mc1l0): 3,344 -> 3,340 unexplained field rows,
+        // conforming pairs unchanged at 5,319, mc1l5 t=403 promoted.
+        // Pinned by mc1l0 t=3230, where one 100-damage melee onto a 400
+        // residue costs the player exactly 500 life, and t=3235 where
+        // the 500 it left behind makes the next one cost 600.
+        // ⭐ D/E ONLY, and BOOKKEEPING here, not behavior: OBSERVABLE
+        // holds byte-for-byte below. L005's D/E is FIREBALL combat —
+        // all area writes, which keep the old order — so nothing in
+        // this slice takes different damage; the hash moves only
+        // because the consumer now leaves an amount standing in the
+        // hashed `player_mail` word where it used to memset the block.
+        // The behavioral half of this law is melee, which the corpus
+        // above pins and this slice never exercises.
+        0x0f951b0288b9106a, // D: 64 ticks of two-hand fireball combat
+        0x2e89eff0e117cdbc, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,

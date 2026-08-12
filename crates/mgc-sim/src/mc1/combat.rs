@@ -97,9 +97,19 @@ pub(crate) enum DeflectLaw {
 impl Gen {
     // ---- mailbox writes ---------------------------------------------------
 
-    /// The shared write protocol (:17301-05): accumulate while a
-    /// source is pending, overwrite a stale amount (readers clear the
-    /// source but never the amount).
+    /// The AREA write protocol, open-coded identically at every area
+    /// writer in both games (MC1 `sub_120B0`/`sub_124F0`/`sub_127E0`
+    /// :17466-70 and twins; MC2 `EF:4022-25`; the MC1 at-castle ch0
+    /// redirect :55357-60 too): accumulate while a source is pending,
+    /// overwrite a stale amount.
+    ///
+    /// Readers in both games clear the SOURCE and never the amount
+    /// (:55734 / :21337 / EF:5407), so a consumed mailbox keeps its
+    /// last amount as residue — under this order the next write simply
+    /// overwrites it, and the residue is inert.
+    ///
+    /// ⚠ It is NOT inert under [`Gen::mail_write_single`], MC1's
+    /// point-damage writer, whose branches are the exact INVERSE.
     pub(crate) fn mail_write(&mut self, tgt: MailTarget, ch: usize, amt: u32, src: u16) {
         let m = match tgt {
             MailTarget::Pool(i) => &mut self.ent[i].mail[ch],
@@ -109,6 +119,37 @@ impl Gen {
             m.0 = m.0.wrapping_add(amt);
         } else {
             m.0 = amt;
+        }
+        m.1 = src;
+    }
+
+    /// `sub_12B50` (:17604-07) — MC1's SINGLE-TARGET write, and its
+    /// branches are the INVERSE of the area protocol above: it
+    /// OVERWRITES while a source is still pending and ACCUMULATES onto
+    /// the stale amount once a reader has cleared the source. Because
+    /// readers leave the amount standing, point damage in MC1
+    /// SNOWBALLS: each hit lands on top of the residue of the previous
+    /// one.
+    ///
+    /// Exactly two callers in the whole binary — the creature melee
+    /// thunk `sub_1AB10` (:21970) and the class-3 arm of the proximity
+    /// sweep at :31296. Every other MC1 damage path is an area write.
+    ///
+    /// Measured on mc1l0: one 100-damage melee (`+44`) onto a 400
+    /// residue costs the player 500 life at t=3230, and 600 at t=3235
+    /// on the 500 that left behind — both exact. The other branch is
+    /// pinned by the t=565-570 castle window, where the source stays
+    /// pending across four writes and the amounts record
+    /// 1200/800/1200/400 with no compounding at all.
+    pub(crate) fn mail_write_single(&mut self, tgt: MailTarget, ch: usize, amt: u32, src: u16) {
+        let m = match tgt {
+            MailTarget::Pool(i) => &mut self.ent[i].mail[ch],
+            MailTarget::Player => &mut self.player_mail[ch],
+        };
+        if m.1 != 0 {
+            m.0 = amt;
+        } else {
+            m.0 = m.0.wrapping_add(amt);
         }
         m.1 = src;
     }
@@ -3696,7 +3737,11 @@ impl Gen {
                 }
                 match class {
                     2 | 5 => self.ent[j].act_life = -1,
-                    3 => self.mail_write(MailTarget::Pool(j), 0, amt, own),
+                    // sub_12B50 (:31296) — the field's wizard arm is
+                    // the binary's OTHER single-target write, so the
+                    // 7000 stacks onto a stale amount rather than
+                    // replacing it.
+                    3 => self.mail_write_single(MailTarget::Pool(j), 0, amt, own),
                     9 | 10 => self.ent[i].act_life = 0,
                     _ => {}
                 }

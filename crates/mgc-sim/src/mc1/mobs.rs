@@ -2380,7 +2380,10 @@ impl Gen {
                     } else {
                         MailTarget::Pool(tgt as usize)
                     };
-                    self.mail_write(t, 0, f44 as u32, owner);
+                    // sub_12B50 (:21970) — the INVERTED single-target
+                    // protocol: melee accumulates onto the victim's
+                    // stale amount, so repeated bites snowball.
+                    self.mail_write_single(t, 0, f44 as u32, owner);
                     self.snd(if model == 2 { 13 } else { 7 }, i); // :22294/:22358
                     if model == 2 {
                         // Recoil + cooldown (:22356-62).

@@ -677,7 +677,36 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 &mut csv,
             )?;
         } else {
+            // MGC_KNOCK_TRACE=<t0>:<t1> — the knock PHASE probe. Prints
+            // what the mover consumed this tick vs what the world tick
+            // armed for the next, beside retail's recorded +22/+24.
+            let ktrace = std::env::var("MGC_KNOCK_TRACE").ok().and_then(|v| {
+                let (a, b) = v.split_once(':')?;
+                Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
+            });
+            let pre = world.debug_player_knock();
             step_mc1(&mut world, ch, inp, cmd);
+            if let Some((t0, t1)) = ktrace
+                && pt >= t0
+                && pt <= t1
+            {
+                let post = world.debug_player_knock();
+                let pw = &pst.wizards[pst.local_player as usize];
+                println!(
+                    "KNOCK pair {pt}->{}  port consumed=({},{}) armed=({},{})  \
+                     retail rec@{pt}=({},{}) @{}=({},{})",
+                    tick.t,
+                    pre.0,
+                    pre.1,
+                    post.0,
+                    post.1,
+                    pw.knock_dir,
+                    pw.knock_mag,
+                    tick.t,
+                    cw.knock_dir,
+                    cw.knock_mag
+                );
+            }
             stats.seg().stepped += 1;
             // Grade at the boundary (capture-clean pairs only — a torn
             // snapshot grades nothing, the chain runs on regardless).

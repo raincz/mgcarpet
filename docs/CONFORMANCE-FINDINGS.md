@@ -9456,3 +9456,56 @@ Fixture: `a_projectile_acquires_once_at_the_muzzle_and_a_miss_never_re_acquires`
 nothing anywhere else — measured, before the fireball arm was written. Almost
 the entire +727 is the fireball. Had the dig stopped at the reported symptom it
 would have banked a rounding error and missed the column.
+
+## 🏆 THE MC1 MAILBOX RESIDUE LAW — two write protocols, not one (LANDED 2026-08-12)
+
+**MC1 has TWO damage-mail write protocols and the port ran one
+everywhere.** The area writers (`sub_120B0` / `sub_124F0` / `sub_127E0`,
+:17466-70) accumulate while a source is pending and overwrite a stale
+amount. `sub_12B50` (:17604-07) — the SINGLE-target writer — is the exact
+INVERSE: it OVERWRITES while a source is pending and ACCUMULATES onto the
+stale amount once a reader has cleared the source. MC2's `EF:4022-25` is
+area-order, which is what the port implemented for both games.
+
+`sub_12B50` has **exactly two callers in the binary**: the creature melee
+thunk `sub_1AB10` (:21970, damage = the attacker's `+44`, 3D range < 1024)
+and the death field's class-3 arm (:31296).
+
+Every reader clears the **SOURCE and never the amount** — MC1 player
+:55734, MC1 pool inbox :21337, MC2 player `sub_5EFA0` EF:60725 — and
+**both games leave the source armed on a FATAL hit** (the clear sits past
+the early return; the dead wizard's next pass bails at :55643). So a
+consumed mailbox keeps its last amount as residue, and under `sub_12B50`
+MC1 point damage SNOWBALLS onto the previous hit.
+
+Also landed: the shield writes its QUARTERED value back into +90
+(:55704 / EF:60684), and the port's unconditional 6-channel wipe at the
+end of the player consumer is DELETED — no retail path does it. The only
+full clears are the spawn-grace memset (:55367-71) and the death landing
+(:55485-569).
+⚠ The at-castle ch0 redirect (:55357-60) open-codes the AREA order — it
+must NOT route through the single writer.
+
+**Pinned by mc1l0**: t=3230, one 100-damage vulture melee onto a 400
+residue costs the player exactly **500**; t=3235, the 500 left behind
+makes the next cost **600**. The opposite branch is pinned by t=565-570
+(the castle tanking worm fire via the redirect), where the source stays
+pending across four writes and the amounts record 1200/800/1200/400 with
+**no compounding at all**.
+
+**Receipts**: mc1l0 unexplained field rows 3,344 → **3,340** (life 26→24,
+player.life 3→1 — exactly the four targeted); conforming pairs unchanged
+at 5,319; **mc1l5 t=403 promoted**; 0 regressions across all 9 suites
+(7,829 fixtures). Re-pinned: `state_hash` L005 D/E (⭐ OBSERVABLE HOLDS —
+bookkeeping; L005's D/E is fireball/AREA combat, so nothing there takes
+different damage) and `mc2_slice` E (the residue is INERT for MC2
+behaviour — area order overwrites it — only the hashed `player_mail` word
+moves).
+
+⚠ **A first attempt keyed this per GAME and regressed pool `life` 26 → 331
+rows.** The split is per WRITER, not per game. Read the area writer's
+open-coded branches before touching the shared one.
+
+⭐ **Attribution note**: the corpus win is FOUR rows. The law is right and
+decompile-pinned, but mc1l0 barely exercises melee — mc1l5 gave up a
+fixture, so look for the payoff in takes with real creature contact.

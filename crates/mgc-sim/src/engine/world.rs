@@ -3108,7 +3108,13 @@ impl World {
             if at_castle && self.g.player_mail[0].1 != 0 {
                 if let Some(c) = self.player_castle() {
                     let (amt, src) = self.g.player_mail[0];
+                    // The AREA order — retail inlines the forward at
+                    // :55357-60 with pending→ACCUMULATE, NOT the
+                    // inverted `sub_12B50` protocol.
                     self.g.mail_write(MailTarget::Pool(c), 0, amt, src);
+                    // Retail leaves the player's own mail armed here;
+                    // the grace memset below (:55367-71, armed by the
+                    // `grace = 2` write) is what clears it.
                     self.g.player_mail[0] = (0, 0);
                     self.player.grace = 2;
                 }
@@ -3461,7 +3467,9 @@ impl World {
         // wizards cast it yet; the intake side effects land (regen
         // stall + danger music), the tether itself is the duel track.
         if self.g.player_mail[4].1 != 0 {
-            self.g.player_mail[4] = (0, 0);
+            // Source only (:55677) — the AMOUNT is left standing as the
+            // residue the next write accumulates onto (`Gen::mail_write`).
+            self.g.player_mail[4].1 = 0;
             self.player.regen_delay = 16;
             self.g.player_danger = 100;
             // "You are being attacked" flash (+392=4, :55679) — the
@@ -3472,7 +3480,7 @@ impl World {
         // thief would bank it (mob feeders aren't wizards).
         if self.g.player_mail[3].1 != 0 {
             let amt = self.g.player_mail[3].0;
-            self.g.player_mail[3] = (0, 0);
+            self.g.player_mail[3].1 = 0; // source only (:55696)
             self.player.mana = self.player.mana.saturating_sub(amt);
             self.player.regen_delay = 16;
             self.g.player_danger = 100;
@@ -3481,7 +3489,6 @@ impl World {
         // ch0 physical (:55698-735).
         if self.g.player_mail[0].1 != 0 {
             let (mut amt, src) = self.g.player_mail[0];
-            self.g.player_mail[0] = (0, 0);
             // Shield (:55700-07): quarter the damage, and the
             // quarter is ALSO paid from mana. (The original clears
             // the +17 0x40 flag per absorb; the manifestation
@@ -3490,6 +3497,10 @@ impl World {
             if self.player.shield {
                 amt /= 4;
                 self.player.mana = self.player.mana.saturating_sub(amt);
+                // :55704 writes the QUARTERED value back into +90, so
+                // the shield shrinks the residue too — the next hit
+                // accumulates onto the absorbed amount, not the raw one.
+                self.g.player_mail[0].0 = amt;
             }
             self.g.player_damage += amt as u64;
             self.player.life -= amt as i32;
@@ -3526,20 +3537,27 @@ impl World {
             };
             self.g.snd_player(hit);
             if self.player.life < 0 {
-                // Fatal (:55729): latch the killer; the state flip
-                // + death sound are the wizard tick's death check
-                // (:55424-29), same turn.
+                // Fatal (:55729-31): latch the killer and RETURN with
+                // the source still armed — retail's clear at :55734 is
+                // past the early return, and the dead wizard's next
+                // pass bails at :55643 (`actLife < 0`) before reaching
+                // it. The death landing's memset is what finally wipes
+                // the block. The state flip + death sound are the
+                // wizard tick's death check (:55424-29), same turn.
                 self.player.killer = src;
                 self.player.state = LifeState::Falling;
                 self.player.fall_speed = 0;
                 self.g.snd_player(16);
                 return;
             }
+            self.g.player_mail[0].1 = 0; // source only (:55734)
             self.g.player_danger = 100;
         }
         // ch1/ch2/ch5 have no player consumers (mask 29 filters most
-        // writers already); drop anything stale.
-        self.g.player_mail = [(0, 0); 6];
+        // writers already). Retail leaves them standing — there is NO
+        // trailing wipe in sub_46540; the only full clears are the
+        // spawn-grace memset (:55367-71) and the death landing
+        // (:55485-569).
     }
 
     /// The death landing (:55485-569): wipe the mailbox, scatter the
@@ -9518,6 +9536,15 @@ impl World {
     /// :52433-37).
     pub fn knock_magnitude(&self) -> i16 {
         self.g.player_knock.1
+    }
+
+    /// The live `(direction, magnitude)` knock pair — the conformance
+    /// runner's phase probe against the recorded `+22`/`+24` column
+    /// (retail arms it in `sub_46540` and CONSUMES it in `sub_455D0`
+    /// the same tick, :55365-80; the port arms it inside `World::tick`
+    /// and consumes it in the NEXT mover step).
+    pub fn debug_player_knock(&self) -> (u16, i16) {
+        self.g.player_knock
     }
 
     /// Ground height in ENGINE units at an 8.8 position (the faithful

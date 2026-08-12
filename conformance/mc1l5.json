@@ -107,11 +107,7 @@
     },
     {
       "t": 403,
-      "status": "open",
-      "sig": "253df07af8038765",
-      "atoms": [
-        "field:3,3:life"
-      ],
+      "status": "conforming",
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
     {

@@ -594,7 +594,19 @@ fn mc2_slice_behaviors_and_goldens() {
         // EF:3750; corpus pins: mc1l0 t=91 tent claim, mc2l0 t=7257
         // fixture conforming): an edge-tile victim in the provocation
         // window now gets its mail on retail's tick.
-        0x1983685c164e2cb2, // E: census + villager/archer provocation
+        // E re-pinned again for the MAILBOX RESIDUE LAW: the player
+        // damage consumer now clears the SOURCE only and leaves the
+        // amount standing, exactly like the pool inbox already did
+        // (MC1 :55734, MC2 `sub_5EFA0` EF:60725 — and BOTH leave it
+        // armed on a fatal hit), plus the shield writes its quartered
+        // value back (:55704 / EF:60684). The old code memset the
+        // whole 6-channel block every tick, which no retail path does.
+        // ⭐ E ONLY, and the residue is INERT for MC2 behaviour — MC2's
+        // writers are all area-order, so the next write overwrites the
+        // stale amount regardless; only the hashed `player_mail` word
+        // moves. (It is NOT inert in MC1, which is the whole point:
+        // `mail_write_single` accumulates onto it.)
+        0x41ea338e30462fb4, // E: census + villager/archer provocation
     ];
     assert_eq!(
         got, GOLDEN,
