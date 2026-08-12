@@ -9365,3 +9365,94 @@ sparse suites — and it mattered twice. The suites credited the ch0 fix with th
 one mc1l0 fixture but hid its whole-take +3; and they reported the probe lane as
 "1 regression" when the whole take says +9. Conversely the whole take is what
 proved the `.max(1)` removal inert. **Sparse fixtures rank; whole takes decide.**
+
+# THE ONE-SHOT ACQUISITION LATCH (2026-08-12) — ✅ LANDED, AND IT IS THE WHOLE PROJECTILE COLUMN
+
+Opened as a narrow player-report verification — "MC1's meteor curves oddly; is
+that retail, and does it depend on awake range?" — and the verification found a
+defect four flight functions wide.
+
+## THE VERDICT ON THE REPORT (both halves)
+**The long curve is FAITHFUL.** `sub_52550_52890` (:62534) is the post-lock
+tracker and it runs every tick the bolt has a target: recompute the bearing to
+the target's LIVE position, turn yaw and pitch toward it at the behaviour row's
+rates. **No range cap, no lifetime cutoff, no line-of-sight test, no
+re-validation of anything.** MC1's meteor is speed 384 / life 21 ≈ 31 tiles of
+flight, so most of that arc historically happened past the fog veil — which is
+exactly why it reads as wrong now.
+
+**It is NOT independent of awake — but awake is sampled ONCE.** The acquire
+switch `sub_54520` case 0/3/4 (:63979) scans two lists: the creature buckets,
+where a candidate must have the awake counter `+58` nonzero (:63996), and the
+wizard/castle list, gated instead on a distance from the caster's own row value
+(`+156 → +28`) plus the not-cloaked bit. Awake decides WHICH CREATURE MAY BE
+PICKED, at one instant. It does not gate the homing: once locked, the bolt
+tracks its victim for the rest of the flight however far it goes, asleep or not.
+
+## THE DEFECT — RETAIL COMMITS AT THE MUZZLE, WE HUNTED FOR THE WHOLE FLIGHT
+Both flight prologues wrap the acquire in a ONE-SHOT LATCH on flags bit 2, set
+win or lose:
+
+```
+if (no target) {
+    if ((+16 & 2) == 0) {
+        +16 |= 2;
+        if (sub_54520(self)) { commit the heading to the pick }   // HIT
+        else                 { +34 = +30; +36 = +32; }            // MISS
+    }
+} else  sub_52550(self, target);                                  // the tracker
+```
+
+`sub_52770` :62640-60 (generic) and `sub_52B30` :62811-15 (fireball) — identical
+shape. The commit differs: the generic path SNAPS (`+30 = +34; +32 = +36`), the
+fireball turns yaw by AT MOST 34 toward the pick and takes pitch outright
+(:62817-24). Note the tracker is the **else** arm: the tick that acquires
+commits and stops, easing starts the tick after.
+
+The port re-ran the scan EVERY untargeted tick and never committed. Consequences,
+all matching the report: a bolt that missed its cone at launch kept hunting for
+its whole life and bent onto anything that wandered in; a creature that merely
+WOKE UP mid-flight became targetable mid-flight; and without the commit the first
+turn was a long lazy ease from the launch heading instead of a re-point. (Also:
+`home()` clears `f146` on target death, so with no latch a bereaved bolt
+immediately re-acquired — retail's tracker has no liveness check and cannot.)
+
+## ⚠ ROOT CAUSE — THE SAME LESSON, THIRD TIME
+Retail's `sub_52770` is ONE function; the port split it across
+`proj_generic_tick`, `proj_firewall_tick` and `proj_payload_tick`. The latch got
+ported into the `proj_firewall_tick` half ALONE, where a comment asserted it was
+Hidden Worlds' own — **it is not, it is in base remc1 at :62640**. Only the SCAN
+is HW's (base MC1's `sub_54520` has no case 16, so the bolt takes the miss arm,
+which still sets the bit and still mirrors). **The port's function boundaries are
+not retail's** — cf. the `mc2_castle_extents_ent` refutation and the building
+degradation link.
+
+## FIXED IN FOUR PLACES (one law each)
+- `proj_generic_tick` — m3 meteor, m14 boulder (restructured to retail's literal
+  if/else so the acquire tick cannot also ease).
+- `proj_m0_tick` — **the fireball**, and this is where the corpus payoff is.
+- `proj_payload_tick` — m4 volcano, m7 duel, m11; m2/m5/m17 take the miss arm.
+- `proj_firewall_tick` — latch un-gated from HW, scan left HW-only.
+Already correct and untouched: the possess lob (:62952-60), the m9 beam, the
+castle ball.
+
+## MEASURED — THE LARGEST CORPUS MOVE OF THE SESSION
+| take | conforming pairs | unexplained field rows |
+|---|---|---|
+| mc1l0 | 5,174 → **5,319** (+145) | 4,090 → **3,344** (−746) |
+| mc1l32 | 3,635 → **4,122** (+487) | 1,885,831 → **1,879,802** (−6,029) |
+| mc1l5 | 1,449 → **1,455** (+6) | 215,043 → **210,226** (−4,817) |
+| mc1hwl0 | 10,500 → **10,589** (+89) | 197,763 → **196,011** (−1,752) |
+
+**+727 conforming pairs, −13,344 unexplained rows.** 10/10 suites, 0
+regressions; three fixtures FIXED and promoted (mc1l0 t=2696, mc1l32-bee-height
+t=981 and t=1392). 723 tests, fmt + clippy clean. `state_hash` level-005 D/E
+re-pinned with OBSERVABLE — correct, D is literally "64 ticks of two-hand
+fireball combat". MC2 untouched (its projectile column is its own).
+Fixture: `a_projectile_acquires_once_at_the_muzzle_and_a_miss_never_re_acquires`
+(both halves; non-vacuity checked by disabling the fireball latch in place).
+
+⭐ Attribution note: the meteor arm ALONE was worth −30 rows on mc1l32 and
+nothing anywhere else — measured, before the fireball arm was written. Almost
+the entire +727 is the fireball. Had the dig stopped at the reported symptom it
+would have banked a rounding error and missed the column.

@@ -20579,6 +20579,112 @@ mod tests {
         }
     }
 
+    /// **A PROJECTILE ACQUIRES ITS VICTIM EXACTLY ONCE, AT THE MUZZLE
+    /// — AND A MISS FLIES STRAIGHT FOREVER.**
+    /// Both flight prologues wrap the acquire in a one-shot latch on
+    /// flags bit 2, set win or lose: `sub_52770` :62640-60 (the m3
+    /// meteor, the m4/m7/m11 payloads, the m14 boulder, the m16 wall)
+    /// and `sub_52B30` :62811-15 (the m0 fireball). A HIT commits the
+    /// live heading to the pick — an outright snap on the generic
+    /// path, a ≤34 yaw step on the fireball's — and only then does the
+    /// per-tick tracker `sub_52550` take over. A MISS mirrors the live
+    /// heading into the aim fields and never scans again.
+    ///
+    /// The port re-ran the scan every untargeted tick, so a bolt that
+    /// missed its cone at launch kept hunting for its whole life and
+    /// bent onto anything that wandered in — including a creature that
+    /// merely WOKE UP mid-flight, the acquire's creature buckets being
+    /// gated on the awake counter `+58` (:63996), which retail samples
+    /// once. Player-reported as meteors curving oddly; the long curve
+    /// itself is faithful ([`Gen::home`] tracks the target's live
+    /// position with no range, lifetime or line-of-sight bound), but
+    /// retail picks its victim at the muzzle and keeps it.
+    #[test]
+    fn a_projectile_acquires_once_at_the_muzzle_and_a_miss_never_re_acquires() {
+        use crate::mc1::mobs::{MobCtx, PLAYER_TARGET};
+        let ctx = MobCtx {
+            px: 0,
+            py: 0,
+            pz: 0,
+            pyaw: 0,
+            pmana: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        // A wyvern dead ahead of the muzzle, awake and wild.
+        let victim_at = |w: &mut World, ground: i16| -> usize {
+            let (vx, vy) = (100u16 << 8, 108u16 << 8);
+            let v = w.g.spawn_creature(16, vx, vy, ground).expect("victim");
+            let e = &mut w.g.ent[v];
+            e.id24 = 0;
+            e.f58 = 100; // awake — the acquire's creature gate
+            v
+        };
+        // Fire due north from (100,100) with the victim eight tiles up
+        // the flight line, so the cone test is not what decides this.
+        let launch = |w: &mut World| -> (usize, i16) {
+            let (bx, by) = (100u16 << 8, 100u16 << 8);
+            let ground = w.g.ground_z(bx, by) as i16;
+            let b = w.g.spawn_fireball(bx, by, ground + 512).expect("bolt");
+            w.g.arm_projectile(
+                b,
+                PLAYER_TARGET,
+                0xFF,
+                0xFF,
+                0,
+                bx,
+                108 << 8,
+                ground + 512,
+                100,
+                0,
+            );
+            (b, ground)
+        };
+
+        // (a) THE LATCH. Launch into an EMPTY cone: the bolt spends its
+        // one acquire, sets the bit and mirrors the heading. Then put a
+        // perfectly good victim right on the flight line — retail can
+        // no longer see it.
+        let mut w = flat_world();
+        let (b, ground) = launch(&mut w);
+        w.g.proj_tick(b, &ctx);
+        assert_eq!(w.g.ent[b].f146, 0, "nothing to acquire on the first tick");
+        assert_ne!(
+            w.g.ent[b].flags & 2,
+            0,
+            "the acquire latch is spent even on a miss"
+        );
+        assert_eq!(
+            w.g.ent[b].f34, w.g.ent[b].f30,
+            "the miss arm mirrors the live heading into the aim fields"
+        );
+        let v = victim_at(&mut w, ground);
+        for _ in 0..6 {
+            w.g.proj_tick(b, &ctx);
+        }
+        assert_eq!(
+            w.g.ent[b].f146, 0,
+            "a bolt that missed its cone at the muzzle NEVER re-acquires"
+        );
+
+        // (b) NON-VACUITY: the very same victim, present at launch, IS
+        // acquired on the first tick — so (a) is the latch talking and
+        // not an unreachable target.
+        let mut w = flat_world();
+        let (bx, by) = (100u16 << 8, 100u16 << 8);
+        let ground = w.g.ground_z(bx, by) as i16;
+        let v2 = victim_at(&mut w, ground);
+        let (b2, _) = launch(&mut w);
+        w.g.proj_tick(b2, &ctx);
+        assert_eq!(
+            w.g.ent[b2].f146, v2 as u16,
+            "present at the muzzle, the victim is acquired on tick one"
+        );
+        let _ = v;
+    }
+
     fn one_rival_world(start_spell: usize) -> World {
         use crate::mc2::rivals::Mc2RivalConfig;
         let mut w = mc2_flat_world();

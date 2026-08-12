@@ -504,8 +504,18 @@ fn level_005_golden_state_hashes() {
         // 4,163 -> 4,090 unexplained field rows, fixture t=4177
         // (`field:5,3:life`) promoted. Behavior change toward retail
         // by design. A-C hold — no ch0 area write lands in them.
-        0x619a5f02a8edd46b, // D: 64 ticks of two-hand fireball combat
-        0x8b5bbe3b1fd37e1b, // E: 100 aftermath ticks
+        // D/E re-pinned once more for THE ONE-SHOT ACQUISITION LATCH:
+        // retail attempts target acquisition EXACTLY ONCE per
+        // projectile, latched on flags bit 2 and set win or lose
+        // (`sub_52770` :62640-60, `sub_52B30` :62811-15), snapping the
+        // live heading onto the pick — where the port re-scanned every
+        // untargeted tick and never committed. D is literally "64 ticks
+        // of two-hand FIREBALL combat", so it is the checkpoint this
+        // most affects. Corpus: mc1l0 5,174 -> 5,319 conforming pairs
+        // and 4,090 -> 3,344 unexplained field rows; three fixtures
+        // promoted. Behavior change toward retail by design.
+        0x256de1a6396c2506, // D: 64 ticks of two-hand fireball combat
+        0xc07f2502d4d49984, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,
@@ -620,8 +630,14 @@ fn level_005_golden_state_hashes() {
         // bees an explosion's ch0 mail reaches is exactly what the
         // window decides. Post-init..C hold, which is the evidence
         // that the shift is confined to the ch0 damage windows.
-        0x28d75fabaf40029f, // D
-        0x6b1ecf73a7b0962a, // E
+        // D/E re-pinned with the ONE-SHOT ACQUISITION LATCH (see the
+        // GOLDEN note). OBSERVABLE moving here is again the CORRECT
+        // signal: fireballs that used to hunt for their whole flight
+        // now commit at the muzzle, so trajectories, impacts and the
+        // populations that survive the D window genuinely differ.
+        // Post-init..C hold — nothing is fired before D.
+        0x6f684bbed7b924e2, // D
+        0x6f7b523b8d2b5685, // E
     ];
     assert_eq!(
         obs, OBSERVABLE,

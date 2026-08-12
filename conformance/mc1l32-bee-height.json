@@ -455,11 +455,7 @@
     },
     {
       "t": 981,
-      "status": "open",
-      "sig": "21adf41ed5f4ae31",
-      "atoms": [
-        "field:9,0:flags"
-      ],
+      "status": "conforming",
       "note": "bee z-law FIXED; residual: (9,0) flags"
     },
     {
@@ -487,11 +483,7 @@
     },
     {
       "t": 1392,
-      "status": "open",
-      "sig": "21adf41ed5f4ae31",
-      "atoms": [
-        "field:9,0:flags"
-      ],
+      "status": "conforming",
       "note": "(9,0) flags lane"
     },
     {

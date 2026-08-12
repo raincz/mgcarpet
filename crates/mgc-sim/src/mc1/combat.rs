@@ -1314,20 +1314,34 @@ impl Gen {
 
     /// sub_52B30 (:62779): the fireball. Returns terrain_dirty.
     fn proj_m0_tick(&mut self, i: usize, ctx: &MobCtx) -> bool {
-        // Steering: while untargeted the acquire scan re-runs EVERY
-        // tick (:62815 — +146 invalid → sub_54520; model 0 is an
-        // acquire case), so a bolt launched wide SNAPS mid-flight
-        // the moment a victim enters the ±0x71 cone. Then a ≤34/tick
-        // yaw ease; homing once a target exists.
+        // ⭐ ONE-SHOT ACQUISITION, exactly as in `sub_52770`'s
+        // prologue — `sub_52B30` carries the SAME latch (:62811-15):
+        // untargeted and `(+16 & 2) == 0` → set the bit, scan once
+        // (model 0 is an acquire case), and on a HIT turn yaw by AT
+        // MOST 34 toward the pick with pitch taken outright
+        // (`+32 = +36`, :62817-24); on a MISS mirror the live heading
+        // into the aim fields and never scan again.
+        //
+        // The port re-ran the scan EVERY untargeted tick and applied
+        // the 34-step every tick with it, so a fireball launched wide
+        // kept hunting for its whole life and bent onto anything that
+        // wandered into the ±0x71 cone. Retail commits at the muzzle:
+        // miss the cone at launch and the shot flies straight. This is
+        // the same law as the meteor's, and the fireball is where it
+        // is felt — it is the most-cast spell in the game.
         if self.ent[i].f146 == 0 {
-            self.aim_assist(i, ctx);
-            if self.ent[i].f146 == 0 {
-                self.ent[i].f34 = self.ent[i].f30;
-                self.ent[i].f36 = self.ent[i].f32;
+            if self.ent[i].flags & 2 == 0 {
+                self.ent[i].flags |= 2;
+                self.aim_assist(i, ctx);
+                if self.ent[i].f146 != 0 {
+                    let t = Self::turn_step(self.ent[i].f30, self.ent[i].f34, 34);
+                    self.ent[i].f30 = (self.ent[i].f30 as i32 + t as i32) as u16 & 0x7FF;
+                    self.ent[i].f32 = self.ent[i].f36;
+                } else {
+                    self.ent[i].f34 = self.ent[i].f30;
+                    self.ent[i].f36 = self.ent[i].f32;
+                }
             }
-            let t = Self::turn_step(self.ent[i].f30, self.ent[i].f34, 34);
-            self.ent[i].f30 = (self.ent[i].f30 as i32 + t as i32) as u16 & 0x7FF;
-            self.ent[i].f32 = self.ent[i].f36;
         } else {
             self.home(i, ctx);
         }
@@ -1702,14 +1716,27 @@ impl Gen {
         // hit SNAPS the live heading to the pick (f30/f32 = f34/f36,
         // :58742-43). Only the post-lock tracker eases (sub_52550,
         // :58754 = home()). Same idiom as the m9 beam (proj_m9_tick).
-        // The latch stays inside the HW gate so the shared MC1 path
-        // never writes flags bit 2.
-        if self.is_hidden_worlds() && self.ent[i].f146 == 0 && self.ent[i].flags & 2 == 0 {
+        //
+        // ⚠ THE LATCH ITSELF IS NOT HW's — it is the shared
+        // `sub_52770` prologue (:62640-60, and see
+        // [`Gen::proj_generic_tick`], which is the other half of the
+        // same retail function). Only the SCAN is Hidden Worlds':
+        // base MC1's `sub_54520` has no case 16, so it returns 0 and
+        // the bolt takes the MISS arm — which still sets the bit and
+        // still mirrors the live heading into the aim fields. An
+        // earlier note here claimed the shared MC1 path never writes
+        // flags bit 2; that was our seam talking, not retail's.
+        if self.ent[i].f146 == 0 && self.ent[i].flags & 2 == 0 {
             self.ent[i].flags |= 2;
-            self.aim_assist_mc1_cone(i, ctx, 0x100, 0x71);
+            if self.is_hidden_worlds() {
+                self.aim_assist_mc1_cone(i, ctx, 0x100, 0x71);
+            }
             if self.ent[i].f146 != 0 {
                 self.ent[i].f30 = self.ent[i].f34;
                 self.ent[i].f32 = self.ent[i].f36;
+            } else {
+                self.ent[i].f34 = self.ent[i].f30;
+                self.ent[i].f36 = self.ent[i].f32;
             }
         }
         if self.ent[i].f146 != 0 {
@@ -1968,17 +1995,67 @@ impl Gen {
     fn proj_generic_tick(&mut self, i: usize, ctx: &MobCtx, fire_trail: bool) -> bool {
         let e = &mut self.ent[i];
         e.f126 += (e.f128 - e.f126).clamp(-2, 2);
-        // The generic flight re-acquires while untargeted (:62652 →
-        // sub_54520); the meteor's m3 is an acquire case (block
-        // 0/3/4 :63979) — the retail meteor SNAPS to a bee in the
-        // cone and the blast ring does the cluster. The boulder's
-        // m14 is sub_54520's `default: return 0` (:64185): it never
-        // acquires, so an untargeted (or bereaved) boulder flies
-        // straight.
-        if self.ent[i].f146 == 0 && matches!(self.ent[i].model65, 0 | 3 | 4) {
-            self.aim_assist(i, ctx);
-        }
-        if self.ent[i].f146 != 0 {
+        // ⭐ ACQUISITION IS ONE-SHOT, AND IT SNAPS. `sub_52770` opens
+        // by testing the target slot (+146): with a target it goes
+        // straight to the tracker, and WITHOUT one it runs the acquire
+        // exactly once, latched on flags bit 2 and set win or lose
+        // (:62640-60):
+        //
+        //   if ((flags & 2) == 0) {
+        //       flags |= 2;
+        //       if (sub_54520(self)) { +30 = +34; +32 = +36; }   // SNAP
+        //       else                 { +34 = +30; +36 = +32; }   // mirror
+        //   }
+        //
+        // A hit SNAPS the live heading onto the pick and only then
+        // hands over to the per-tick tracker; a MISS mirrors the live
+        // heading into the aim fields and the bolt flies straight for
+        // the rest of its life, never scanning again. The `else`
+        // mirror also runs for the models `sub_54520` declines —
+        // m14's `default: return 0` (:64185) — which is why the
+        // acquire CALL is unconditional here and only the scan is
+        // model-gated.
+        //
+        // The port used to re-scan EVERY tick while untargeted and
+        // never snap, which let a meteor lock onto something that
+        // drifted into its cone long after launch (or onto a creature
+        // that merely WOKE UP mid-flight — the creature buckets are
+        // gated on the awake counter +58, :63996, and retail samples
+        // that gate once, at launch), and then ease onto it in a long
+        // lazy curve instead of re-pointing. Player-reported as
+        // meteors "curving weirdly"; the LONG curve itself is
+        // faithful — `sub_52550` tracks the target's live position
+        // every tick with no range, lifetime or line-of-sight bound
+        // ([`Gen::home`]) — but retail commits to its victim at the
+        // muzzle.
+        //
+        // ⚠ ROOT CAUSE, and the same shape as the castle-extents and
+        // building-degradation misses: retail's `sub_52770` is ONE
+        // function that the port split in two, and the latch was
+        // ported into the `proj_firewall_tick` half only, where a
+        // comment claimed it was Hidden Worlds' — it is not, it is
+        // right here in base remc1. **The port's function boundaries
+        // are not retail's.**
+        if self.ent[i].f146 == 0 {
+            if self.ent[i].flags & 2 == 0 {
+                self.ent[i].flags |= 2;
+                // The acquire switch's live cases (:63979 block 0/3/4)
+                // — the retail meteor SNAPS to a bee in the cone and
+                // the blast ring does the cluster.
+                if matches!(self.ent[i].model65, 0 | 3 | 4) {
+                    self.aim_assist(i, ctx);
+                }
+                if self.ent[i].f146 != 0 {
+                    self.ent[i].f30 = self.ent[i].f34;
+                    self.ent[i].f32 = self.ent[i].f36;
+                } else {
+                    self.ent[i].f34 = self.ent[i].f30;
+                    self.ent[i].f36 = self.ent[i].f32;
+                }
+            }
+        } else {
+            // The tracker is the ELSE arm: the tick that acquires
+            // snaps and stops there, and easing starts the tick after.
             self.home(i, ctx);
         }
         if fire_trail {
@@ -2280,18 +2357,32 @@ impl Gen {
     /// damage on ch0 and the per-model payload fires.
     fn proj_payload_tick(&mut self, i: usize, ctx: &MobCtx) -> bool {
         // These states run the engine's generic homing flight
-        // (sub_52770): re-acquire while untargeted per the sub_54520
-        // subtype switch — m4 (volcano) sits in the 0/3/4 creature
-        // block; m7/m11 acquire only wizards (block 7/8/B/C — a no-op
-        // until AI wizards land); m2/m5/m17 are default: no acquire.
-        // All of them home once +146 holds a target.
-        if self.ent[i].model65 == 4 && self.ent[i].f146 == 0 {
-            self.aim_assist(i, ctx);
-        }
-        if matches!(self.ent[i].model65, 7 | 11) && self.ent[i].f146 == 0 {
-            self.aim_assist_wizards(i, ctx);
-        }
-        if self.ent[i].f146 != 0 {
+        // (sub_52770), so they carry ITS one-shot prologue too
+        // (:62640-60, see [`Gen::proj_generic_tick`]): the acquire is
+        // attempted ONCE, latched on flags bit 2, and a hit SNAPS the
+        // live heading onto the pick. The sub_54520 subtype switch
+        // then picks the candidate set — m4 (volcano) sits in the
+        // 0/3/4 creature block; m7/m11 acquire only wizards (block
+        // 7/8/B/C — a no-op until AI wizards land); m2/m5/m17 are
+        // `default:` and never acquire, taking the miss arm's mirror.
+        // Homing runs from the tick after, once +146 holds a target.
+        if self.ent[i].f146 == 0 {
+            if self.ent[i].flags & 2 == 0 {
+                self.ent[i].flags |= 2;
+                match self.ent[i].model65 {
+                    4 => self.aim_assist(i, ctx),
+                    7 | 11 => self.aim_assist_wizards(i, ctx),
+                    _ => {}
+                }
+                if self.ent[i].f146 != 0 {
+                    self.ent[i].f30 = self.ent[i].f34;
+                    self.ent[i].f32 = self.ent[i].f36;
+                } else {
+                    self.ent[i].f34 = self.ent[i].f30;
+                    self.ent[i].f36 = self.ent[i].f32;
+                }
+            }
+        } else {
             self.home(i, ctx);
         }
         let mut tmp = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
