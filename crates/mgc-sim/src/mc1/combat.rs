@@ -10,11 +10,10 @@
 //!   (deliberate: suspect transcription swap, like :21814).
 //! - The m9 ranged thunk aims at the TARGET, not the atan2(0,0)
 //!   self-aim (:21947-48) (deliberate: decompile casualty).
-//! - Aim assist scores candidates by angular miss (Δyaw² + Δpitch²)
-//!   with a distance tiebreak (deliberate approximation of sub_54A90's
-//!   squared-miss-distance metric; exact port OPEN for the CREATURE
-//!   cones — the possess acquisition runs the exact metric, see
-//!   `aim_assist_possess_mc1`).
+//! - (RETIRED) Aim assist now runs sub_54A90's exact distance-weighted
+//!   score, 2-D range and v_28 class-3 pre-gate in every acquire
+//!   subtype (see `Gen::acquire_score`); the Δyaw² + Δpitch²
+//!   approximation is gone.
 //! - The m9 lightning BEAM (sub_535E0 :63272) is a full port (one-tick
 //!   hitscan walk + state-14 segment chain, confirmed vs remc2
 //!   sub_66750); the explosion's +146 stamps hit-or-0 where the
@@ -55,11 +54,11 @@ pub(crate) const PLAYER_HH: i32 = (SPRITE_STATS[44].height / 2) as i32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum AimPreviewSet {
     /// Blocks 0/3/4 + the beam's one-shot snap: awake creatures +
-    /// rival wizards (fireball, meteor, volcano, lightning).
+    /// the class-3 list (fireball, meteor, volcano, lightning).
     Creatures,
     /// Block 1: unowned mana balls + houses (possess).
     Possess,
-    /// Blocks 7/8/B/C: rival wizards only (duel, steal, undead).
+    /// Blocks 7/8/B/C: the class-3 list alone (duel, steal, undead).
     Wizards,
 }
 
@@ -638,6 +637,41 @@ impl Gen {
         Self::angle_of(fz.wrapping_sub(tz), (-(dh.clamp(0, 0x7FFF))) as i16)
     }
 
+    /// The acquire score, sub_54A90 :64212-17 (its castle twin
+    /// sub_54BD0 :64261 is term-for-term identical): the 2-D ground
+    /// distance decomposed onto the angular-error axes. The 16.16 cos
+    /// terms come down `>>16`, the sin terms `>>14` through an i16
+    /// truncation — a unit of angular miss costs ~4x its on-axis
+    /// projection (16x squared), but DISTANCE multiplies everything:
+    /// between two candidates inside the cone, the closer one wins
+    /// unless the farther is much straighter ahead. Lower is better;
+    /// the caller's compare is unsigned strictly-less (retail seeds
+    /// best = -1 and rejects with -1, both = u32::MAX; the port
+    /// gates cone/range before scoring instead).
+    fn acquire_score(dist: i32, dy: usize, dp: usize) -> u32 {
+        use crate::mc1::tables::{COS, SIN};
+        let v8 = dist * COS[dy];
+        let v9 = dist * SIN[dy];
+        let v10 = dist * COS[dp];
+        let v11 = ((SIN[dp] * dist) >> 14) as i16 as i32;
+        ((v10 >> 16) * (v10 >> 16)
+            + (v8 >> 16) * (v8 >> 16)
+            + ((v9 >> 14) as i16 as i32) * ((v9 >> 14) as i16 as i32)
+            + v11 * v11) as u32
+    }
+
+    /// The 3-D point distance (sub_42340 :52721): wrapping i16
+    /// deltas, i32 wrapping square-sum, Newton isqrt — the acquire's
+    /// class-3 pre-gate metric, measured at the nodes' RAW positions
+    /// (+72, no aim lift).
+    fn dist3d(ax: u16, ay: u16, az: i16, bx: u16, by: u16, bz: i16) -> i32 {
+        let dx = (bx as i16).wrapping_sub(ax as i16) as i32;
+        let dy = (by as i16).wrapping_sub(ay as i16) as i32;
+        let dz = bz.wrapping_sub(az) as i32;
+        let sum = (dx * dx).wrapping_add(dy * dy).wrapping_add(dz * dz);
+        Self::isqrt(sum as u32) as i32
+    }
+
     /// Aim a fresh projectile from an attacker at a target point
     /// (sub_42150/42180 pair) and stamp the combat fields the thunks
     /// share: owner, filter, homing target, damage, explosion.
@@ -699,9 +733,11 @@ impl Gen {
         matches!(self.verbs.targeting, TargetingVerb::Mc1Hw)
     }
 
-    /// One-time target acquisition sub_54520 (:63943): nearest awake
-    /// creature (any range) or wizard within the caster row's v_28,
-    /// inside a ±0x71 yaw AND pitch cone, 3D distance ≤ 5120.
+    /// One-time target acquisition sub_54520 (:63943): the class-3
+    /// significant list (within the OWNER row's v_28) and the awake
+    /// creature buckets, inside a ±0x71 yaw AND pitch cone within
+    /// 2-D ground distance 5120, best by sub_54A90's
+    /// distance-weighted score ([`Self::acquire_score`]).
     ///
     /// **THE LIGHTNING BEAM (model 9) IS ITS OWN CASE.** `sub_54520`
     /// switches on `+65`, and case 9 (:64125, remc1hw :60256 —
@@ -724,7 +760,7 @@ impl Gen {
         } else {
             0x71
         };
-        self.aim_assist_mc1_cone2(i, ctx, 0x71, 0x71, creature_pitch);
+        self.aim_assist_mc1_cone2(i, ctx, 0x71, 0x71, Some(creature_pitch));
     }
 
     /// [`Self::aim_assist_mc1`] with an explicit acquire cone. The base
@@ -735,94 +771,91 @@ impl Gen {
     /// we reuse the shared creature+wizard+player candidate set (the
     /// meaningful enemy set), only widening the cone.
     fn aim_assist_mc1_cone(&mut self, i: usize, ctx: &MobCtx, yaw_cone: u32, pitch_cone: u32) {
-        self.aim_assist_mc1_cone2(i, ctx, yaw_cone, pitch_cone, pitch_cone);
+        self.aim_assist_mc1_cone2(i, ctx, yaw_cone, pitch_cone, Some(pitch_cone));
     }
 
     /// [`Self::aim_assist_mc1_cone`] with the CREATURE-bucket pitch cone
     /// split out: `sub_54520` case 9 (the lightning beam) is the one
     /// subtype that scores creatures on a different cone than the
-    /// wizard/castle list.
+    /// wizard/castle list. `creature_pitch: None` is the
+    /// significant-list-only shape (blocks 7/8/B/C) — no creature
+    /// sweep at all.
     fn aim_assist_mc1_cone2(
         &mut self,
         i: usize,
         ctx: &MobCtx,
         yaw_cone: u32,
         pitch_cone: u32,
-        creature_pitch: u32,
+        creature_pitch: Option<u32>,
     ) {
         let (px, py, pz, yaw, pitch, own) = {
             let e = &self.ent[i];
             (e.x, e.y, e.z, e.f30, e.f32, e.id24)
         };
+        // The class-3 list's 3-D pre-gate (:64018-19): dist from the
+        // bolt to the node's RAW +72 position vs the OWNER's row v_28
+        // (`v28 = pool[164*+24] → +156 → +28` — the human wizard's
+        // row 7 and a rival's row 8 both carry 8192; a creature
+        // caster gates at its own row's reach). The beam alone (case
+        // 9, :64137) gates on its own `f128 x max_life` instead.
+        let sig_gate = if self.ent[i].model65 == 9 {
+            (self.ent[i].f128 as i32).wrapping_mul(self.ent[i].max_life as i32)
+        } else {
+            let row = if own == PLAYER_TARGET || own as usize >= self.ent.len() {
+                7
+            } else {
+                self.ent[own as usize].row156
+            };
+            BEHAVIOR[row as usize].v_28 as i32
+        };
         let mut best: Option<(u16, u32, u16, u16)> = None; // (slot, score, yaw, pitch)
+        // sub_54A90's measurement order (:64196-217): yaw wedge,
+        // pitch wedge, then the 2-D ground range — sub_423D0 has NO
+        // z term (:52739) — and the score off the SAME truncated
+        // ground distance.
         let consider = |tx: u16,
                         ty: u16,
                         tz: i16,
                         slot: u16,
                         pcone: u32,
                         best: &mut Option<(u16, u32, u16, u16)>| {
-            let d2 = Self::dist2_sq(px, py, tx, ty);
-            let dz = tz.wrapping_sub(pz) as i32;
-            let d3 = d2.wrapping_add(dz.wrapping_mul(dz));
-            if d3 > 5120 * 5120 {
-                return;
-            }
             let ty_yaw = Self::angle_between(px, py, tx, ty);
-            let dh = Self::isqrt(d2 as u32) as i32;
-            let ty_pitch = Self::pitch_toward(pz, tz, dh);
             let dy = Self::angdist(yaw, ty_yaw) as u32;
-            let dp = Self::angdist(pitch, ty_pitch) as u32;
-            if dy > yaw_cone || dp > pcone {
+            if dy > yaw_cone {
                 return;
             }
-            let score = dy * dy + dp * dp;
-            // Strictly-less: on a score tie the earlier slot wins,
-            // matching the original's scan order.
+            let dist = Self::isqrt(Self::dist2_sq(px, py, tx, ty) as u32) as i32;
+            let ty_pitch = Self::pitch_toward(pz, tz, dist);
+            let dp = Self::angdist(pitch, ty_pitch) as u32;
+            if dp > pcone || dist > 5120 {
+                return;
+            }
+            let score = Self::acquire_score(dist, dy as usize, dp as usize);
+            // Strictly-less: on a score tie the earlier candidate
+            // wins, matching the original's scan order.
             if best.is_none() || best.is_some_and(|(_, bs, _, _)| score < bs) {
                 *best = Some((slot, score, ty_yaw, ty_pitch));
             }
         };
-        for j in 1..self.ent.len() {
-            let c = &self.ent[j];
-            if c.class64 != 5 || c.tick70 == 120 || c.act_life < 0 || c.f58 == 0 {
-                continue;
-            }
-            if c.id24 == own {
-                continue;
-            }
-            let (tx, ty, tz) = (c.x, c.y, c.aim_z());
-            consider(tx, ty, tz, j as u16, creature_pitch, &mut best);
-        }
-        // The significant-entity list (sub_54520 list 1): rival
-        // wizards (models 0/1) AND CASTLES (model 2) — live, not
-        // cloaked (+16 0x20), not the caster's own team. Wizards
-        // score through the generic scorer sub_54A90, whose
-        // sub_524C0 bracket lifts the aim z by +78; castles route
-        // to the dedicated castle scorer sub_54BD0 (:60452 — same
-        // cones/range/score) measured at the RAW position: the +78
-        // lift explicitly skips model 2. Both the base cases 0/3/4
-        // (:60122, cone 0x71) and HW's meteor case 0x10 (:60322,
-        // cone 0x100) branch `+65 == 2` to the castle scorer —
-        // castles are first-class homing candidates, which is how
-        // retail meteors fall a rival's castle out from under a
-        // camping wizard (mc1hwl0 slot 522, chase=522).
-        for j in 1..self.ent.len() {
-            let c = &self.ent[j];
-            if c.class64 != 3 || c.flags & (0x400 | 0x20) != 0 || c.id24 == own {
-                continue;
-            }
-            match c.model65 {
-                0 | 1 if c.tick70 == 1 => {
-                    let (tx, ty, tz) = (c.x, c.y, c.aim_z());
-                    consider(tx, ty, tz, j as u16, pitch_cone, &mut best);
-                }
-                2 => consider(c.x, c.y, c.aim_z(), j as u16, pitch_cone, &mut best),
-                _ => {}
-            }
-        }
-        // Invisible (spell 12, :65689-90 — the +16 0x20 bit): the
-        // cloaked player is skipped by mob-side target acquisition.
-        if own != PLAYER_TARGET && !self.player_invisible {
+        // The significant-entity list FIRST (:64016-37): bucket[0]
+        // holds every live class-3 body — rival carpets, CASTLES and
+        // mana BALLOONS; the walk carries NO model filter (the
+        // membership ruling on [`Self::nearest_wizard_target`]).
+        // Per-node gates: not the shooter's own team, not cloaked
+        // (+16 0x20; 0x420 folds the port's removed bit), inside the
+        // 3-D sig gate at the node's RAW position. Wizards/balloons
+        // score through the generic scorer sub_54A90, whose sub_524C0
+        // bracket lifts the aim z by +78; castles route to the castle
+        // scorer sub_54BD0 (:64231 — same cones/range/score) at the
+        // RAW position: the lift explicitly skips model 2. That is
+        // how retail meteors fall a rival's castle out from under a
+        // camping wizard (mc1hwl0 slot 522, chase=522). The
+        // out-of-pool human goes first (the Scan-A tie-break ruling),
+        // cloak-gated on spell 12's mirror (:65689-90).
+        if own != PLAYER_TARGET
+            && !self.player_invisible
+            && Self::dist3d(px, py, pz, ctx.px, ctx.py, ctx.pz) <= sig_gate
+        {
             consider(
                 ctx.px,
                 ctx.py,
@@ -831,6 +864,40 @@ impl Gen {
                 pitch_cone,
                 &mut best,
             );
+        }
+        for j in 1..self.ent.len() {
+            let c = &self.ent[j];
+            if c.class64 != 3 || c.model65 == 0 {
+                continue; // model 0 = the human's body, handled above
+            }
+            if c.act_life < 0 || c.flags & 0x420 != 0 || c.id24 == own {
+                continue;
+            }
+            if Self::dist3d(px, py, pz, c.x, c.y, c.z) > sig_gate {
+                continue;
+            }
+            consider(c.x, c.y, c.aim_z(), j as u16, pitch_cone, &mut best);
+        }
+        // Then the creature buckets (:63990-64007) with the SAME
+        // running best — a creature must strictly BEAT the class-3
+        // pick. The 20 bucket lists are keyed by MODEL (:52267
+        // rebuild: class 5, live, not a body segment) and walked
+        // model-major in ascending pool order; the per-node gates are
+        // awake (+58) and not the shooter's own (:63995-96) — NO
+        // cloak, NO distance beyond the scorer's own 5120.
+        if let Some(creature_pitch) = creature_pitch {
+            for m in 0..20u8 {
+                for j in 1..self.ent.len() {
+                    let c = &self.ent[j];
+                    if c.class64 != 5 || c.model65 != m || c.tick70 == 120 || c.act_life < 0 {
+                        continue;
+                    }
+                    if c.f58 == 0 || c.id24 == own {
+                        continue;
+                    }
+                    consider(c.x, c.y, c.aim_z(), j as u16, creature_pitch, &mut best);
+                }
+            }
         }
         if let Some((slot, _, ty_yaw, ty_pitch)) = best {
             self.ent[i].f146 = slot;
@@ -846,7 +913,7 @@ impl Gen {
 
     /// Read-only twin of the acquire family below for the crosshair
     /// instrument (P-class `crosshair` option): identical candidate
-    /// filters, cone (±0x71 yaw AND pitch), 3D range (≤ 5120) and
+    /// filters, cone (±0x71 yaw AND pitch), 2-D range (≤ 5120) and
     /// min-score pick as [`Self::aim_assist`] /
     /// [`Self::aim_assist_wizards`] / [`Self::aim_assist_possess`] —
     /// but NO entity writes, NO `player_danger` arming and NO LCG
@@ -865,21 +932,21 @@ impl Gen {
     ) -> Option<u16> {
         let own = PLAYER_TARGET;
         let mut best: Option<(u16, u32)> = None;
+        // sub_54A90's measurement, mirroring the live consider: yaw
+        // wedge, pitch wedge, 2-D ground range, weighted score.
         let mut consider = |tx: u16, ty: u16, tz: i16, slot: u16| {
-            let d2 = Self::dist2_sq(px, py, tx, ty);
-            let dz = tz.wrapping_sub(pz) as i32;
-            if d2.wrapping_add(dz.wrapping_mul(dz)) > 5120 * 5120 {
-                return;
-            }
             let ty_yaw = Self::angle_between(px, py, tx, ty);
-            let dh = Self::isqrt(d2 as u32) as i32;
-            let ty_pitch = Self::pitch_toward(pz, tz, dh);
             let dy = Self::angdist(yaw, ty_yaw) as u32;
-            let dp = Self::angdist(pitch, ty_pitch) as u32;
-            if dy > 0x71 || dp > 0x71 {
+            if dy > 0x71 {
                 return;
             }
-            let score = dy * dy + dp * dp;
+            let dist = Self::isqrt(Self::dist2_sq(px, py, tx, ty) as u32) as i32;
+            let ty_pitch = Self::pitch_toward(pz, tz, dist);
+            let dp = Self::angdist(pitch, ty_pitch) as u32;
+            if dp > 0x71 || dist > 5120 {
+                return;
+            }
+            let score = Self::acquire_score(dist, dy as usize, dp as usize);
             if best.is_none_or(|(_, bs)| score < bs) {
                 best = Some((slot, score));
             }
@@ -903,49 +970,38 @@ impl Gen {
             }
             return best.map(|(slot, _)| slot);
         }
-        if set == AimPreviewSet::Creatures {
-            // Mirror of aim_assist's creature scan.
-            for j in 1..self.ent.len() {
-                let c = &self.ent[j];
-                if c.class64 != 5 || c.tick70 == 120 || c.act_life < 0 || c.f58 == 0 {
-                    continue;
-                }
-                if c.id24 == own {
-                    continue;
-                }
-                consider(c.x, c.y, c.aim_z(), j as u16);
-            }
-        }
-        // Both remaining sets scan the rival-wizard list (live, not
-        // hidden or cloaked, not own).
+        // Both remaining sets walk the class-3 significant list FIRST
+        // (mirror of aim_assist_mc1_cone2): every live body — rival
+        // carpets, castles, balloons — not cloaked/removed, inside
+        // the human wizard row's v_28 at the RAW position; model 2
+        // scores at the flag z (no +78 lift), the rest lifted.
+        let sig_gate = BEHAVIOR[7].v_28 as i32;
         for j in 1..self.ent.len() {
             let c = &self.ent[j];
-            if c.class64 != 3
-                || c.model65 > 1
-                || c.tick70 != 1
-                || c.flags & (0x400 | 0x20) != 0
-                || c.id24 == own
-            {
+            if c.class64 != 3 || c.model65 == 0 {
+                continue;
+            }
+            if c.act_life < 0 || c.flags & 0x420 != 0 || c.id24 == own {
+                continue;
+            }
+            if Self::dist3d(px, py, pz, c.x, c.y, c.z) > sig_gate {
                 continue;
             }
             consider(c.x, c.y, c.aim_z(), j as u16);
         }
-        // Castles ride the GENERAL acquire only (sub_54520 cases
-        // 0/3/4/0x10 walk the significant list's model-2 members
-        // through the castle scorer; the wizard-only cases 7/8/B/C
-        // scan models 0/1 alone). Mirrors aim_assist_mc1_cone:
-        // measured at the RAW position — no +78 lift for model 2.
+        // The Creatures set adds the model-major bucket sweep.
         if set == AimPreviewSet::Creatures {
-            for j in 1..self.ent.len() {
-                let c = &self.ent[j];
-                if c.class64 != 3
-                    || c.model65 != 2
-                    || c.flags & (0x400 | 0x20) != 0
-                    || c.id24 == own
-                {
-                    continue;
+            for m in 0..20u8 {
+                for j in 1..self.ent.len() {
+                    let c = &self.ent[j];
+                    if c.class64 != 5 || c.model65 != m || c.tick70 == 120 || c.act_life < 0 {
+                        continue;
+                    }
+                    if c.f58 == 0 || c.id24 == own {
+                        continue;
+                    }
+                    consider(c.x, c.y, c.aim_z(), j as u16);
                 }
-                consider(c.x, c.y, c.z, j as u16);
             }
         }
         best.map(|(slot, _)| slot)
@@ -963,64 +1019,15 @@ impl Gen {
         }
     }
 
-    /// The wizard-only acquire (sub_54520 blocks 7/8/B/C — duel m7,
-    /// steal m8, undead m11): same cone/range as [`Self::aim_assist`]
-    /// but the candidate set is the class-3 wizard list alone.
+    /// The significant-list-only acquire (sub_54520 blocks 7/8/B/C —
+    /// duel m7, steal m8, undead m11): the same class-3 walk, gates,
+    /// cone, v_28 pre-gate and score as [`Self::aim_assist`], minus
+    /// the creature-bucket sweep. The decompile carries NO model
+    /// filter here either (:64100-118 — castles and balloons are
+    /// candidates alongside the carpets; the `+65 == 2` split calls
+    /// the same scorer in both arms).
     fn aim_assist_wizards_mc1(&mut self, i: usize, ctx: &MobCtx) {
-        let (px, py, pz, yaw, pitch, own) = {
-            let e = &self.ent[i];
-            (e.x, e.y, e.z, e.f30, e.f32, e.id24)
-        };
-        let mut best: Option<(u16, u32, u16, u16)> = None;
-        let consider =
-            |tx: u16, ty: u16, tz: i16, slot: u16, best: &mut Option<(u16, u32, u16, u16)>| {
-                let d2 = Self::dist2_sq(px, py, tx, ty);
-                let dz = tz.wrapping_sub(pz) as i32;
-                if d2.wrapping_add(dz.wrapping_mul(dz)) > 5120 * 5120 {
-                    return;
-                }
-                let ty_yaw = Self::angle_between(px, py, tx, ty);
-                let dh = Self::isqrt(d2 as u32) as i32;
-                let ty_pitch = Self::pitch_toward(pz, tz, dh);
-                let dy = Self::angdist(yaw, ty_yaw) as u32;
-                let dp = Self::angdist(pitch, ty_pitch) as u32;
-                if dy > 0x71 || dp > 0x71 {
-                    return;
-                }
-                let score = dy * dy + dp * dp;
-                if best.is_none_or(|(_, bs, _, _)| score < bs) {
-                    *best = Some((slot, score, ty_yaw, ty_pitch));
-                }
-            };
-        for j in 1..self.ent.len() {
-            let c = &self.ent[j];
-            if c.class64 != 3
-                || c.model65 > 1
-                || c.tick70 != 1
-                || c.flags & (0x400 | 0x20) != 0
-                || c.id24 == own
-            {
-                continue;
-            }
-            consider(c.x, c.y, c.aim_z(), j as u16, &mut best);
-        }
-        if own != PLAYER_TARGET && !self.player_invisible {
-            consider(
-                ctx.px,
-                ctx.py,
-                ctx.pz.wrapping_add(PLAYER_HH as i16),
-                PLAYER_TARGET,
-                &mut best,
-            );
-        }
-        if let Some((slot, _, ty_yaw, ty_pitch)) = best {
-            self.ent[i].f146 = slot;
-            self.ent[i].f34 = ty_yaw;
-            self.ent[i].f36 = ty_pitch;
-            if slot == PLAYER_TARGET {
-                self.player_danger = 100;
-            }
-        }
+        self.aim_assist_mc1_cone2(i, ctx, 0x71, 0x71, None);
     }
 
     /// sub_52550 (:62534): per-tick homing — recompute bearing to the
@@ -1518,7 +1525,6 @@ impl Gen {
     /// UNSIGNED (the -1 reject sentinel = u32::MAX). Snaps the heading
     /// on success.
     fn aim_assist_possess_mc1(&mut self, i: usize) {
-        use crate::mc1::tables::{COS, SIN};
         let (px, py, pz, yaw, pitch, own) = {
             let e = &self.ent[i];
             (e.x, e.y, e.z, e.f30, e.f32, e.id24)
@@ -1561,14 +1567,7 @@ impl Gen {
             if dp > 0x71 || dist > 5120 {
                 continue;
             }
-            let v8 = dist * COS[dy];
-            let v9 = dist * SIN[dy];
-            let v10 = dist * COS[dp];
-            let v11 = ((SIN[dp] * dist) >> 14) as i16 as i32;
-            let score = ((v10 >> 16) * (v10 >> 16)
-                + (v8 >> 16) * (v8 >> 16)
-                + ((v9 >> 14) as i16 as i32) * ((v9 >> 14) as i16 as i32)
-                + v11 * v11) as u32;
+            let score = Self::acquire_score(dist, dy, dp);
             if best.is_none() || best.is_some_and(|(_, bs, _, _)| score < bs) {
                 best = Some((j as u16, score, ty_yaw, ty_pitch));
             }
@@ -2391,9 +2390,10 @@ impl Gen {
         // attempted ONCE, latched on flags bit 2, and a hit SNAPS the
         // live heading onto the pick. The sub_54520 subtype switch
         // then picks the candidate set — m4 (volcano) sits in the
-        // 0/3/4 creature block; m7/m11 acquire only wizards (block
-        // 7/8/B/C — a no-op until AI wizards land); m2/m5/m17 are
-        // `default:` and never acquire, taking the miss arm's mirror.
+        // 0/3/4 creature block; m7/m11 take the significant-list-only
+        // block 7/8/B/C (rival carpets, castles, balloons); m2/m5/m17
+        // are `default:` and never acquire, taking the miss arm's
+        // mirror.
         // Homing runs from the tick after, once +146 holds a target.
         if self.ent[i].f146 == 0 {
             if self.ent[i].flags & 2 == 0 {

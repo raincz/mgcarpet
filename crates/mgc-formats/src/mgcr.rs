@@ -964,7 +964,7 @@ pub struct RetailEntMc1 {
 
 /// One decoded MC1 wizard record (`TypeStrAE400_13323`, 2049 B) — the
 /// slice of the Type_160 spell/flight column the importer consumes.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct RetailWizardMc1 {
     /// Exit-status word `var_u16_13325` (+2; bit 2 = won).
     pub status: u16,

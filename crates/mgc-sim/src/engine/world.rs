@@ -20803,6 +20803,141 @@ mod tests {
         let _ = v;
     }
 
+    /// **THE ACQUIRE SCORE IS DISTANCE-WEIGHTED.** sub_54A90
+    /// (:64212-17) decomposes the 2-D ground distance onto the
+    /// angular-error axes — cos terms `>>16`, sin terms `>>14`
+    /// through an i16 — so of two candidates inside the ±0x71 cone
+    /// the CLOSER one wins unless the farther one is far straighter
+    /// ahead. The port's old Δyaw²+Δpitch² metric ranked by angle
+    /// alone and picked the dead-center candidate at any range —
+    /// mc1l0's t=3200-3500 barrage `chase` column, where every
+    /// re-pick chose a straighter, farther victim than retail's.
+    /// Non-vacuous: under the old metric FAR (Δyaw 0) beats NEAR
+    /// (Δyaw ~54) and the assert fails.
+    #[test]
+    fn the_acquire_score_prefers_the_closer_candidate() {
+        use crate::mc1::mobs::{MobCtx, PLAYER_TARGET};
+        let ctx = MobCtx {
+            px: 0,
+            py: 0,
+            pz: 0,
+            pyaw: 0,
+            pmana: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        let mut w = flat_world();
+        let (bx, by) = (100u16 << 8, 100u16 << 8);
+        let ground = w.g.ground_z(bx, by) as i16;
+        let bz = ground + 512;
+        // Both candidates level with the bolt (f78 zeroed so aim_z is
+        // the raw z): the pick is the score's alone, not the cone's.
+        let mut creature = |w: &mut World, x: u16, y: u16| -> usize {
+            let v = w.g.spawn_creature(16, x, y, ground).expect("creature");
+            let e = &mut w.g.ent[v];
+            e.id24 = 0;
+            e.f58 = 100;
+            e.f78 = 0;
+            e.z = bz;
+            v
+        };
+        // NEAR: 4.5 tiles ahead, 0.75 east — d ~1167, Δyaw ~54.
+        let near = creature(&mut w, (100 << 8) + 192, 95 << 8 | 128);
+        // FAR: 8 tiles ahead, dead center — d 2048, Δyaw 0.
+        let far = creature(&mut w, 100 << 8, 92 << 8);
+        let b = w.g.spawn_fireball(bx, by, bz).expect("bolt");
+        w.g.arm_projectile(b, PLAYER_TARGET, 0xFF, 0xFF, 0, bx, 92 << 8, bz, 100, 0);
+        w.g.proj_tick(b, &ctx);
+        assert_eq!(
+            w.g.ent[b].f146, near as u16,
+            "the distance term must outweigh NEAR's ~9.5deg of yaw miss \
+             (retail ~1.5M vs FAR's ~8.4M)"
+        );
+        let _ = far;
+    }
+
+    /// **BUCKET[0] HAS NO MODEL FILTER, AND THE OWNER ROW'S v_28
+    /// PRE-GATES IT.** The acquire's significant-list walk
+    /// (:64016-37) takes every live class-3 body — a mana BALLOON
+    /// (model 3) is as valid a fireball victim as a carpet — but a
+    /// node only reaches the scorer within `pool[164*+24] → +156 →
+    /// +28` of 3-D distance (:64018-19): a creature-owned bolt reads
+    /// the CREATURE's row reach, and a candidate beyond it is
+    /// invisible no matter how well it scores. Non-vacuous both
+    /// ways: the old walk never considered model 3 (part a fails),
+    /// and without the pre-gate part b acquires at 10 tiles.
+    #[test]
+    fn balloons_are_acquire_candidates_and_v28_pre_gates_the_list() {
+        use crate::mc1::mobs::{MobCtx, PLAYER_TARGET};
+        let ctx = MobCtx {
+            px: 0,
+            py: 0,
+            pz: 0,
+            pyaw: 0,
+            pmana: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        let (bx, by) = (100u16 << 8, 100u16 << 8);
+        // (a) A balloon six tiles dead ahead is acquired by a
+        // player-owned fireball (row 7's v_28 = 8192 clears it).
+        let mut w = flat_world();
+        let ground = w.g.ground_z(bx, by) as i16;
+        let bz = ground + 512;
+        let balloon =
+            w.g.spawn_class3(3, 100 << 8, 94 << 8, ground)
+                .expect("balloon");
+        {
+            let e = &mut w.g.ent[balloon];
+            e.act_life = 1000;
+            e.f78 = 0;
+            e.z = bz;
+        }
+        let b = w.g.spawn_fireball(bx, by, bz).expect("bolt");
+        w.g.arm_projectile(b, PLAYER_TARGET, 0xFF, 0xFF, 0, bx, 92 << 8, bz, 100, 0);
+        w.g.proj_tick(b, &ctx);
+        assert_eq!(
+            w.g.ent[b].f146, balloon as u16,
+            "a mana balloon is a first-class acquire candidate"
+        );
+
+        // (b) The same shot from a CREATURE whose row reaches only
+        // 2048 units (row 21) cannot see a balloon 10 tiles out —
+        // and the same owner on row 12 (v_28 = 5120) can.
+        for (row, want_lock) in [(21u8, false), (12u8, true)] {
+            let mut w = flat_world();
+            let ground = w.g.ground_z(bx, by) as i16;
+            let bz = ground + 512;
+            let owner =
+                w.g.spawn_creature(16, (120u16) << 8, 120 << 8, ground)
+                    .expect("owner");
+            w.g.ent[owner].row156 = row;
+            let balloon =
+                w.g.spawn_class3(3, 100 << 8, 90 << 8, ground)
+                    .expect("balloon");
+            {
+                let e = &mut w.g.ent[balloon];
+                e.act_life = 1000;
+                e.f78 = 0;
+                e.z = bz;
+            }
+            let b = w.g.spawn_fireball(bx, by, bz).expect("bolt");
+            w.g.arm_projectile(b, owner as u16, 0xFF, 0xFF, 0, bx, 90 << 8, bz, 100, 0);
+            w.g.proj_tick(b, &ctx);
+            assert_eq!(
+                w.g.ent[b].f146 == balloon as u16,
+                want_lock,
+                "row {row}: the v_28 pre-gate is the owner row's reach \
+                 (10 tiles = 2560 units vs v_28 {})",
+                crate::mc1::behavior::BEHAVIOR[row as usize].v_28
+            );
+        }
+    }
+
     /// **THE TRACKER IS BLIND, AND THE LEDGER MARKS EACH BOLT ONCE.**
     /// (1) `sub_52550` (:62543-55) recomputes the bearing to whatever
     /// `pool[164 * +146]` holds — no class, liveness or identity check;

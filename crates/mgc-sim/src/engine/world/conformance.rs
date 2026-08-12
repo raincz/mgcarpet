@@ -242,8 +242,22 @@ impl World {
         let mut bad_rows = 0usize;
         for slot in 1..n {
             let r = &st.ents[slot];
-            if r.class64 == 0 || slot == human_slot as usize {
+            if slot == human_slot as usize {
                 self.g.ent[slot] = Ent::default();
+                continue;
+            }
+            if r.class64 == 0 {
+                // A freed slot is not an EMPTY slot: retail's free
+                // path clears +64 and pushes the stack — every other
+                // byte stays, and the blind tracker steers at
+                // whatever the record still holds (ledger §THE
+                // PROJECTILE LEDGER + BLIND TRACKER; mc1l0 t=3464-70:
+                // bolt 557 tracks reaped slot 534's stale position —
+                // a defaulted slot re-aims it at the origin). Import
+                // the stale bytes, class 0, not counted active; row
+                // 0 stands in for the stale model_ptr (nothing live
+                // dereferences a freed row).
+                self.g.ent[slot] = import_ent(r, 0, &tr);
                 continue;
             }
             active += 1;
@@ -2588,6 +2602,138 @@ mod tests {
             !w.g.free.contains(&3),
             "the ghost's push belongs to tick()'s top reap, not the import"
         );
+    }
+
+    /// A freed MC1 slot is not an EMPTY slot: retail's free path
+    /// clears +64 and pushes the stack — every OTHER byte stays, and
+    /// the blind tracker (`sub_52550`, ledger §THE PROJECTILE LEDGER
+    /// + BLIND TRACKER) steers at whatever the record still holds.
+    /// mc1l0 t=3464-70: bolt 557 tracked reaped slot 534's stale
+    /// position (pitch pinned level by the corpse's raw-2048 bearing);
+    /// the old `Ent::default()` import re-aimed it at the ORIGIN and
+    /// the bolt's whole heading/pitch/aim column diverged. The import
+    /// must carry the stale bytes through — class 0, unlinked, not
+    /// counted active, still on the free stack.
+    /// Non-vacuous: restoring the default arm zeroes the position and
+    /// the stale-byte asserts fail.
+    #[test]
+    fn mc1_import_keeps_a_freed_slots_stale_bytes_for_the_blind_tracker() {
+        let planes = Planes {
+            height: vec![100; 0x10000],
+            tile_type: vec![5; 0x10000],
+            shading: vec![32; 0x10000],
+            angle: vec![5; 0x10000],
+            ceiling: Vec::new(),
+        };
+        let mut grid = vec![31u8; 1024];
+        for y in 0..32i32 {
+            for x in 0..32i32 {
+                let (dx, dy) = (x - 15, y - 15);
+                let r = dx.max(dy).max(-dx + 1).max(-dy + 1) - 1;
+                grid[(y * 32 + x) as usize] = r.clamp(0, 31) as u8;
+            }
+        }
+        let tab: Vec<u8> = (0..24u32)
+            .flat_map(|_| {
+                let mut e = 0u32.to_le_bytes().to_vec();
+                e.extend_from_slice(&[4, 4]);
+                e
+            })
+            .collect();
+        let mut dat = Vec::new();
+        for _ in 0..4 {
+            dat.push(4u8);
+            dat.extend_from_slice(&[0x10, 0x10, 0x10, 0x10]);
+            dat.push(0);
+        }
+        let fa = crate::engine::features::FeatureAssets::parse(&grid, &tab, &dat).unwrap();
+        let mut w = World::new_for_game(planes, &[], 1, fa, crate::ids::GameId::Mc1);
+        let pool = w.g.ent.len();
+
+        let mut ents = vec![RetailEntMc1::default(); pool];
+        // Slot 1: the human carpet (row-7 model_ptr anchors the base).
+        ents[1] = RetailEntMc1 {
+            class64: 3,
+            model65: 0,
+            model_ptr: 7 * 32,
+            x: 100 << 8,
+            y: 100 << 8,
+            ..Default::default()
+        };
+        // Slot 2: a reaped corpse — class 0, every stale byte intact
+        // (the mc1l0 slot-534 shape, model_ptr stale/dangling too).
+        ents[2] = RetailEntMc1 {
+            class64: 0,
+            model65: 1,
+            act_life: -400,
+            flags: 0x408,
+            f58: 7,
+            f78: 50,
+            x: 53174,
+            y: 17486,
+            z: 1101,
+            model_ptr: 0xDEAD_BEEF,
+            ..Default::default()
+        };
+        // Slot 3: a live bolt still chasing the freed slot.
+        ents[3] = RetailEntMc1 {
+            class64: 9,
+            model65: 0,
+            flags: 0x2006,
+            act_life: 7,
+            x: 57998,
+            y: 15993,
+            z: 1146,
+            f146: 2,
+            model_ptr: 0,
+            ..Default::default()
+        };
+        // Retail's stack: every class-0 slot (the fresh corpse rides
+        // it — its reap already pushed), human hole and the bolt out.
+        let stack: Vec<u16> = std::iter::once(2u16).chain(4..pool as u16).collect();
+        let st = RetailMc1 {
+            rand: 1,
+            local_player: 0,
+            player_count: 1,
+            spawn_count: [0; 20],
+            wizards: {
+                let mut ws = vec![RetailWizardMc1::default(); 8];
+                ws[0] = RetailWizardMc1 {
+                    play_index: 1,
+                    hand_left: 0xFFFF,
+                    hand_right: 0xFFFF,
+                    ..Default::default()
+                };
+                ws
+            },
+            ents,
+            free_stack: stack.clone(),
+            recycle_stack: Vec::new(),
+            level: 0,
+        };
+        let report = w.retail_import_mc1(&st).expect("import");
+        assert_eq!(report.active, 1, "only the bolt counts active");
+        assert_eq!(
+            report.bad_rows, 0,
+            "a freed slot's dangling model_ptr is not a bad row"
+        );
+        let corpse = &w.g.ent[2];
+        assert_eq!(corpse.class64, 0, "freed stays freed");
+        assert_eq!(
+            (corpse.x, corpse.y, corpse.z),
+            (53174, 17486, 1101),
+            "the stale position survives the import — the blind \
+             tracker's whole aim"
+        );
+        assert_eq!(corpse.model65, 1);
+        assert_eq!(corpse.f78, 50, "aim_z's stale +78 lift survives too");
+        assert_eq!(corpse.flags & 4, 0, "never linked into a tile chain");
+        assert_eq!(
+            report.stack_fallback, None,
+            "the freed slot still counts as free for the stack census"
+        );
+        assert!(w.g.free.contains(&2), "and rides the recorded stack");
+        assert_eq!(w.g.ent[3].f146, 2, "the bolt still chases the slot");
     }
 
     /// A FULL MC2 pool still spawns: `NewEvent_4A050` (:581) falls

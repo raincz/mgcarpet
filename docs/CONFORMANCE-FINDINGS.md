@@ -9721,3 +9721,106 @@ open on their corpus rows alone.
 
 Other residue: (3,3) balloon 211 rows (now the top block), (5,3) 119,
 (9,10) 56, (10,39) 37, (10,43) 25.
+
+# THE ACQUIRE SCAN EXACT + THE FREED-SLOT STALE BYTES (2026-08-12 night) — ✅ LANE 1 CLOSED, mc1l0 −37% AGAIN
+
+**The acquisition-PICK divergence lane (§ above) resolved into TWO
+independent laws — the exact sub_54520/sub_54A90 scan and the
+freed-slot import law. mc1l0: conforming 5,887 → 5,917, unexplained
+field rows 796 → 505; the (9,0) block 294 → 74 (every chase row dead),
+(3,3) 211 → 163, (9,1) 30 → 8. mc1l5 +42 pairs / −5.6k rows, mc1hwl0
++29 / −2.5k, mc1l32 +0 / −1.0k. 728 tests (3 new pins), 10 suites 0
+regressions, MC2 held. DEVIATIONS "aim assist metric" RETIRED.**
+
+## 1. THE ACQUIRE SCAN IS NOW THE EXACT RETAIL SCAN (`aim_assist_mc1_cone2`)
+
+The port's Δyaw²+Δpitch² metric was a documented deliberate
+approximation; the line-by-line audit of sub_54520 case 0 (:63979)
+found FIVE divergences, all landed:
+
+1. **The score is distance-weighted** (sub_54A90 :64212-17, castle
+   twin sub_54BD0 :64261 identical): the 2-D ground distance
+   decomposed onto the angular-error axes — cos terms `>>16`, sin
+   terms `>>14` through an i16 truncation (~16x angular weight,
+   squared). DISTANCE multiplies everything: the closer candidate
+   wins unless the farther is far straighter. This alone was the
+   barrage `chase` column (t=3200-3500/4200/4900): every port re-pick
+   chose a straighter-farther victim than retail's closer one.
+   Shared helper `Gen::acquire_score`; the possess scan already ran
+   this exact math — the fix is its generalization (⭐ the method
+   lesson AGAIN: the law was already IN THE TREE, one subtype wide).
+2. **The range gate is 2-D** (sub_423D0 :52739 has no z term):
+   `isqrt(dx²+dy²) ≤ 5120`, and the score uses that SAME truncated
+   distance. The port gated 3-D.
+3. **The class-3 list is pre-gated at the OWNER row's v_28**
+   (:64018-19): 3-D distance (sub_42340, wrapping i16 deltas) from
+   the bolt to the node's RAW +72 position vs
+   `pool[164*id24] → +156 → +28`. Wizard rows 7/8 carry 8192 (near
+   vacuous next to the 5120+pitch-cone bound); a CREATURE-cast bolt
+   reads the creature's own row reach (row 21 = 2048 bites hard).
+   The beam alone (case 9 :64137) gates on its own `f128 × max_life`.
+4. **No model filter anywhere**: bucket[0] holds every live class-3
+   body (the Scan-A membership ruling, `nearest_wizard_target`) —
+   fireballs acquire mana BALLOONS (+78-lifted) and castles (RAW
+   flag z, the sub_54BD0 twin = sub_524C0's model-2 exemption). The
+   "wizard-only" blocks 7/8/B/C (duel m7, steal m8, undead m11) have
+   NO model filter either (:64100-118) — the port scanned models 0/1;
+   `aim_assist_wizards_mc1` is now a thin `creature_pitch: None`
+   wrapper over the shared core.
+5. **Scan order**: significant list FIRST (human out-of-pool first,
+   pool ascending — the Scan-A tie-break ruling), then the 20
+   creature buckets model-major ascending (:52267 rebuild keys the
+   bucket on the MODEL byte). Ties break to the earlier candidate
+   under strictly-less.
+
+The crosshair preview (`aim_preview_scan`) mirrors all of it.
+⛔ RULED OUT by measurement: the tick-start list-membership snapshot
+(retail rebuilds its lists at :52326 BEFORE handlers, so a mid-tick
+death leaves a candidate visible for the rest of the tick) — every
+barrage chase row died without it; not modeled, revisit only if a
+corpus row demands it.
+
+## 2. A FREED SLOT IS NOT AN EMPTY SLOT (`retail_import_mc1`)
+
+Retail's free path clears +64 and pushes the stack — EVERY OTHER BYTE
+STAYS. The blind tracker (§THE PROJECTILE LEDGER + BLIND TRACKER law
+2) steers at whatever the record still holds, and that includes slots
+already REAPED: mc1l0 t=3464-70, bolt 557 tracks slot 534 three ticks
+after its corpse was freed — the stale position keeps the bearing at
+~1445 and the corpse's raw-2048 pitch bearing pins the bolt level
+(pitch 0, seven ticks). The importer turned class-0 slots into
+`Ent::default()`, so the port's tracker aimed at the ORIGIN (bearing
+142). Freed slots now import their stale bytes verbatim — class 0,
+row 0, unlinked, uncounted, still free-stack members. Worth −174 rows
+across three blocks ((9,0), (3,3) balloon, (9,1) possess-lob — blind
+readers are everywhere). NOT touched: the port's own NATIVE free path
+still zeroes on realloc only (new_event fully re-stamps), but a
+mid-tick free inside one pair could still expose zeroed-vs-stale —
+no corpus row demands it yet.
+
+## PINS + RECEIPTS
+
+`the_acquire_score_prefers_the_closer_candidate` (near-off-axis beats
+far-dead-center, ~1.5M vs ~8.4M), 
+`balloons_are_acquire_candidates_and_v28_pre_gates_the_list` (balloon
+lock + row-21 vs row-12 owner gate flip),
+`mc1_import_keeps_a_freed_slots_stale_bytes_for_the_blind_tracker`
+(stale position/f78 survive, slot stays free + unlinked).
+728 workspace tests, fmt + clippy clean, 10/10 suites 0 regressions
+(0 fixed — the sparse-fixture under-report again; the takes decided).
+RetailWizardMc1 gained `Default` (test ergonomics only).
+
+## REMAINING mc1l0 (505 field rows) — the NEXT digs
+
+Top blocks: **(3,3) balloon 163** (now decisively the top), (5,3) 119,
+(9,10) 56, (10,39) 37, (10,43) 25, (9,0) 74. The (9,0) remainder is
+lane 2 as mapped (§ above): position-drift x/y (t=2978-3127 slots
+714/663/752 + flyby-amplified target_yaw/pitch echoes at close pass),
+the t=4829-4945 death-tick/parked-(253,251) family (= the (10,0)
+4-missing/1-extra explosion set), and two small decompile-pinned
+loose ends: (a) 4 rows of RAW heading storage (want 65512/65520/
+65506/2068 — law 5's storage half; the port stores masked, retail
+stores the unmasked u16 and every consumer masks on read), (b) 4
+"want 0" pairs (t=3051/3081/4194/4254: retail +34 stays 0 = never
+armed while the port acquired — latch-timing attribution open; check
+the bolts' tick70/state before believing an acquire story).
