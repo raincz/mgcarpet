@@ -548,8 +548,28 @@ fn level_005_golden_state_hashes() {
         // hashed `player_mail` word where it used to memset the block.
         // The behavioral half of this law is melee, which the corpus
         // above pins and this slice never exercises.
-        0x6da333573d15c7eb, // D: 64 ticks of two-hand fireball combat
-        0xdb8821ba4c066089, // E: 100 aftermath ticks
+        // D/E re-pinned once more for THE PROJECTILE LEDGER + BLIND
+        // TRACKER LAWS: (1) sub_16540 (:19643) ledgers every class-9
+        // record ONCE at the tick top — flags |= 0x2000 the first tick
+        // it has a class-3 owner and a held victim, feeding the rival
+        // hate/war tables at ACQUISITION time (the D-window fireballs
+        // wear the mark, which alone moves the hash); (2) sub_52550's
+        // tracker NEVER re-validates (:62543-55) — the port used to
+        // clear +146 on a dead/empty slot, so bolts now steer at
+        // corpses and recycled slots exactly as retail does;
+        // (3) the fireball's terrain arm reverts to the pre-step
+        // position for its water test (:62899-908) where the generic
+        // keeps the stepped one (:62680-701), both exempting model 4.
+        // Corpus: mc1l0 5,687 -> 5,887 conforming pairs, unexplained
+        // 1,624 -> 798; the (9,0)/(9,1) block 1,135 -> 324; twelve
+        // fixtures promoted across five suites, 0 regressions.
+        // ⭐ BOOKKEEPING in this slice: OBSERVABLE holds byte-for-byte
+        // below — no D-window bolt loses its victim mid-flight or
+        // grounds on a shore tile here, so the hash moves on the
+        // hashed ledger marks alone. The behavioral halves are
+        // corpus-pinned (the chase -> 0 family, mc1l0 t=1818-30).
+        0xba13f3992e830a01, // D: 64 ticks of two-hand fireball combat
+        0x7250743b95c7d1df, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,

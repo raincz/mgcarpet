@@ -224,11 +224,7 @@
     },
     {
       "t": 581,
-      "status": "open",
-      "sig": "4d1985660553dfb4",
-      "atoms": [
-        "field:9,1:flags"
-      ],
+      "status": "conforming",
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
     {
@@ -1381,11 +1377,7 @@
     },
     {
       "t": 5038,
-      "status": "open",
-      "sig": "2c2001a2ca52c34a",
-      "atoms": [
-        "field:9,0:chase"
-      ],
+      "status": "conforming",
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
     {

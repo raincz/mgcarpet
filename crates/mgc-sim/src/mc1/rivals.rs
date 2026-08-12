@@ -694,12 +694,11 @@ impl World {
         self.g.ent[i].f38 = src; // killer latch (+38)
         self.rivals[ri].regen_stall = 16;
         self.g.snd(17, i);
-        // Hate feed (sub_16540 :19686-709): +3000 for the heavy
-        // models, +500 base — we key on the source owner only
-        // (model split folded to the base rate; APPROX).
-        if let Some(shooter) = self.owner_slot_of_source(src) {
-            self.rival_add_hate(ri, shooter, 3000);
-        }
+        // (The hate feed lives in `proj_hate_sweep` now — retail's
+        // per-projectile one-shot ledger scan `sub_16540`, run at the
+        // tick top. The intake-time bump that used to sit here was
+        // the interim approximation of that scan; keeping both would
+        // double-count every targeted hit.)
     }
 
     /// Resolve a mailbox source id to the attacking wizard's slot:
@@ -717,19 +716,152 @@ impl World {
         self.owner_slot(e.id24)
     }
 
-    /// Bump the ledger and raise the war flag past the wealth-scaled
-    /// threshold (:19733-39): hate > 50000 - maxmana/10 * agg/255.
+    /// Bump the ledger (`str_456[shooter].u16_4` += amount, clamped —
+    /// :19727-32). No war check here: retail raises the flag ONLY in
+    /// the castle arm of the sweep (:19733-39); the carpet/balloon
+    /// and mana-ball arms bump and stop.
     fn rival_add_hate(&mut self, ri: usize, shooter: u8, amount: u16) {
         if shooter as usize >= 8 || self.rivals[ri].slot == shooter {
             return;
         }
         let r = &mut self.rivals[ri];
         r.hate[shooter as usize] = r.hate[shooter as usize].saturating_add(amount);
-        let wealth = r.mana_max / 10 * r.agg as u32 / 255;
-        let threshold = 50_000u32.saturating_sub(wealth);
+    }
+
+    /// The castle-arm war check (:19733-39): hate past
+    /// `50000 − shooter_wealth/10 × victim_agg/255` raises the war
+    /// flag. The wealth is the SHOOTER's max mana and the aggression
+    /// the VICTIM's — the MC2 twin spells it out unambiguously
+    /// (`v1x->maxMana_0x8C * v2x_owner->word_0x242` EF:7402-03); an
+    /// earlier port fold used the victim's wealth.
+    fn rival_war_check(&mut self, ri: usize, shooter: u8, shooter_wealth: u32) {
+        if shooter as usize >= 8 || self.rivals[ri].slot == shooter {
+            return;
+        }
+        let r = &mut self.rivals[ri];
+        let scaled = shooter_wealth / 10 * r.agg as u32 / 255;
+        let threshold = 50_000u32.saturating_sub(scaled);
         if r.hate[shooter as usize] as u32 > threshold {
             r.war[shooter as usize] = true;
         }
+    }
+
+    /// The per-projectile hate/war ledger sweep `sub_16540` (:19643),
+    /// called once per tick from [`crate::engine::world`]'s tick
+    /// between the reap/list phase and the mana census (:52326,
+    /// ahead of every entity handler). Each class-9 record is
+    /// ledgered ONCE — flags 0x2000 is the mark (:19666/:19678), set
+    /// the first tick the bolt has BOTH a class-3 owner and a victim
+    /// in +146, whether or not a table below applies. A bolt that
+    /// MISSED at the muzzle never latches (no victim), and is
+    /// re-examined every tick until it dies or acquires one (the
+    /// rebound path can hand it a victim mid-flight).
+    ///
+    /// The corpus-visible half is the mark itself — mc1l0's 202-row
+    /// `flags want 8198 got 6` family. The tables drive rival
+    /// aggression: victim's wizard gains hate against the shooter,
+    /// keyed on the PROJECTILE model ({3,4,11,16} heavy → +3000
+    /// carpet/balloon, +5000 castle; model 10 → nothing; else
+    /// +500/+1000), the castle arm alone running the war check. A
+    /// possess lob (m1) locked onto a CLAIMED mana ball (10,39)
+    /// bumps the claimant's wizard by ball_mana/4 (:19742-61).
+    ///
+    /// ⚠ Two remc1 transcription slips corrected via the MC2 twin
+    /// `sub_159E0` (EF:7320): the carpet-arm base-read is the
+    /// VICTIM-owner's table (remc1's text reads `v2->id24` — the
+    /// shooter's; the twin reads `ent[target.id]`), and BOTH arms
+    /// key the bonus on the projectile MODEL (the text reads +63 in
+    /// the carpet arm; the twin reads `model_0x40` in both). MC2 is
+    /// not wired to this sweep yet — zero class-9 flags signal in the
+    /// four MC2 takes; its own frame does call the twin (EF:786).
+    ///
+    /// Human-victim writes go to retail's human T160 tables, which
+    /// nothing consumes (the human has no AI); the port keeps no such
+    /// store, so those arms latch the mark and stop.
+    pub(crate) fn proj_hate_sweep(&mut self) {
+        for i in 1..self.g.ent.len() {
+            let e = &self.g.ent[i];
+            if e.class64 != 9 || e.flags & 0x2000 != 0 {
+                continue;
+            }
+            let (own, tgt, model) = (e.id24, e.f146, e.model65);
+            let owner_ok = own == PLAYER_TARGET
+                || (own != 0
+                    && (own as usize) < self.g.ent.len()
+                    && self.g.ent[own as usize].class64 == 3);
+            if !owner_ok || tgt == 0 {
+                continue;
+            }
+            self.g.ent[i].flags |= 0x2000; // ledgered (:19678)
+            let Some(shooter) = self.owner_slot_of_source(own) else {
+                continue;
+            };
+            if tgt == PLAYER_TARGET || tgt as usize >= self.g.ent.len() {
+                continue; // human tables unmodeled (see above)
+            }
+            let t = &self.g.ent[tgt as usize];
+            let (tclass, tmodel) = (t.class64, t.model65);
+            if tclass == 3 {
+                let Some(victim) = self.owner_slot_of_source(tgt) else {
+                    continue;
+                };
+                let Some(ri) = self.rivals.iter().position(|r| r.slot == victim) else {
+                    continue;
+                };
+                if tmodel == 2 {
+                    let bonus = match model {
+                        3 | 4 | 11 | 16 => 5000,
+                        10 => 0,
+                        _ => 1000,
+                    };
+                    self.rival_add_hate(ri, shooter, bonus);
+                    let wealth = self.wizard_mana_max(shooter);
+                    self.rival_war_check(ri, shooter, wealth);
+                } else {
+                    let bonus = match model {
+                        3 | 4 | 11 | 16 => 3000,
+                        10 => 0,
+                        _ => 500,
+                    };
+                    self.rival_add_hate(ri, shooter, bonus);
+                }
+            } else if tclass == 10 && model == 1 && tmodel == 39 {
+                // The claimed-ball arm: possessing someone's claimed
+                // sphere is an act of war-adjacent theft.
+                let claimant = t.f144;
+                let mana = t.f140.max(0) as u32;
+                if claimant == 0 {
+                    continue;
+                }
+                let claimant_ok = claimant == PLAYER_TARGET
+                    || ((claimant as usize) < self.g.ent.len()
+                        && self.g.ent[claimant as usize].class64 == 3);
+                if !claimant_ok {
+                    continue;
+                }
+                let Some(victim) = self.owner_slot_of_source(claimant) else {
+                    continue;
+                };
+                let Some(ri) = self.rivals.iter().position(|r| r.slot == victim) else {
+                    continue;
+                };
+                let bump = (mana / 4).min(u16::MAX as u32) as u16;
+                self.rival_add_hate(ri, shooter, bump);
+            }
+        }
+    }
+
+    /// A wizard's max-mana by player slot (the sweep's war-threshold
+    /// wealth — retail reads the shooter CARPET's +136 mirror).
+    fn wizard_mana_max(&self, slot: u8) -> u32 {
+        if slot == 0 {
+            return self.player.mana_max;
+        }
+        self.rivals
+            .iter()
+            .find(|r| r.slot == slot)
+            .map(|r| r.mana_max)
+            .unwrap_or(0)
     }
 
     /// Credit stolen mana to a wizard by owner tag.

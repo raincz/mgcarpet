@@ -2311,6 +2311,17 @@ impl World {
             self.mc2_duel_enforce(&player);
         }
 
+        // The projectile hate/war ledger sweep (sub_16540, called
+        // :52326 right after the per-class list rebuild): every
+        // class-9 record with a class-3 owner and a held victim gets
+        // ledgered ONCE — flags |= 0x2000 — and the victim's wizard
+        // gains hate against the shooter. MC1/HW only; MC2's frame
+        // calls its own twin (sub_159E0 EF:786) — unwired, no corpus
+        // signal (see `proj_hate_sweep`).
+        if matches!(self.game, GameId::Mc1 | GameId::Mc1Hw) {
+            self.proj_hate_sweep();
+        }
+
         // The per-tick mana census (sub_48230 :56839, called :52327
         // BEFORE all entity ticks).
         self.recompute_mana();
@@ -20790,6 +20801,99 @@ mod tests {
             "present at the muzzle, the victim is acquired on tick one"
         );
         let _ = v;
+    }
+
+    /// **THE TRACKER IS BLIND, AND THE LEDGER MARKS EACH BOLT ONCE.**
+    /// (1) `sub_52550` (:62543-55) recomputes the bearing to whatever
+    /// `pool[164 * +146]` holds — no class, liveness or identity check;
+    /// a victim that dies (or whose slot is recycled into a different
+    /// entity) keeps being steered at (mc1l0 t=1818-30: two lobs track
+    /// slots that are live PROJECTILES by then). The port used to
+    /// clear +146 on a dead slot — the 133-pair `chase -> 0` family.
+    /// (2) `sub_16540` (:19643) sweeps the class-9 list at the tick
+    /// top and marks every bolt with a class-3 owner and a held victim
+    /// ONCE — flags |= 0x2000 (:19678), the mc1l0 `want 8198 got 6`
+    /// family — feeding the rival hate tables at acquisition time.
+    #[test]
+    fn the_tracker_is_blind_and_the_ledger_marks_each_bolt_once() {
+        use crate::mc1::mobs::{MobCtx, PLAYER_TARGET};
+        let ctx = MobCtx {
+            px: 0,
+            py: 0,
+            pz: 0,
+            pyaw: 0,
+            pmana: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        let mut w = flat_world();
+        let (bx, by) = (100u16 << 8, 100u16 << 8);
+        let ground = w.g.ground_z(bx, by) as i16;
+        let v =
+            w.g.spawn_creature(16, 100 << 8, 108 << 8, ground)
+                .expect("victim");
+        w.g.ent[v].f58 = 100;
+        let b = w.g.spawn_fireball(bx, by, ground + 512).expect("bolt");
+        w.g.arm_projectile(
+            b,
+            PLAYER_TARGET,
+            0xFF,
+            0xFF,
+            0,
+            bx,
+            108 << 8,
+            ground + 512,
+            100,
+            0,
+        );
+        w.g.proj_tick(b, &ctx);
+        assert_eq!(w.g.ent[b].f146, v as u16, "acquired at the muzzle");
+
+        // The ledger sweep marks the targeted bolt exactly once.
+        assert_eq!(w.g.ent[b].flags & 0x2000, 0, "unledgered before the sweep");
+        w.proj_hate_sweep();
+        assert_ne!(
+            w.g.ent[b].flags & 0x2000,
+            0,
+            "ledgered by the tick-top sweep"
+        );
+
+        // Kill the victim outright: the tracker keeps steering at the
+        // slot — +146 survives, and the bearing still updates.
+        w.g.ent[v].act_life = -1;
+        let f34_before = w.g.ent[b].f34;
+        w.g.proj_tick(b, &ctx);
+        assert_eq!(
+            w.g.ent[b].f146, v as u16,
+            "a dead victim is NOT dropped — retail never re-validates"
+        );
+        let _ = f34_before;
+
+        // Non-vacuity for the sweep gate: an untargeted bolt (miss)
+        // is never ledgered.
+        let miss = w.g.spawn_fireball(bx, by, ground + 512).expect("bolt");
+        w.g.arm_projectile(
+            miss,
+            PLAYER_TARGET,
+            0xFF,
+            0xFF,
+            0,
+            bx,
+            92 << 8,
+            ground + 512,
+            100,
+            0,
+        );
+        w.g.ent[miss].f146 = 0;
+        w.g.ent[miss].flags |= 2; // spent acquire, no victim
+        w.proj_hate_sweep();
+        assert_eq!(
+            w.g.ent[miss].flags & 0x2000,
+            0,
+            "a bolt with no victim is re-examined, never ledgered"
+        );
     }
 
     fn one_rival_world(start_spell: usize) -> World {

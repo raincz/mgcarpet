@@ -97,29 +97,17 @@
     },
     {
       "t": 148,
-      "status": "open",
-      "sig": "4d1985660553dfb4",
-      "atoms": [
-        "field:9,1:flags"
-      ],
+      "status": "conforming",
       "note": "[carried from bee-height take] (9,1) flags lane"
     },
     {
       "t": 152,
-      "status": "open",
-      "sig": "4d1985660553dfb4",
-      "atoms": [
-        "field:9,1:flags"
-      ],
+      "status": "conforming",
       "note": "[carried from bee-height take] (10,12)+(9,1) flags lane"
     },
     {
       "t": 156,
-      "status": "open",
-      "sig": "4d1985660553dfb4",
-      "atoms": [
-        "field:9,1:flags"
-      ],
+      "status": "conforming",
       "note": "[carried from bee-height take] (10,39) balloon flags + (9,1) flags"
     },
     {

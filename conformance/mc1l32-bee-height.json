@@ -118,11 +118,7 @@
     },
     {
       "t": 198,
-      "status": "open",
-      "sig": "4d1985660553dfb4",
-      "atoms": [
-        "field:9,1:flags"
-      ],
+      "status": "conforming",
       "note": "(9,1) flags lane"
     },
     {
@@ -136,20 +132,12 @@
     },
     {
       "t": 219,
-      "status": "open",
-      "sig": "4d1985660553dfb4",
-      "atoms": [
-        "field:9,1:flags"
-      ],
+      "status": "conforming",
       "note": "(10,12)+(9,1) flags lane"
     },
     {
       "t": 230,
-      "status": "open",
-      "sig": "4d1985660553dfb4",
-      "atoms": [
-        "field:9,1:flags"
-      ],
+      "status": "conforming",
       "note": "(10,39) balloon flags + (9,1) flags"
     },
     {

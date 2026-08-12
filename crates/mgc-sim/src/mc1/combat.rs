@@ -616,14 +616,20 @@ impl Gen {
             _ => return None,
         };
         let state = if model == 17 { 1 } else { model };
-        // The possess lob's ctor is the family's ONE short fuse:
-        // sub_39A90 (:45900-16) computes life 4096/speed = 10 where
-        // every sibling (:45861..:46135) takes 0x2000/speed = 21 —
-        // corpus-pinned (mc1l0 pair 63: retail lob 9/10 vs the port's
-        // fireball-shaped 20/21; the doubled range overshoots every
-        // close-in possess target).
-        let life = if model == 1 { 10 } else { 21 };
-        self.spawn_projectile(model, state, x, y, z, 384, life, 0, sprite)
+        // The possess lob AND the magnet bolt are the family's short
+        // fuses: sub_39A90 (:45908) and sub_3A2F0 (:46375) both
+        // compute life 4096/speed = 10 where every sibling
+        // (:45861..:46135) takes 0x2000/speed = 21 (mc1l0 pair 63:
+        // retail lob 9/10 vs the port's old fireball-shaped 20/21).
+        let life = if model == 1 || model == 17 { 10 } else { 21 };
+        // Homing rows straight off the ctors: m1/m17 sit on row [2]
+        // (yaw/pitch caps 113/113, :45908/:46376); the payload lobs
+        // m2/m4/m5/m7/m11 on row [1] (caps 22/22, :45941..:46220).
+        // The port used to hand every lob row 0 — inert while the
+        // homer hardcoded its caps, live now that the tracked arm
+        // reads BEHAVIOR[row156].
+        let row = if model == 1 || model == 17 { 2 } else { 1 };
+        self.spawn_projectile(model, state, x, y, z, 384, life, row, sprite)
     }
 
     /// Vertical bearing (sub_42180 :52644): the pitch whose polar step
@@ -1022,15 +1028,22 @@ impl Gen {
     /// [`crate::engine::features::Ent::aim_z`] model-2 bracket:
     /// castles home at the FLAG, not 8192 under the base) and turn
     /// yaw/pitch capped at the row's v_2/v_6.
+    ///
+    /// THE TRACKER NEVER RE-VALIDATES (:62543-55): retail computes the
+    /// bearing to whatever `pool[164 * +146]` holds — a corpse waiting
+    /// on the reaper, even a slot recycled into a different entity
+    /// (mc1l0 t=1818-30: two lobs track slots that are live
+    /// PROJECTILES by then, and retail steers onto them). The port
+    /// used to clear +146 on a dead/empty slot — the 133-pair
+    /// `chase → 0` family. Only the out-of-range guard stays
+    /// (defensive; a retail +146 is always a pool index).
     fn home(&mut self, i: usize, ctx: &MobCtx) -> bool {
         let tgt = self.ent[i].f146;
         let (tx, ty, tz) = if tgt == PLAYER_TARGET {
             (ctx.px, ctx.py, ctx.pz.wrapping_add(PLAYER_HH as i16))
         } else {
             let t = tgt as usize;
-            if t == 0 || t >= self.ent.len() || self.ent[t].class64 == 0 || self.ent[t].act_life < 0
-            {
-                self.ent[i].f146 = 0;
+            if t == 0 || t >= self.ent.len() {
                 return false;
             }
             let c = &self.ent[t];
@@ -1398,18 +1411,22 @@ impl Gen {
     /// shooter already owns or claimed. Any end detonates into the
     /// (10,12) ch1-claim flash.
     fn proj_m1_tick(&mut self, i: usize, ctx: &MobCtx) -> bool {
-        let _ = ctx;
         // ONE acquisition roll on the first untargeted tick — the
         // +16&2 latch (:62952-60), same idiom as the HW dart and the
-        // castle ball. A lob that finds nothing (or later loses its
-        // slot) flies straight and never re-acquires.
+        // castle ball. A lob that finds nothing flies straight and
+        // never re-acquires.
         if self.ent[i].f146 == 0 {
             if self.ent[i].flags & 2 == 0 {
                 self.ent[i].flags |= 2;
                 self.aim_assist_possess(i);
             }
         } else {
-            self.home_possess(i);
+            // The tracked arm is the SHARED homer `sub_52550`
+            // (:62971), row-capped on BOTH axes — the lob's ctor row
+            // [2] turns 113/113 a tick (:45908). An earlier port
+            // homer hardcoded a 34 yaw cap and snapped pitch outright
+            // — the (9,1) ±79 heading staircase.
+            self.home(i, ctx);
         }
         let mut tmp = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
         let (yaw, pitch, speed) = {
@@ -1564,35 +1581,6 @@ impl Gen {
             e.f34 = ty_yaw;
             e.f36 = ty_pitch;
         }
-    }
-
-    /// Pool-target homing for the possess lob (the sub_52550 steer
-    /// against a class-10 target — the generic home() only handles
-    /// creatures/the player).
-    fn home_possess(&mut self, i: usize) {
-        let t = self.ent[i].f146 as usize;
-        if t == 0
-            || t >= self.ent.len()
-            || self.ent[t].class64 != 10
-            || self.ent[t].flags & 0x400 != 0
-        {
-            self.ent[i].f146 = 0;
-            return;
-        }
-        let (px, py, pz) = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
-        let (tx, ty, tz) = (self.ent[t].x, self.ent[t].y, self.ent[t].aim_z());
-        let yaw = Self::angle_between(px, py, tx, ty);
-        let dh = Self::isqrt(Self::dist2_sq(px, py, tx, ty) as u32) as i32;
-        let pitch = Self::pitch_toward(pz, tz, dh);
-        let e = &mut self.ent[i];
-        let ty_ = Self::turn_step(e.f30, yaw, 34);
-        e.f30 = (e.f30 as i32 + ty_ as i32) as u16 & 0x7FF;
-        e.f32 = pitch;
-        // The shared homer stamps the raw target yaw/pitch into
-        // +34/+36 every tick (:62543-46); write-only for the lob
-        // (proj_m1_tick reads only f30/f32/f126).
-        e.f34 = yaw;
-        e.f36 = pitch;
     }
 
     /// sub_11AC0 (:17033): the possess victim scan — class-10 models
@@ -3053,7 +3041,14 @@ impl Gen {
                             let d = self.ent_rand(i);
                             let e = &mut self.ent[i];
                             e.f34 = e.f30.wrapping_add(0x400) & 0x7FF;
-                            e.f30 = (e.f34 as i32 + (d % modulus) as i32 - half) as u16 & 0x7FF;
+                            // The scattered heading is stored RAW
+                            // (:62740/:62877 — no mask): a draw below
+                            // `half` off a near-zero reversed yaw
+                            // parks a NEGATIVE u16 in +30 for a tick
+                            // (corpus t=2739: 65512 = −24). Every
+                            // consumer masks on read; the next homing
+                            // write canonicalizes.
+                            e.f30 = (e.f34 as i32 + (d % modulus) as i32 - half) as u16;
                             e.f32 = e.f32.wrapping_neg() & 0x7FF;
                             e.f146 = if shooter == PLAYER_TARGET {
                                 PLAYER_TARGET
@@ -3096,7 +3091,8 @@ impl Gen {
                             let d = self.ent_rand(i);
                             let e = &mut self.ent[i];
                             e.f34 = e.f30.wrapping_add(0x400) & 0x7FF;
-                            e.f30 = (e.f34 as i32 + (d % modulus) as i32 - half) as u16 & 0x7FF;
+                            // Raw store, as in the pool arm above.
+                            e.f30 = (e.f34 as i32 + (d % modulus) as i32 - half) as u16;
                             e.f32 = e.f32.wrapping_neg() & 0x7FF;
                             e.f146 = shooter;
                             e.id24 = PLAYER_TARGET;
@@ -3132,10 +3128,24 @@ impl Gen {
             if self.ent[i].act_life < 0 {
                 self.proj_explode(i, ctx, None, copy_f44, stamp_victim); // midair expiry
             }
-        } else if self.on_water_pub(tmp.0, tmp.1) {
-            self.splash_and_die(i); // :62916-21, no explosion/crater
         } else {
-            self.proj_explode(i, ctx, None, copy_f44, stamp_victim); // terrain hit (pre-move pos)
+            // Terrain impact. The position law differs by function:
+            // the FIREBALL (:62899-908) moves, then REVERTS to the
+            // pre-step position (`sub_41C70(a1, &v21)`) — its water
+            // test, splash and detonation all happen at the point it
+            // flew FROM; the GENERIC (:62680-701) has no revert — it
+            // keeps the stepped position for all three. Both exempt
+            // model 4 (the volcano lob) from the splash: over water
+            // it detonates like on land.
+            if law == DeflectLaw::Generic {
+                self.move_relink(i, tmp.0, tmp.1, tmp.2);
+            }
+            let (ix, iy) = (self.ent[i].x, self.ent[i].y);
+            if self.ent[i].model65 != 4 && self.on_water_pub(ix, iy) {
+                self.splash_and_die(i); // :62916-21, no explosion/crater
+            } else {
+                self.proj_explode(i, ctx, None, copy_f44, stamp_victim);
+            }
         }
         false
     }

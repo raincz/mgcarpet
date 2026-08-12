@@ -9608,3 +9608,116 @@ heading 8 (same-tick ch4 phase on freshly-scattered balls at the
 spawn boundary + double-magnet last-writer at t=1869); mana 1
 (t=2371, rides the one slot-swap pair). The (9,0)/(9,1) projectile
 families (1,135 rows) are now the take's top block.
+
+# THE PROJECTILE LEDGER + BLIND TRACKER (2026-08-12 evening) — ✅ FIVE LAWS LANDED, THE (9,0)/(9,1) BLOCK −71%
+
+**The banked (9,0)/(9,1) block (1,135 rows, mc1l0's top family) resolved
+into five independent laws. mc1l0: conforming pairs 5,687 → 5,887,
+unexplained 1,624 → 798, the block itself 1,135 → 324 ((9,1) 30, (9,0)
+294). Twelve fixtures promoted across five suites, 0 regressions;
+mc1l32 +22 pairs / −10.7k rows, mc1l5 +76 / −23.6k, mc1hwl0 +584 /
+−15.3k. First unexplained pair 581 → 586. Player-reported the free
+replay converged further on this change (with one new symptom, banked
+below).**
+
+## 1. THE LEDGER SWEEP `sub_16540` (:19643) — flags 0x2000, hate at acquisition time
+
+Runs once per tick between the per-class list rebuild and the mana
+census (:52326). Every class-9 record with a class-3 owner (+24) and a
+held victim (+146) is ledgered ONCE — `flags |= 0x2000` (:19678), win
+or lose on the tables below — and re-examined every tick until it has
+both (a rebound can hand a miss a victim mid-flight). The mark alone
+was mc1l0's 202-row `flags want 8198 got 6` family. The tables:
+victim's wizard gains hate vs the shooter keyed on the PROJECTILE
+model ({3,4,11,16} → +3000 carpet/balloon, +5000 castle; model 10 →
+nothing; else +500/+1000); the CASTLE arm alone runs the war check at
+`50000 − shooter_wealth/10 × victim_agg/255`; a possess lob (m1)
+locked onto a claimed (10,39) ball bumps the claimant by ball_mana/4.
+The port's intake-time hate feed (the flagged interim in rivals.rs) is
+DELETED — it was this scan's approximation.
+
+⚠ TWO remc1 TRANSCRIPTION SLIPS, arbitrated by the MC2 twin
+`sub_159E0` (EF:7320, called EF:786): the carpet-arm base-read is the
+VICTIM-owner's table (remc1's text reads `v2->id24` — the shooter's),
+and BOTH arms key on the projectile MODEL (the text reads +63 in the
+carpet arm). The twin also pins the war formula's wealth as the
+SHOOTER's max mana (the port had folded to the victim's). MC2 is NOT
+wired to the sweep — zero class-9 flags signal in all four MC2 takes;
+its own frame calls the twin, so a future MC2 lane may want it.
+
+## 2. THE TRACKER IS BLIND — `sub_52550` (:62543-55) never re-validates
+
+Retail steers at whatever `pool[164 * +146]` holds: corpses awaiting
+the reaper, even slots recycled into different entities (mc1l0
+t=1818-30: two lobs track slots that are live PROJECTILES by then).
+The port cleared +146 on a dead/empty slot in BOTH `home()` and the
+possess homer — the 133-pair `chase → 0` family, 56% of the block's
+rows. Both clears deleted; only an out-of-range guard stays.
+
+## 3. THE LOB ROWS — `home_possess` deleted, ctor rows off the decompile
+
+The possess lob (m1) and magnet bolt (m17) ctors sit on row [2] — yaw
+AND pitch caps 113/113 (:45908/:46375-76) — and BOTH take the short
+fuse `4096/speed = 10` (the port had m17 at 21). The payload lobs
+m2/m4/m5/m7/m11 sit on row [1] (:45941..:46220). The port handed every
+spell lob row 0 AND tracked possession through a hardcoded homer (34
+yaw cap, pitch snapped outright) — the (9,1) ±79 = 113−34 heading
+staircase. `home_possess` is deleted; the lob tracks through the
+shared row-capped `home()`. (The per-pair lane always seeded the RIGHT
+row from the recorded +156 pointer — the ctor rows only bit in native
+play and free replay; the homer bit everywhere.)
+
+## 4. THE TERRAIN ARM POSITION LAW — fireball reverts, generic doesn't
+
+On terrain impact the FIREBALL (:62899-908) reverts to its PRE-STEP
+position (`sub_41C70(a1, &v21)`) — its water test, (10,5) splash and
+detonation all happen at the point it flew FROM; the GENERIC
+(:62680-701) keeps the STEPPED position for all three. Both exempt
+model 4 (the volcano lob) from the splash — over water it detonates
+like on land. The port had folded both to "pre-move" with the water
+test at the stepped point.
+
+## 5. THE REBOUND HEADING IS STORED RAW (:62740/:62877)
+
+`+30 = draw % mod + reversed_yaw − half` with NO mask — a draw below
+`half` off a near-zero reversed yaw parks a NEGATIVE u16 in +30 for a
+tick (corpus t=2739: want 65512 = −24; the port's masked 2024 is the
+same angle). Every consumer masks on read (`& 0x7FF` ≡ retail's
+`HIBYTE &= 7`); the next homing write canonicalizes.
+
+## GOLDENS + FIXTURES
+
+`state_hash` L005 D/E re-pinned — ⭐ OBSERVABLE HELD BYTE-FOR-BYTE:
+in that slice the hash moves on the hashed ledger marks alone (no
+D-window bolt loses its victim or grounds on a shore there). New pin:
+`the_tracker_is_blind_and_the_ledger_marks_each_bolt_once`. Promoted:
+mc1l0 t=581/t=5038, mc1l32 t=148/152/156, mc1l32-bee-height
+t=198/219/230, mc1l5 t=2038/2477, mc1hwl0 t=929/1314. 725 workspace
+tests green, fmt + clippy clean.
+
+## REMAINING (9,0) RESIDUE (294 rows) — the NEXT dig, with a player symptom
+
+Two lanes, both already mapped:
+
+1. **THE ACQUISITION-PICK DIVERGENCE** (chase want/got both nonzero
+   and different, target_yaw `0 vs picked`, t=3200-3500/4200-4300/
+   4800-5000 barrages): from identical seeded state, the port's
+   `aim_assist` picks a DIFFERENT victim than retail's `sub_54520`
+   case 0 — or picks where retail misses. Gates/score/order need a
+   line-by-line audit (:63979-64220 vs combat.rs).
+2. **THE PROBE GEOMETRY** (full-step x/y diffs + the (10,0) 4-missing/
+   1-extra explosion set): the HELD-BACK ring lane (§THE HELD-BACK
+   AREA FIXES) — the port's inflated square window + chord march vs
+   retail's narrow forward-biased SEARCH.DAT ring, ONE compensating
+   family, needs the probe-cadence dig first.
+
+⭐ **PLAYER RULING (2026-08-12): the mid-replay VULTURE KILL is
+CORRECT.** First read as a deviation symptom; the player ruled the
+vulture is not supposed to survive — the kill matches the real play,
+i.e. that stretch of the free replay CONVERGED on this session's laws.
+It is a convergence receipt, NOT a certification exemplar — do not
+hunt for a way to keep that vulture alive. The two lanes above remain
+open on their corpus rows alone.
+
+Other residue: (3,3) balloon 211 rows (now the top block), (5,3) 119,
+(9,10) 56, (10,39) 37, (10,43) 25.
