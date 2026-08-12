@@ -68,11 +68,7 @@
     },
     {
       "t": 113,
-      "status": "open",
-      "sig": "e1cdb015d94c64f7",
-      "atoms": [
-        "field:3,3:chase"
-      ],
+      "status": "conforming",
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
     {

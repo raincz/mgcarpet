@@ -1888,11 +1888,12 @@ impl Gen {
             let own = self.ent[i].id24;
             if upgrade {
                 // Morph into the (10,43) upgrade token at the castle
-                // (the token mails the castle's ch5 on touch).
-                let (z, link) = (self.ent[i].z, self.ent[i].f146);
+                // (:63606-08): owner stamp ONLY — retail never writes
+                // the token's +146; the delivery resolves the castle
+                // through the owner's bound slot (sub_293D0).
+                let z = self.ent[i].z;
                 if let Some(t) = self.spawn_creator(43, tmp.0, tmp.1, z) {
                     self.ent[t].id24 = own;
-                    self.ent[t].f146 = link;
                 }
                 self.ent[i].flags |= 0x400;
                 return false;

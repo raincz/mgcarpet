@@ -13532,13 +13532,16 @@ mod tests {
             "20000 max minus the 5000 overkill carry"
         );
         assert!(count(&w, 10, 39) >= 2, "the spill scattered as mana balls");
-        // TWO ejector passes on a spilling downgrade (retail law):
-        // sub_47A70's haircut pass (spill above 90% of the OLD cap),
-        // then the state-6 wrapper's pass at the NEW cap (sub_470E0
-        // :56147) — 30000 banked spills 12000 then 8000 here, each
-        // pass with its own 4 magnets, and the bank parks exactly at
-        // the new cap.
-        assert_eq!(count(&w, 10, 54), 8, "both ejector passes' magnets");
+        // THREE ejector passes on this over-banked downgrade (retail
+        // law): the death-NOTICE tick still runs the established
+        // f63-even block (sub_46DB0 :56003 falls through), whose
+        // ejector clamps the synthetic 30000 bank to the old cap;
+        // then sub_47A70's haircut pass (spill above 90% of the OLD
+        // cap) and the state-6 wrapper's pass at the NEW cap
+        // (sub_470E0 :56147) — 10000, 2000 and 8000 here, each
+        // spilling pass with its own 4 magnets, and the bank parks
+        // exactly at the new cap.
+        assert_eq!(count(&w, 10, 54), 12, "all three ejector passes' magnets");
         assert_eq!(
             w.g.ent[c].f140, 10_000,
             "the wrapper pass drains the bank to the new cap"

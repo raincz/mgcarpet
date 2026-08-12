@@ -9809,6 +9809,8 @@ lock + row-21 vs row-12 owner gate flip),
 728 workspace tests, fmt + clippy clean, 10/10 suites 0 regressions
 (0 fixed — the sparse-fixture under-report again; the takes decided).
 RetailWizardMc1 gained `Default` (test ergonomics only).
+✅ PLAYTESTED + PLAYER-CONFIRMED (2026-08-12): the closer-target
+picks and balloon/castle locks play correctly.
 
 ## REMAINING mc1l0 (505 field rows) — the NEXT digs
 
@@ -9824,3 +9826,150 @@ stores the unmasked u16 and every consumer masks on read), (b) 4
 "want 0" pairs (t=3051/3081/4194/4254: retail +34 stays 0 = never
 armed while the port acquired — latch-timing attribution open; check
 the bolts' tick70/state before believing an acquire story).
+
+# THE BALLOON FLEET STAGGER + THE BLIND BALLOON MOVER (2026-08-12 night 2) — ✅ (3,3) BLOCK DEAD, mc1l0 −32%
+
+**The (3,3) balloon block (163 rows, the top block) resolved into ONE
+retail law pair — the dispatcher's stagger and the mover's blindness —
+plus the 3-D pick metric. mc1l0: conforming 5,917 → 5,980, unexplained
+field rows 505 → 345; (3,3) 163 → 3 (one pair of (10,39)-lane
+collateral + one missing spawn). mc1l5 −20.8k rows, mc1l1 −119,
+mc2l0 improved, 0 regressions, 1 mc1hwl0 fixture PROMOTED. 403
+mgc-sim tests (2 pins rewritten/added).**
+
+## 1. THE DISPATCHER STAGGERS; A FRESH BALLOON PARKS UNTARGETED (`castle_balloons`)
+
+sub_47400's per-fleet-index walk (:56330-97), previously approximated
+as "re-pick every pass" (DEVIATIONS entry RETIRED):
+
+1. **A spawned index takes the place of its targeting arm**
+   (:56340-49): the newborn parks at the flag with chase 0 — mc1l0
+   t=2379, balloon 492 spawns at castle 107 (169,77) and retail holds
+   it parked while the old port flew it at ball 115 the same tick.
+2. **The stagger** (:56338): the retarget block runs only on passes
+   where `castle+63 % quota == 0`; between turns every live balloon
+   keeps its stale +146 — even one whose ball has been FREED. The
+   modulus is the QUOTA (the MC2 twin sub_60400 EF:61405 agrees).
+3. **The census-full arm bypasses the stagger** (:56333-35): houses +
+   stored ≥ capacity homes every live balloon every pass; the
+   balloon-cargo-full → castle default sits INSIDE the stagger.
+4. **The pick is 3-D nearest** (sub_46CA0 :55922 via sub_42390 —
+   wrapping i16 deltas INCLUDING z, compared unsigned; the port
+   compared 2-D): the t=2407 "wrong ball" rows (want 90 got 67) were
+   this metric.
+5. **A dead register balloon reaps at dispatch** (:56345-47): cargo
+   dropped as an owned ball, record freed, before the quota count.
+6. tick70 must be 9 to retarget (:56339).
+
+## 2. THE MOVER IS BLIND (`balloon_move`, sub_47F90)
+
+The mover dereferences the claim ticket by the target's CLASS BYTE
+alone (:56735-36) — no liveness check, no model check (the projectile
+blind-tracker law, third appearance):
+
+- class 10 → the ball arm (owner gate, tether, absorb, snap) — a slot
+  recycled into ANY class-10 record gets absorbed (retail's latent
+  LIFO-reuse bug :56742-73 — now the port's law too);
+- class 3 → the castle arm (level·speed ring, z-gate, delivery);
+- anything else — **including a freed slot's class-0 stale bytes** —
+  a plain polar step at the corpse position. mc1l0 t=2472-2516:
+  balloon 492 bounces ±48 across freed ball 88's tile forever,
+  heading flipping 1024/0 (angle(0,+48)=1024, angle(0,0)=0). The old
+  port dead-target guard IDLED there (every pair a y+heading row);
+  the old model-39 guard cleared claims retail keeps. Both removed.
+- The dispatcher un-sticks a stuck balloon only on its stagger turn —
+  and ONLY if it is in the register; mc1l0's 492 was never retargeted
+  again (castle 107 established at 2470 with the request bit pending
+  — see the open (3,2) lane below).
+
+## ATTRIBUTION METHOD (the row-staring trap again)
+
+The (3,3) "one-tick-late arrival" story survived three readings of the
+rows and was WRONG three ways: slot 492 at t=2378 was a freed corpse
+(the "arrival" was a SPAWN), the state channel is PRE-tick (dump-state
+@N = before tick N — the obs channel is post-tick; align before
+comparing), and the oscillation was anti-PHASE only because the port
+idled on odd ticks while retail stepped. The kill shot was the
+15-minute eprintln probe on mover/dispatcher order, not the row table.
+
+## PINS + RECEIPTS
+
+`the_balloon_mover_is_blind` (recycled-record absorb + the freed-slot
+bounce, heading 1024/0), 
+`the_dispatcher_staggers_retargeting_and_a_fresh_balloon_parks_untargeted`
+(spawn-pass park, off-turn stale claim, 3-D metric + sibling
+exclusion). The old `balloon_ignores_recycled_claim_slots` pin (the
+guard) was corpus-refuted and REWRITTEN. mc1l0 7,097 pairs: 5,980
+conforming, 345 unexplained field rows (first unexplained block now
+(5,3) 119 = lane-2 collateral at t=2978/4276 — the worm rows are
+bolt-position fallout, NOT a worm bug). mc1l5 200,306 → 179,549,
+mc1l1 15,974 → 15,855, mc2l0 2,288 → 1,409 (older baseline), mc1hwl0
+t=113 fixture promoted. fmt + clippy clean.
+
+## ⭐ OPEN: THE (3,2) CASTLE REQUEST LANE (the self-destruct cadence)
+
+Player report: a castle self-destructed L3 → nothing, then recast to
+crush a worm — the replay's degradation steps run LONG and the kill
+misses. Corpus anchors: t=1187 slot 663 flags want 78 got 14 + life
+want 19100 got 19200 (−100 in retail), t=2472 slot 107 flags want 78
+got 14 — the OBS carries the 0x40 request bit set MID-TICK while the
+pre-tick state channel shows 14 both sides: the port's cast/request
+writer does not fire where retail's does (and retail's life drops 100
+at the same tick). Castle 107's traced rebuild: established action 4
+at 2380 (f63 151), upgrade machine action 5 sub-states 0/4/6 through
+2422-2469 (~47 ticks/level — the dispatcher and the fleet freeze for
+the whole window), established again 2470. NEXT: find the retail
+request writer (the m16 manifestation pass? the −100 life is its
+signature), diff the port's, then re-time the action-5 wait states
+against the painter round trip.
+
+## ADDENDUM (same session): THE (3,2) REQUEST LANE ~CLOSED — token delivery + the death-notice fall-through
+
+The "OPEN (3,2) lane" above resolved the same night into three more
+laws, mc1l0 345 → 322 field rows / 47 → 46 missing:
+
+1. **The upgrade token delivers through the OWNER'S BOUND CASTLE**
+   (sub_293D0 :31025-31 resolves wizext+50 — retail never writes the
+   token's +146; the port's imported tokens carried no link and
+   silently missed, which is exactly the flags-78-got-14 family).
+   The token is strictly ONE-tick: f26++, PRE-decrement life, arm,
+   hit → ch5 {10, owner} + free; miss → release the owner's m16
+   manifestation charge pin (sub_46D20(_,0) → port class-12 f26 = 0)
+   + free. The ball's lander stamps the owner ONLY, and the token
+   ctor LINKS at spawn (:47537 — the fresh token's flags 4 is the
+   tile-link bit; the port's ctor never linked).
+2. **The death-notice tick falls through** (sub_46DB0 :56003): a
+   lethal sub_47EC0 parks `+70 = 6` and the established tick KEEPS
+   GOING — owner echo + the whole f63-even block (ejector, extents,
+   fleet dispatch, absorb) run while the castle sits at its negative
+   life. mc1l0 t=2310: the Shift+L self-destruct (life −1, the
+   :55846-50 stamp) SPAWNS balloon 484 mid-death; the level-0 cull
+   demolishes it the next tick. The port's early return dropped the
+   spawn (the last (3,3) missing row). The lethal arms skip only
+   sub_47EC0's own tail (ch5 stays boxed) and the 0x40 else-if; the
+   ch0-lethal arm stamps the killer into +38 (:56695-97).
+3. The castle-ball's upgrade landing calls sub_524C0 = the +78
+   z-lift helper (model-2 EXEMPT → castle no-op) — NOT a damage
+   call; the lone remaining (3,2) row (t=1187 life −100) has no
+   writer in the token/castle chain and the seed's mail box is
+   empty: suspected obs/state capture-point artifact (state@N is
+   PRE-tick; a mid-tick mail written after the capture point is
+   invisible to the seed). Left open, one row.
+
+Pins: `the_death_notice_tick_still_runs_the_dispatcher`;
+`castle_downgrade_ejects_mana_and_demolish_razes` re-tuned (the
+notice tick's ejector clamps an over-banked castle BEFORE the
+downgrade's two passes — three spilling passes = 12 magnets on the
+synthetic 30k bank). mc2l30 t=609 fixture FIXED + promoted by the
+stagger law (castle_balloons is reachable from the MC2-column path).
+404 mgc-sim tests, workspace green, fmt + clippy clean. mc1l5
+179,549 → 179,526, mc1l1 15,855 → 15,789, mc1l2 31,746 → 31,735.
+
+⭐ REPLAY NOTE (the player's worm-kill report): the pair lane is now
+clean through the whole self-destruct window (t=2160-2516 holds five
+sub-pixel/collateral rows) — every degradation step evolves
+tick-exact from a retail seed, so the free-run cadence through a
+self-destruct chain is now retail's. The free-run wall remains
+pose.z t=563 (the mid-walk restructure) — the worm-kill segment sits
+far behind it and needs that wall down before the replay shows the
+kill.

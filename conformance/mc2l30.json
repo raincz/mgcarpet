@@ -318,11 +318,7 @@
     },
     {
       "t": 609,
-      "status": "open",
-      "sig": "d86c632b24ea7713",
-      "atoms": [
-        "field:10,43:life"
-      ],
+      "status": "conforming",
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
     {

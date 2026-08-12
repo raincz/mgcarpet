@@ -2258,14 +2258,18 @@ impl Gen {
             }
             // sub_3B6F0 (:47526): the castle UPGRADE token — state
             // 45, life 8, +44 = -1536 (inert dead weight, same
-            // family as the possess flash), sprite row 41, 512
-            // extents. The caller stamps owner + castle link.
+            // family as the possess flash), LINKED at spawn (:47537
+            // — the tile-link bit is the fresh token's flags 4),
+            // sprite row 41, 512 extents. The caller stamps the
+            // owner; the delivery resolves the castle through the
+            // owner's bound slot, never a stored link.
             43 => {
                 e.tick70 = 45;
                 e.max_life = 8;
                 e.act_life = 8;
                 e.f44 = (-1536i16) as u16;
                 e.flags &= !8;
+                self.link(i, x, y, z);
                 self.set_sprite(i, 41);
                 self.ent[i].f80 = 512;
                 self.ent[i].f82 = 512;
@@ -3428,25 +3432,51 @@ impl Gen {
 
     /// sub_293D0 (:31009), byte70 45: the castle UPGRADE token — the
     /// delivery receipt the upgrade ball morphs into at the castle.
-    /// One armed tick: touching the linked castle (the original
-    /// resolves it through wizext +50 — same castle) → ch5 mail
-    /// {10, owner} (:31033-34) and despawn; the fall-through deletes
-    /// it on the next tick regardless (the ball already carried it
-    /// to the castle — the token is not a traveler).
+    /// Strictly ONE armed tick (:31040-44 — every armed path frees
+    /// the token the same tick): f26++, PRE-decrement life, then the
+    /// bit-2 latch tests overlap against the OWNER'S BOUND castle
+    /// (retail resolves wizext+50, NOT the token's own +146 — an
+    /// imported token carries no link, which silently missed the
+    /// delivery: mc1l0 t=1187/2472, castle flags want 78 got 14).
+    /// Hit → ch5 mail {10, owner} (:31033-34); miss → the owner's
+    /// m16 manifestation charge pin releases (sub_46D20(_, 0) →
+    /// +48 = 0).
     fn tick_upgrade_token(&mut self, i: usize) {
-        if self.ent[i].flags & 2 == 0 {
+        let life = self.ent[i].act_life;
+        self.ent[i].f26 = self.ent[i].f26.wrapping_add(1);
+        self.ent[i].act_life = life - 1;
+        if life >= 0 && self.ent[i].flags & 2 == 0 {
             self.ent[i].flags |= 2;
-            let c = self.ent[i].f146 as usize;
-            if c != 0
-                && self.ent[c].class64 == 3
-                && self.ent[c].model65 == 2
-                && self.ent[c].flags & 0x400 == 0
-                && self.ent_overlap(i, c)
-            {
-                self.ent[c].mail[5] = (10, self.ent[i].id24);
-                self.ent[i].flags |= 0x400;
+            let own = self.ent[i].id24;
+            // The wizext+50 stand-in: +50 is written only by the
+            // level-up commit (:56484) and cleared by the removal
+            // path (:56534), so the bound castle is the owner's
+            // ESTABLISHED (3,2) — a fresh level-0 flag is unbound
+            // and the delivery misses it.
+            let castle = (1..self.ent.len()).find(|&c| {
+                let e = &self.ent[c];
+                e.class64 == 3
+                    && e.model65 == 2
+                    && e.id24 == own
+                    && e.f26 > 0
+                    && e.flags & 0x400 == 0
+            });
+            if let Some(c) = castle {
+                if self.ent_overlap(i, c) {
+                    self.ent[c].mail[5] = (10, own);
+                    self.ent[i].flags |= 0x400;
+                    return;
+                }
             }
-            return;
+            // The miss releases the manifestation's charge pin
+            // (retail +48; the port keeps class-12 state in f26 —
+            // the importer's `f26: r.f48` mapping).
+            if let Some(m) = (1..self.ent.len()).find(|&m| {
+                let e = &self.ent[m];
+                e.class64 == 12 && e.model65 == 16 && e.f144 == own && e.flags & 0x400 == 0
+            }) {
+                self.ent[m].f26 = 0;
+            }
         }
         self.ent[i].flags |= 0x400;
     }
@@ -3599,15 +3629,19 @@ impl Gen {
     /// quota by level: (balloons, guards) = L1(1,0) L2(1,0) L3(1,4)
     /// L4(2,6) L5(2,14) L6(3,18) L7(3,34); shortfalls respawn at the
     /// castle (guards = class-5 m15, HP 512). Targeting (:56358-95):
-    /// the state-9 balloon's target DEFAULTS to the castle every
-    /// pass (:56376 — the return/offload/hover-home behavior), then
-    /// is overridden to the nearest own claimed ball no sibling is
-    /// on, ONLY when the balloon still has cargo room and the castle
-    /// census (house tally + stored) is below capacity. No free ball
-    /// → the castle stays the target: balloons come home and wait
-    /// there. Untraced nicety (deliberate): retail staggers retargeting
-    /// by castle+63 % fleet, keeping a stale ball target between slots'
-    /// turns; we re-pick every pass.
+    /// per fleet index: a spawned index gets NO targeting that pass
+    /// (:56340-49 — the newborn parks at the flag with chase 0), a
+    /// dead one (life < 0) drops its cargo and frees (:56345-47),
+    /// and a live state-9 one retargets ONLY on the stagger turn
+    /// `castle+63 % quota == 0` (:56338) — between turns the stale
+    /// +146 stands, even one pointing at a freed slot (the blind
+    /// mover keeps stepping there). On a stagger turn the target
+    /// DEFAULTS to the castle (:56341 — return/offload/hover-home),
+    /// then is overridden to the nearest own claimed ball no sibling
+    /// is on (3-D metric, sub_42390) while the balloon has cargo
+    /// room. The census-full arm (houses + stored ≥ capacity)
+    /// bypasses the stagger and homes every live balloon every pass
+    /// (:56333-35). No free ball → the castle default stands.
     fn castle_balloons(&mut self, i: usize) {
         const FLEET: [(usize, usize); 8] = [
             (0, 0),
@@ -3636,10 +3670,27 @@ impl Gen {
                 _ => {}
             }
         }
+        // The register walk's dead-reap (:56345-47): a balloon whose
+        // life went negative outside its own tick (the one-frame
+        // linger, or an imported mid-death seed) drops its cargo and
+        // frees at DISPATCH time, before the quota count.
+        balloons.retain(|&b| {
+            if self.ent[b].act_life < 0 {
+                self.corpse_drop(b);
+                self.ent[b].flags |= 0x400;
+                false
+            } else {
+                true
+            }
+        });
         let (cx, cy, cz) = {
             let e = &self.ent[i];
             (e.x, e.y, e.z)
         };
+        // A spawned fleet index takes the place of its targeting arm
+        // for the pass (:56340-49): everything from `first_fresh` on
+        // parks at the flag with chase 0 until its stagger turn.
+        let first_fresh = balloons.len();
         while balloons.len() < bq {
             let Some(b) = self.spawn_balloon(cx, cy, cz, own) else {
                 break;
@@ -3652,8 +3703,8 @@ impl Gen {
         // balloons, cargo first spilled as an owned ball (sub_27690,
         // which spawns nothing for an empty balloon — only loaded
         // culls leave a ball behind). Retail walks its 3-slot
-        // register; our scan-order tail stands in (the same
-        // approximation as the retarget re-pick above). TOTAL castle
+        // register; our owner scan in slot order stands in (same
+        // membership, the culled EXCESS may differ). TOTAL castle
         // death runs the same demolition from castle_downgrade
         // (retail orphans the fleet alive there — see
         // docs/DEVIATIONS.md).
@@ -3690,17 +3741,39 @@ impl Gen {
             }
         }
         let full = house_tally + self.ent[i].f140.max(0) as i64 >= self.ent[i].f136.max(0) as i64;
+        // THE STAGGER (:56338): the ball re-pick runs only on passes
+        // where castle+63 % quota == 0 — between turns every balloon
+        // keeps its stale +146 (even one pointing at a freed slot;
+        // the blind mover keeps flying there). The modulus is the
+        // QUOTA, not the live-fleet size — same as the MC2 twin
+        // (sub_60400 EF:61405).
+        let stagger = bq != 0 && self.ent[i].f63 as usize % bq == 0;
         for k in 0..balloons.len() {
             let b = balloons[k];
-            if full || self.ent[b].f140 >= self.ent[b].f136 {
+            if k >= first_fresh {
+                continue; // spawn pass: no targeting at all (:56340-49)
+            }
+            if full {
+                // The census-full arm bypasses the stagger and homes
+                // every live balloon every pass (:56333-35).
                 self.ent[b].f146 = i as u16;
                 continue;
             }
+            if !stagger || self.ent[b].tick70 != 9 {
+                continue; // stale target stands (:56338-40)
+            }
+            // The castle default is written FIRST (:56341), then a
+            // ball override while there is cargo room.
+            self.ent[b].f146 = i as u16;
+            if self.ent[b].f140 >= self.ent[b].f136 {
+                continue; // cargo full → home
+            }
             // Nearest own claimed ball a sibling isn't already on
-            // (sub_46CA0 :55922).
-            let (bx, by) = (self.ent[b].x, self.ent[b].y);
+            // (sub_46CA0 :55922) — 3-D squared distance (sub_42390:
+            // wrapping i16 deltas incl. z, compared UNSIGNED).
+            let (bx, by, bz) = (self.ent[b].x, self.ent[b].y, self.ent[b].z);
             let mut best = 0usize;
-            let mut best_d = i32::MAX;
+            let mut best_d = u32::MAX;
             for j in 1..self.ent.len() {
                 let e = &self.ent[j];
                 if e.class64 != 10 || e.model65 != 39 || e.flags & 0x400 != 0 || e.f144 != own {
@@ -3712,14 +3785,21 @@ impl Gen {
                 {
                     continue;
                 }
-                let d = Self::dist2_sq(bx, by, e.x, e.y);
+                let dx = (e.x as i16).wrapping_sub(bx as i16) as i32;
+                let dy = (e.y as i16).wrapping_sub(by as i16) as i32;
+                let dz = (e.z).wrapping_sub(bz) as i32;
+                let d = dx
+                    .wrapping_mul(dx)
+                    .wrapping_add(dy.wrapping_mul(dy))
+                    .wrapping_add(dz.wrapping_mul(dz)) as u32;
                 if d < best_d {
                     best_d = d;
                     best = j;
                 }
             }
-            // No free ball → the castle default stands (:56376).
-            self.ent[b].f146 = if best != 0 { best as u16 } else { i as u16 };
+            if best != 0 {
+                self.ent[b].f146 = best as u16;
+            }
         }
     }
 
@@ -3757,19 +3837,20 @@ impl Gen {
     fn balloon_move(&mut self, i: usize) {
         use crate::mc1::behavior::BEHAVIOR;
         let t = self.ent[i].f146 as usize;
-        if t == 0 || self.ent[t].flags & 0x400 != 0 {
+        if t == 0 {
             return; // idle (:56814)
         }
-        // Stale-slot guard: the claim ticket is a RAW slot index. A
-        // collected ball's slot LIFO-recycled by another class-10 (a
-        // dwelling) passes the class check and gets "absorbed" — an
-        // instant-death bug. Retail sub_47F90 (:56742-73) has the same
-        // latent bug; the dispatcher only ever assigns (10,39), so this
-        // blocks nothing legitimate.
-        if self.ent[t].class64 == 10 && self.ent[t].model65 != 39 {
-            self.ent[i].f146 = 0; // ball is gone: back to idle
-            return;
-        }
+        // THE MOVER IS BLIND (sub_47F90 :56735-36): the claim ticket
+        // is dereferenced by the target's CLASS BYTE alone — no
+        // liveness check, no model check. A ball freed mid-flight
+        // (class 0, stale bytes) keeps the balloon stepping at the
+        // corpse position — the ±48 y-bounce across a freed ball's
+        // tile, angle(0,±48) flipping 0/1024 each tick. A slot
+        // recycled into another class-10 hits the ball arm (retail's
+        // latent absorb-the-recycled-record bug, :56742-73); a
+        // recycled class-3 hits the castle arm; anything else is a
+        // plain step at the stale bytes. The dispatcher un-sticks a
+        // registered balloon only on its stagger turn.
         let mut pos = {
             let e = &self.ent[i];
             (e.x, e.y, e.z)
@@ -3806,7 +3887,7 @@ impl Gen {
                     step = false;
                 }
             }
-        } else {
+        } else if self.ent[t].class64 == 3 {
             // Castle target: delivery ring = level * speed.
             let d = Self::isqrt(Self::dist2_sq(pos.0, pos.1, tx, ty) as u32) as i32;
             if d <= self.ent[t].f26 as i32 * speed as i32 {
@@ -3823,6 +3904,8 @@ impl Gen {
                 step = false;
             }
         }
+        // Any other target class — including a freed slot's class-0
+        // corpse — falls through to the plain step (:56807-09).
         if step {
             Self::polar_step(&mut pos, yaw, self.ent[i].f32, speed);
         }
@@ -4027,46 +4110,54 @@ impl Gen {
                 // sub_47EC0's first line (:56683): already below
                 // zero → the leveler. This is also the demolish path
                 // — Shift+L writes life = −1 with no mail at all
-                // (:55846-50). Both lethal arms return 2, and :56003
-                // turns a 2 into `+70 = 6` and NOTHING else: the
-                // castle sits at its negative life for this whole
-                // tick and the downgrade runs at the top of the next.
-                if self.ent[i].act_life < 0 {
-                    self.ent[i].tick70 = 6;
-                    return;
-                }
-                // sub_47EC0: HP -= pending ch0; lethal → the
-                // one-level downgrade, deferred through action 6.
-                if self.ent[i].mail[0].1 != 0 {
-                    let amt = self.ent[i].mail[0].0;
+                // (:55846-50). Both lethal arms return 2 and :56003
+                // turns a 2 into `+70 = 6` — but sub_46DB0 does NOT
+                // return there: the owner echo and the whole
+                // f63-even block below still run on the death-notice
+                // tick (mc1l0 t=2310: the self-destructing castle at
+                // life −1 SPAWNS balloon 484 through the dispatcher,
+                // and the next tick's level-0 cull demolishes it —
+                // the port's early return dropped the spawn). The
+                // lethal arms skip only sub_47EC0's own tail (ch5
+                // stays in the box) and the 0x40 else-if.
+                let mut lethal = self.ent[i].act_life < 0;
+                if !lethal && self.ent[i].mail[0].1 != 0 {
+                    // sub_47EC0: HP -= pending ch0; lethal → the
+                    // one-level downgrade, deferred through action 6,
+                    // with the killer stamped into +38 (:56695-97).
+                    let (amt, src) = self.ent[i].mail[0];
                     self.ent[i].mail[0] = (0, 0);
                     self.ent[i].act_life -= amt as i32;
                     if self.ent[i].act_life < 0 {
-                        self.ent[i].tick70 = 6;
-                        return;
-                    }
-                    // "Castle under attack" flash (Type_160+391=4).
-                    if self.ent[i].id24 == crate::mc1::mobs::PLAYER_TARGET {
+                        self.ent[i].f38 = src;
+                        lethal = true;
+                    } else if self.ent[i].id24 == crate::mc1::mobs::PLAYER_TARGET {
+                        // "Castle under attack" flash (Type_160+391=4).
                         self.castle_alert = 4;
                     }
                 }
-                if self.ent[i].mail[5].1 != 0 {
-                    let sender = self.ent[i].mail[5].1;
-                    self.ent[i].mail[5] = (0, 0);
-                    if sender == self.ent[i].id24 && self.ent[i].f26 < 7 {
-                        // sub_47EC0 :56707-11 — the inbox arms the
-                        // upgrade-request BIT (+16 |= 0x40), and the
-                        // settled tick's own check below launches it.
-                        self.ent[i].flags |= 0x40;
+                if lethal {
+                    self.ent[i].tick70 = 6;
+                } else {
+                    if self.ent[i].mail[5].1 != 0 {
+                        let sender = self.ent[i].mail[5].1;
+                        self.ent[i].mail[5] = (0, 0);
+                        if sender == self.ent[i].id24 && self.ent[i].f26 < 7 {
+                            // sub_47EC0 :56707-11 — the inbox arms the
+                            // upgrade-request BIT (+16 |= 0x40), and the
+                            // settled tick's own check below launches it.
+                            self.ent[i].flags |= 0x40;
+                        }
                     }
-                }
-                // sub_46DB0 :56007-11 — the request bit sends the
-                // settled castle into the level-up; the commit clears
-                // it (:56475). Checked as a FLAG (not a direct state
-                // write off the mail) so an imported castle captured
-                // between request and commit resumes correctly.
-                if self.ent[i].flags & 0x40 != 0 {
-                    self.ent[i].f59 = 0;
+                    // sub_46DB0 :56007-11 — the request bit sends the
+                    // settled castle into the level-up; the commit
+                    // clears it (:56475). Checked as a FLAG (not a
+                    // direct state write off the mail) so an imported
+                    // castle captured between request and commit
+                    // resumes correctly.
+                    if self.ent[i].flags & 0x40 != 0 {
+                        self.ent[i].f59 = 0;
+                    }
                 }
                 // Every settled tick echoes the owner into +144
                 // (sub_46DB0 :52080 `+144 = +24`) — the lane ball
@@ -5902,7 +5993,10 @@ mod tests {
     /// dispatcher only ever assigns (10,39), so the guard blocks
     /// nothing legitimate.
     #[test]
-    fn balloon_ignores_recycled_claim_slots() {
+    fn the_balloon_mover_is_blind() {
+        // sub_47F90 dereferences the claim ticket by the target's
+        // CLASS BYTE alone — no liveness check, no model check
+        // (mc1l0 t=2472-2516: the y-bounce across freed ball 88).
         let mut g = Gen::new(
             flat_land(8),
             synthetic_assets(),
@@ -5914,15 +6008,16 @@ mod tests {
         {
             let e = &mut g.ent[b];
             e.class64 = 3;
-            e.model65 = 4;
+            e.model65 = 3;
             e.x = 0x4000;
             e.y = 0x4000;
             e.z = 300;
             e.f126 = 8;
         }
         let own = g.ent[b].id24;
-        // The claimed slot, recycled as a DWELLING (10,45) overlapping
-        // the balloon (the LIFO-reuse shape).
+        // A claimed slot recycled as a DWELLING (10,45) overlapping
+        // the balloon: the blind ball arm absorbs the record —
+        // retail's latent LIFO-reuse bug (:56742-73) is the law.
         let t = g.new_event().unwrap();
         {
             let e = &mut g.ent[t];
@@ -5939,14 +6034,158 @@ mod tests {
         }
         g.ent[b].f146 = t as u16;
         g.balloon_move(b);
-        assert_eq!(g.ent[t].flags & 0x400, 0, "the dwelling survives");
-        assert_eq!(g.ent[b].f146, 0, "the stale claim is dropped");
+        assert_ne!(
+            g.ent[t].flags & 0x400,
+            0,
+            "the recycled record is absorbed like a ball"
+        );
+        assert_eq!(g.ent[b].f146, 0, "the absorb clears the claim");
+        assert_eq!(g.ent[b].f140, 500, "the record's cargo transfers");
 
-        // Control: the same slot as a real (10,39) ball IS collected.
-        g.ent[t].model65 = 39;
-        g.ent[b].f146 = t as u16;
+        // A claim at a FREED slot (class 0, stale bytes — the
+        // importer's carry): the mover neither idles nor clears it;
+        // it bounces across the corpse position, angle(0,±step)
+        // flipping the heading 1024/0 each tick.
+        let dead = g.new_event().unwrap();
+        {
+            let e = &mut g.ent[dead];
+            e.class64 = 0;
+            e.model65 = 39;
+            e.flags = 0x400 | 12;
+            e.x = 0x4000;
+            e.y = 0x4000;
+        }
+        {
+            let e = &mut g.ent[b];
+            e.x = 0x4000;
+            e.y = 0x4000 - 8; // one speed-step shy of the corpse
+            e.f146 = dead as u16;
+            e.f30 = 7;
+        }
         g.balloon_move(b);
-        assert_ne!(g.ent[t].flags & 0x400, 0, "the real ball is absorbed");
+        assert_eq!(g.ent[b].f146, dead as u16, "the stale claim stands");
+        assert_eq!(g.ent[b].f30, 1024, "heading points down the +y delta");
+        assert_eq!(g.ent[b].y, 0x4000, "the step lands ON the corpse");
+        g.balloon_move(b);
+        assert_eq!(g.ent[b].f30, 0, "the zero-delta angle is 0");
+        assert_eq!(g.ent[b].y, 0x4000 - 8, "the next step bounces back off");
+    }
+
+    #[test]
+    fn the_dispatcher_staggers_retargeting_and_a_fresh_balloon_parks_untargeted() {
+        // sub_47400: a spawned fleet index gets NO targeting that
+        // pass (:56340-49 — mc1l0 t=2379, the newborn parks with
+        // chase 0); a live one retargets only when castle+63 %
+        // quota == 0 (:56338), and the ball pick is 3-D nearest
+        // (sub_42390 includes z).
+        let mut g = Gen::new(
+            flat_land(8),
+            synthetic_assets(),
+            1,
+            ChassisParams::MC1,
+            VerbSet::MC1,
+        );
+        let c = g.new_event().unwrap();
+        {
+            let e = &mut g.ent[c];
+            e.class64 = 3;
+            e.model65 = 2;
+            e.id24 = 630;
+            e.f26 = 4; // level 4: quota (2, 6)
+            e.f136 = 1_000_000; // census far from full
+            e.x = 0x4000;
+            e.y = 0x4000;
+        }
+        // A claimed ball waiting nearby.
+        let ball = g.new_event().unwrap();
+        {
+            let e = &mut g.ent[ball];
+            e.class64 = 10;
+            e.model65 = 39;
+            e.x = 0x4000 + 400;
+            e.y = 0x4000;
+            e.f144 = 630;
+            e.f140 = 100;
+        }
+        // Spawn pass (stagger hit, f63 = 2): both fresh balloons
+        // park untargeted despite the waiting ball.
+        g.ent[c].f63 = 2;
+        g.castle_balloons(c);
+        let fleet: Vec<usize> = (1..g.ent.len())
+            .filter(|&j| g.ent[j].class64 == 3 && g.ent[j].model65 == 3)
+            .collect();
+        assert_eq!(fleet.len(), 2, "the level-4 quota spawns two");
+        for &b in &fleet {
+            assert_eq!(g.ent[b].f146, 0, "a fresh balloon has no target");
+        }
+        // Off-stagger pass (f63 = 3, 3 % 2 != 0): stale targets
+        // stand — even a dangling one.
+        g.ent[fleet[0]].f146 = 999;
+        g.ent[c].f63 = 3;
+        g.castle_balloons(c);
+        assert_eq!(g.ent[fleet[0]].f146, 999, "off-turn keeps the stale claim");
+        // Stagger pass (f63 = 4): the re-pick runs — a second ball
+        // nearer in 2-D but farther in 3-D loses (sub_42390).
+        let far3d = g.new_event().unwrap();
+        {
+            let e = &mut g.ent[far3d];
+            e.class64 = 10;
+            e.model65 = 39;
+            e.x = 0x4000 + 300; // 2-D nearer than `ball`…
+            e.y = 0x4000;
+            e.z = 2000; // …but 3-D much farther
+            e.f144 = 630;
+            e.f140 = 100;
+        }
+        g.ent[c].f63 = 4;
+        g.castle_balloons(c);
+        assert_eq!(
+            g.ent[fleet[0]].f146, ball as u16,
+            "the first balloon takes the 3-D-nearest ball (not the 2-D pick)"
+        );
+        assert_eq!(
+            g.ent[fleet[1]].f146, far3d as u16,
+            "sibling exclusion hands the second balloon the other ball"
+        );
+    }
+
+    #[test]
+    fn the_death_notice_tick_still_runs_the_dispatcher() {
+        // sub_46DB0 :56003 sets `+70 = 6` on a lethal sub_47EC0 and
+        // FALLS THROUGH — the f63-even block (ejector, extents,
+        // fleet dispatch, absorb) still runs while the castle sits
+        // at its negative life (mc1l0 t=2310: the Shift+L
+        // self-destruct at life −1 spawns balloon 484, which the
+        // next tick's level-0 cull demolishes).
+        let mut g = Gen::new(
+            flat_land(8),
+            synthetic_assets(),
+            1,
+            ChassisParams::MC1,
+            VerbSet::MC1,
+        );
+        let c = g.new_event().unwrap();
+        {
+            let e = &mut g.ent[c];
+            e.class64 = 3;
+            e.model65 = 2;
+            e.tick70 = 4;
+            e.id24 = 630;
+            e.f26 = 1; // level 1: quota (1, 0)
+            e.f136 = 1_000_000;
+            e.f59 = 4;
+            e.f63 = 2; // even → the dispatcher pass
+            e.act_life = -1; // the Shift+L demolish stamp (:55846-50)
+            e.x = 0x4000;
+            e.y = 0x4000;
+        }
+        g.castle_tick(c, crate::patches::WorldPatches::RETAIL);
+        assert_eq!(g.ent[c].tick70, 6, "the lethal notice parks action 6");
+        assert_eq!(g.ent[c].act_life, -1, "the negative life lingers the tick");
+        let fleet = (1..g.ent.len())
+            .filter(|&j| g.ent[j].class64 == 3 && g.ent[j].model65 == 3)
+            .count();
+        assert_eq!(fleet, 1, "the death-notice tick still spawns the fleet");
     }
 
     fn mc2_gen() -> Gen {
