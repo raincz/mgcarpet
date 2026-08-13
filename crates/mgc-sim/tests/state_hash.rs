@@ -208,6 +208,7 @@ fn level_005_golden_state_hashes() {
         "sim is not deterministic"
     );
     println!("state hashes: {got:#018x?}");
+    println!("observable:   {obs:#018x?}");
 
     // These goldens encode retail's house-emit gate: the EXACT
     // equality `f26 == f128` (:30819), not a `>=` (which would let
@@ -487,9 +488,9 @@ fn level_005_golden_state_hashes() {
     // OBSERVABLE verdict below.
     const GOLDEN: [u64; 6] = [
         0xfd3092a200982040, // post-init (feature pass + disposition 0)
-        0x7566954183a4ce47, // A: 32 idle ticks far afield
-        0x8de8cfcd4ab56b53, // B: crater trigger fired + 120 dig ticks
-        0x989e1d28b3c608a6, // C: ambush disposition fired
+        0x23f78bd0c449e3c7, // A: 32 idle ticks far afield
+        0x2e45a4b7dae76bd3, // B: crater trigger fired + 120 dig ticks
+        0x95ce584071f07226, // C: ambush disposition fired
         // D/E previously re-pinned for THE CAST-PHASE LAW (the MC1
         // arm→token-fire restructure): every hand cast now arms its
         // spell token at the wizard pass and the token's own tick
@@ -594,8 +595,49 @@ fn level_005_golden_state_hashes() {
         // fireballs, previously born 0. Post-init..C hold — no bolt
         // exists before D. OBSERVABLE holds byte-for-byte: the stamp
         // is bookkeeping on a lane nothing in-engine reads.
-        0x4d55b9b9a8698f6c, // D: 64 ticks of two-hand fireball combat
-        0x70d58338adcf8837, // E: 100 aftermath ticks
+        // D/E re-pinned for the CORPSE-DROP f34 MIRROR removal
+        // (corpse_drop_mc1 — retail sub_27690 :29663 writes only
+        // +30): the D-window kills' mana balls are born target_yaw 0
+        // like retail. Post-init..C hold (no drop before D).
+        // Motion-inert — the ball tick never reads f34; OBSERVABLE
+        // holds byte-for-byte below. Corpus: the mc1l0 pair-564
+        // (10,39) family (129 masked rows) at 0, l1 −187, l2 −166,
+        // l5 −484 unexplained target_yaw rows; 10/10 suites, 0
+        // regressions.
+        // D/E re-pinned for THE WIZARD-TICK BODY ORDER + THE LIFE-RATE
+        // REGISTER (mc1l0 free-run t=1128/t=1144 digs): the mailbox
+        // block now runs INSIDE the carpet dispatch BEFORE the move
+        // (sub_45C90: intake :55344-78, move sub_455D0 at the tail —
+        // a lower-slot hit's knock shoves the SAME tick's move), the
+        // regen tail follows the move, and life regen applies the
+        // PERSISTED u16_341 register before re-selecting it (:55388 /
+        // :55414-20 — the castle rate lands one tick after var_50
+        // latches). ⭐ BOOKKEEPING in this slice: OBSERVABLE holds
+        // byte-for-byte below — D/E fireball combat takes identical
+        // damage on identical ticks; the moved words are the
+        // reordered intake/knock/mail phase inside the tick and the
+        // register joining player state. The behavioral half is
+        // free-run-only (horizon 605 → 1188, the vulture-knock pose
+        // fork and the castle-establish regen staircase), where pair
+        // mode imports retail's own wizext lanes each pair.
+        // A..E re-pinned for THE END-TO-END SESSION (mc1l0 free run
+        // bit-exact 0..7097): (1) the fire scorch gate's water probe
+        // is sub_11760's ANGLE nibble (:28098), not the tile-type
+        // twin — the ambient fires' draw streams and flicker deltas
+        // move from leg A on (shore cells split the two probes);
+        // (2) the live castle painter buffers per-cell goal deltas
+        // over the LEVEL rect, last row wins, one apply pass
+        // (sub_285C0 :30538-70); (3) the projectile impact/rebound
+        // Player arms lift by PLAYER_HH like the pool arms; (4) the
+        // house wanted arm rides the occupied branch only
+        // (:30790-97); (5) villager hit ticks freeze (m12 :25057-67);
+        // (6) the militia chase re-bears f34 only + re-arms wanted on
+        // its own cadence (:22705-14). OBSERVABLE holds byte-for-byte
+        // at post-init..C (the moved words are draw-stream and
+        // bookkeeping state under pose quantization) and moves at D/E
+        // with the combat-window laws — the CORRECT signal.
+        0x9496dd75d8267539, // D: 64 ticks of two-hand fireball combat
+        0xc0cd7f5baf157662, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,

@@ -241,11 +241,17 @@ fn flight_tier_golden_state_hashes() {
     // them; no magnet/claim/corpse event fires in these windows), so
     // the flight tracks are untouched — bookkeeping toward retail's
     // byte image.
+    // FAITHFUL B-C re-pinned for the CORPSE-DROP f34 MIRROR removal
+    // (corpse_drop_mc1 — retail sub_27690 :29663 writes only +30): a
+    // drop landing in those windows is born target_yaw 0 like
+    // retail. Motion-inert (the ball tick never reads f34); ENHANCED
+    // holds (its track sees no drop). Bookkeeping toward retail's
+    // byte image — the mc1l0 pair-564 (10,39) family at 0.
     const FAITHFUL: [u64; 4] = [
         0x4403f4de7cb7d9bc, // post-init
         0x54edc7d9dbdb0ccd, // A: 40 ticks of forward thrust
-        0xa8e4433259426643, // B: 30 ticks of banked turn + strafe
-        0x3b002b11c8e54298, // C: 40 ticks of coast
+        0x5d39f34d39ed7ded, // B: 30 ticks of banked turn + strafe
+        0x77d8fbfe1beb6b93, // C: 40 ticks of coast
     ];
     // Re-pinned for the enhanced-bank strafe fix (2026-07-27): the
     // proportional camera bank no longer gates off while strafing — it

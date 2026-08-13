@@ -134,10 +134,9 @@ fn for_each_pair(
     let level = rec.header.level.ok_or("recording has no level number")?;
     let (mut world, pristine) = verify::build_world(baked, &game, level)?;
 
+    let _ = input_delay; // superseded by the dw_0 cast lane
     let mut prev: Option<(u64, RetailMc1, PlayerCommand)> = None;
     let mut prev_cmd = PlayerCommand::default();
-    let mut cmd_ring: std::collections::VecDeque<PlayerCommand> =
-        std::iter::repeat_n(PlayerCommand::default(), input_delay as usize + 1).collect();
     // Measured terrain (format-2 channel), same pending-block pattern
     // as verify-deltas — the suite MUST run pairs on the same terrain
     // the triage run graded them under.
@@ -162,18 +161,10 @@ fn for_each_pair(
             continue;
         };
         let st = decode_retail_mc1(state)?;
-        let sampled = tick
-            .input
-            .as_ref()
-            .and_then(|i| i.get("mouse_buttons"))
-            .map(|b| PlayerCommand {
-                fire_left: b.get("left").and_then(|v| v.as_bool()).unwrap_or(false),
-                fire_right: b.get("right").and_then(|v| v.as_bool()).unwrap_or(false),
-                ..Default::default()
-            })
-            .unwrap_or_default();
-        cmd_ring.push_back(sampled);
-        let cmd = cmd_ring.pop_front().unwrap_or_default();
+        // The cast lane rides the state's own dw_0 (consumed fire
+        // bits) — the same lane verify-deltas grades on; see
+        // verify::fire_bits_mc1.
+        let cmd = verify::fire_bits_mc1(&st);
         if let Some((pt, pst, pcmd)) = prev.take() {
             let wanted = select.is_none_or(|s| s.contains(&pt));
             if tick.t == pt + 1 && wanted {

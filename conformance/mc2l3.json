@@ -491,11 +491,7 @@
     },
     {
       "t": 1095,
-      "status": "open",
-      "sig": "e4707fbe5ff7125c",
-      "atoms": [
-        "field:10,86:life"
-      ],
+      "status": "conforming",
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
     {
@@ -533,9 +529,9 @@
     {
       "t": 1175,
       "status": "open",
-      "sig": "31584488b7a2a620",
+      "sig": "7fdf8ae1a528d406",
       "atoms": [
-        "missing:10,86"
+        "field:10,86:x"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
@@ -587,11 +583,7 @@
     },
     {
       "t": 1309,
-      "status": "open",
-      "sig": "0df81e3a71dc2119",
-      "atoms": [
-        "field:10,0:rand"
-      ],
+      "status": "conforming",
       "note": "auto-triage vs known-deviations: 2 row(s) unexplained"
     },
     {

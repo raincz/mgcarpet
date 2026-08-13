@@ -1010,6 +1010,10 @@ pub struct RetailWizardMc1 {
     /// Life-regen stall (u32_383): every processed hit sets 16 —
     /// no health regen while > 0 (:55387-90).
     pub regen_stall: u32,
+    /// Life-regen rate REGISTER (u16_341): the regen tail applies
+    /// this, THEN re-selects it from the at-castle test (:55388 /
+    /// :55414-20) — the rate applied at tick N was chosen at N−1.
+    pub life_rate: u16,
     pub shots: u32, // +343
     pub hits: u32,  // +347
     pub kills: u32, // +359
@@ -1188,6 +1192,7 @@ fn decode_retail_wizard_mc1(d: &[u8], i: u16) -> RetailWizardMc1 {
         pitch_acc: u16_(d, t + 329),
         grace: u16_(d, t + 331),
         regen_stall: u32_(d, t + 383),
+        life_rate: u16_(d, t + 341),
         shots: u32_(d, t + 343),
         hits: u32_(d, t + 347),
         kills: u32_(d, t + 359),
@@ -1989,7 +1994,7 @@ impl TerrainImage {
     /// the take declares it — once the accumulator is anchored. A
     /// mid-stream start without the base yields None: relative-only
     /// planes must never be installed as absolute terrain.
-    pub fn measured(&self) -> Option<(&[u8], &[u8], Option<&[u8]>)> {
+    pub fn measured(&self) -> Option<(&[u8], &[u8], Option<&[u8]>, Option<&[u8]>)> {
         if !self.based {
             return None;
         }
@@ -1997,6 +2002,7 @@ impl TerrainImage {
             self.plane("height")?,
             self.plane("type")?,
             self.plane("ceiling"),
+            self.plane("angle"),
         ))
     }
 

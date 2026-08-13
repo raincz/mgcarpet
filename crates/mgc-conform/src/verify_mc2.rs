@@ -252,9 +252,9 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                             img.apply(block)
                                 .map_err(|e| format!("t={pt}: pose terrain: {e}"))?;
                         }
-                        if let Some((h, ty, ceil)) = crate::verify::measured_planes(&timg) {
+                        if let Some((h, ty, ceil, an)) = crate::verify::measured_planes(&timg) {
                             world
-                                .install_measured_terrain(h, ty, ceil)
+                                .install_measured_terrain(h, ty, ceil, an)
                                 .map_err(|e| format!("t={pt}: pose terrain: {e}"))?;
                         }
                         pose_chan
@@ -633,9 +633,9 @@ pub(crate) fn exec_pair_mc2(
     String,
 > {
     world.restore_planes(pristine);
-    if let Some((h, ty, ceil)) = measured {
+    if let Some((h, ty, ceil, an)) = measured {
         world
-            .install_measured_terrain(h, ty, ceil)
+            .install_measured_terrain(h, ty, ceil, an)
             .map_err(|e| format!("terrain: {e}"))?;
     }
     world.restore_thing_table(things);
@@ -989,6 +989,7 @@ fn emit_csv_mc2(
                     crate::roster::Tag::Rule(k) => roster.map_or("", |r| r.rules[k].id.as_str()),
                     crate::roster::Tag::PosePhase => "pose-phase",
                     crate::roster::Tag::SlotDesync => "slot-desync",
+                    crate::roster::Tag::TerrainShadow => "terrain-shadow",
                     crate::roster::Tag::Unexplained => "",
                 },
                 None => "",

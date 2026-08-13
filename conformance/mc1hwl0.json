@@ -70,9 +70,8 @@
     {
       "t": 73,
       "status": "open",
-      "sig": "04810353521f23ea",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,16:f26",
         "field:12,2:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
@@ -98,9 +97,8 @@
     {
       "t": 89,
       "status": "open",
-      "sig": "04810353521f23ea",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,16:f26",
         "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained; f26/charge raw-lane surfacing — lanes not compared at freeze"
@@ -108,10 +106,9 @@
     {
       "t": 91,
       "status": "open",
-      "sig": "27f9e364c71ae015",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,2:f26",
-        "field:3,2:z"
+        "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: roster: mc1hwl0-terrain-z; 1 row(s) unexplained"
     },
@@ -220,9 +217,8 @@
     {
       "t": 902,
       "status": "open",
-      "sig": "8dcb366d140564b9",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,0:f26",
         "field:12,2:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
@@ -230,9 +226,8 @@
     {
       "t": 929,
       "status": "open",
-      "sig": "b02e254bf959a5df",
+      "sig": "ba083d8f2444ade6",
       "atoms": [
-        "field:12,0:f26",
         "field:12,2:f26",
         "field:12,3:f26"
       ],
@@ -262,9 +257,8 @@
     {
       "t": 1045,
       "status": "open",
-      "sig": "687b0b92fb0bf9c3",
+      "sig": "332a1ab0f7b1f25e",
       "atoms": [
-        "field:12,0:f26",
         "field:12,2:f26",
         "field:12,3:f26",
         "field:3,1:chase"
@@ -283,10 +277,9 @@
     {
       "t": 1314,
       "status": "open",
-      "sig": "ba083d8f2444ade6",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,2:f26",
-        "field:12,3:f26"
+        "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained; f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
@@ -297,9 +290,8 @@
     {
       "t": 1698,
       "status": "open",
-      "sig": "8dcb366d140564b9",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,0:f26",
         "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: roster: mc1hw-speed-contrail-extra, mc1hwl0-terrain-z; 14 row(s) unexplained; f26/charge raw-lane surfacing — lanes not compared at freeze"
@@ -347,9 +339,8 @@
     {
       "t": 1906,
       "status": "open",
-      "sig": "d1a48553b4e92eb3",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:10,39:z",
         "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: roster: mc1hwl0-terrain-z, mc1hw-speed-contrail-extra; 15 row(s) unexplained"
@@ -357,11 +348,10 @@
     {
       "t": 2059,
       "status": "capture",
-      "sig": "64d0e9c8974ef46e",
+      "sig": "484c115249ce56da",
       "atoms": [
         "field:12,23:z",
-        "field:12,2:f26",
-        "field:12,3:f26"
+        "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: roster: mc1hwl0-terrain-z"
     },
@@ -489,9 +479,8 @@
     {
       "t": 2933,
       "status": "open",
-      "sig": "35b5f74959db5305",
+      "sig": "ba083d8f2444ade6",
       "atoms": [
-        "field:12,20:f26",
         "field:12,2:f26",
         "field:12,3:f26"
       ],
@@ -633,11 +622,10 @@
     {
       "t": 3561,
       "status": "open",
-      "sig": "2fa1733bd4442715",
+      "sig": "ba083d8f2444ade6",
       "atoms": [
         "field:12,2:f26",
-        "field:12,3:f26",
-        "field:5,15:heading"
+        "field:12,3:f26"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
@@ -704,30 +692,27 @@
     {
       "t": 3651,
       "status": "open",
-      "sig": "ba083d8f2444ade6",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,2:f26",
-        "field:12,3:f26"
+        "field:12,2:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 3687,
       "status": "open",
-      "sig": "ba083d8f2444ade6",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,2:f26",
-        "field:12,3:f26"
+        "field:12,2:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 3753,
       "status": "open",
-      "sig": "ba083d8f2444ade6",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,2:f26",
-        "field:12,3:f26"
+        "field:12,2:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
@@ -908,10 +893,9 @@
     {
       "t": 4355,
       "status": "open",
-      "sig": "ba083d8f2444ade6",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,2:f26",
-        "field:12,3:f26"
+        "field:12,2:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
@@ -1329,10 +1313,9 @@
     {
       "t": 7964,
       "status": "open",
-      "sig": "ba083d8f2444ade6",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,2:f26",
-        "field:12,3:f26"
+        "field:12,2:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
@@ -1435,20 +1418,12 @@
     },
     {
       "t": 9068,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 9280,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -1457,11 +1432,7 @@
     },
     {
       "t": 9366,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -1507,9 +1478,8 @@
     {
       "t": 10134,
       "status": "open",
-      "sig": "35a2b49af62e021e",
+      "sig": "ba083d8f2444ade6",
       "atoms": [
-        "field:12,16:f26",
         "field:12,2:f26",
         "field:12,3:f26"
       ],
@@ -1556,29 +1526,17 @@
     },
     {
       "t": 11236,
-      "status": "open",
-      "sig": "75c977f5180df416",
-      "atoms": [
-        "field:12,20:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 11365,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 11391,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -1611,9 +1569,8 @@
     {
       "t": 12298,
       "status": "open",
-      "sig": "da2c2a5fbf9aeb03",
+      "sig": "04227f961b09cd68",
       "atoms": [
-        "field:12,0:f26",
         "field:12,14:f26",
         "field:12,18:f26",
         "field:12,4:f26"
@@ -1623,9 +1580,8 @@
     {
       "t": 12350,
       "status": "open",
-      "sig": "da2c2a5fbf9aeb03",
+      "sig": "04227f961b09cd68",
       "atoms": [
-        "field:12,0:f26",
         "field:12,14:f26",
         "field:12,18:f26",
         "field:12,4:f26"
@@ -1646,9 +1602,8 @@
     {
       "t": 12431,
       "status": "open",
-      "sig": "f3dac68813bada89",
+      "sig": "6cf03499d86f0c2e",
       "atoms": [
-        "field:12,0:f26",
         "field:12,14:f26",
         "field:12,4:f26"
       ],
@@ -1788,9 +1743,8 @@
     {
       "t": 13664,
       "status": "open",
-      "sig": "d2be1e23bddde332",
+      "sig": "c62fd29328c1190c",
       "atoms": [
-        "field:12,3:f26",
         "field:12,4:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
@@ -1801,11 +1755,7 @@
     },
     {
       "t": 14247,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -2039,10 +1989,9 @@
     {
       "t": 15710,
       "status": "open",
-      "sig": "ba083d8f2444ade6",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,2:f26",
-        "field:12,3:f26"
+        "field:12,2:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
@@ -2152,10 +2101,9 @@
     {
       "t": 24264,
       "status": "open",
-      "sig": "bc8655591d392891",
+      "sig": "5f23be31ebba6725",
       "atoms": [
         "field:12,2:f26",
-        "field:12,3:f26",
         "field:3,1:mana"
       ],
       "note": "rival (3,1) mana +100 per pair under window import — IMPORT-DOMAIN lead: retail's rival pays ~100-150/tick in these stretches and the import doesn't reconstruct the paying state (regen-stall class; cf. the 2026-08-07 human regen_delay fix). Rebound arm itself VINDICATED by player retail playtest 2026-08-07 (castle rubble → rebound lapses) — topic closed, this is a seeding gap, not a sim-law question"
@@ -2167,10 +2115,9 @@
     {
       "t": 25922,
       "status": "open",
-      "sig": "bc8655591d392891",
+      "sig": "5f23be31ebba6725",
       "atoms": [
         "field:12,2:f26",
-        "field:12,3:f26",
         "field:3,1:mana"
       ],
       "note": "rival (3,1) mana +100 per pair under window import — IMPORT-DOMAIN lead: retail's rival pays ~100-150/tick in these stretches and the import doesn't reconstruct the paying state (regen-stall class; cf. the 2026-08-07 human regen_delay fix). Rebound arm itself VINDICATED by player retail playtest 2026-08-07 (castle rubble → rebound lapses) — topic closed, this is a seeding gap, not a sim-law question"
@@ -2185,11 +2132,7 @@
     },
     {
       "t": 26434,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -2298,12 +2241,7 @@
     },
     {
       "t": 27119,
-      "status": "open",
-      "sig": "8d5da48c73e4dc9d",
-      "atoms": [
-        "field:12,3:f26",
-        "field:9,1:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -2312,20 +2250,12 @@
     },
     {
       "t": 27163,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 27183,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -2334,20 +2264,12 @@
     },
     {
       "t": 27232,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 27252,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -2356,29 +2278,17 @@
     },
     {
       "t": 27299,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 27318,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 27333,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -2395,20 +2305,12 @@
     },
     {
       "t": 27414,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 27432,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -2545,11 +2447,7 @@
     },
     {
       "t": 27961,
-      "status": "open",
-      "sig": "c62fd29328c1190c",
-      "atoms": [
-        "field:12,4:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3140,11 +3038,7 @@
     },
     {
       "t": 30429,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3352,11 +3246,9 @@
     {
       "t": 31467,
       "status": "open",
-      "sig": "0dd295f12095cd0c",
+      "sig": "c62fd29328c1190c",
       "atoms": [
-        "field:12,3:f26",
-        "field:12,4:f26",
-        "field:9,1:f26"
+        "field:12,4:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
@@ -3371,40 +3263,22 @@
     },
     {
       "t": 31563,
-      "status": "open",
-      "sig": "8d5da48c73e4dc9d",
-      "atoms": [
-        "field:12,3:f26",
-        "field:9,1:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 31617,
-      "status": "open",
-      "sig": "8d5da48c73e4dc9d",
-      "atoms": [
-        "field:12,3:f26",
-        "field:9,1:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 31655,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 31714,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3479,9 +3353,8 @@
     {
       "t": 32253,
       "status": "open",
-      "sig": "d2be1e23bddde332",
+      "sig": "c62fd29328c1190c",
       "atoms": [
-        "field:12,3:f26",
         "field:12,4:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
@@ -3489,9 +3362,8 @@
     {
       "t": 32290,
       "status": "open",
-      "sig": "d2be1e23bddde332",
+      "sig": "c62fd29328c1190c",
       "atoms": [
-        "field:12,3:f26",
         "field:12,4:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
@@ -3506,11 +3378,7 @@
     },
     {
       "t": 32456,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3523,11 +3391,7 @@
     },
     {
       "t": 32624,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3536,65 +3400,37 @@
     },
     {
       "t": 32686,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 32712,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 32747,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 32791,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 32819,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 32888,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 32925,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3604,21 +3440,16 @@
     {
       "t": 32996,
       "status": "open",
-      "sig": "ef781db657778342",
+      "sig": "8973f653efc622e8",
       "atoms": [
         "field:10,45:f26",
-        "field:12,3:f26",
         "field:5,4:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 33025,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3631,20 +3462,12 @@
     },
     {
       "t": 33096,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 33143,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3684,9 +3507,8 @@
     {
       "t": 34212,
       "status": "open",
-      "sig": "d2be1e23bddde332",
+      "sig": "c62fd29328c1190c",
       "atoms": [
-        "field:12,3:f26",
         "field:12,4:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
@@ -3694,9 +3516,8 @@
     {
       "t": 34269,
       "status": "open",
-      "sig": "d2be1e23bddde332",
+      "sig": "c62fd29328c1190c",
       "atoms": [
-        "field:12,3:f26",
         "field:12,4:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
@@ -3731,10 +3552,9 @@
     {
       "t": 34363,
       "status": "open",
-      "sig": "0b3f09901e51a8b8",
+      "sig": "c62fd29328c1190c",
       "atoms": [
-        "field:12,4:f26",
-        "field:12,7:f26"
+        "field:12,4:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
@@ -3772,11 +3592,7 @@
     },
     {
       "t": 34583,
-      "status": "open",
-      "sig": "1f7ea592ecb335b3",
-      "atoms": [
-        "field:12,18:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3785,38 +3601,22 @@
     },
     {
       "t": 34711,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 34762,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 34779,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 34806,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3825,11 +3625,7 @@
     },
     {
       "t": 34871,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3838,11 +3634,7 @@
     },
     {
       "t": 34914,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3859,20 +3651,12 @@
     },
     {
       "t": 35114,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 35141,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3897,20 +3681,12 @@
     },
     {
       "t": 35991,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 36024,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3919,20 +3695,12 @@
     },
     {
       "t": 36089,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 36119,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -3945,11 +3713,7 @@
     },
     {
       "t": 36225,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4009,11 +3773,7 @@
     },
     {
       "t": 37104,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4035,47 +3795,27 @@
     },
     {
       "t": 37211,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 37245,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 37272,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 37299,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 37395,
-      "status": "open",
-      "sig": "8f3d21aea90e2027",
-      "atoms": [
-        "field:12,7:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4092,11 +3832,7 @@
     },
     {
       "t": 37938,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4118,20 +3854,12 @@
     },
     {
       "t": 38514,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 38562,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4173,11 +3901,7 @@
     },
     {
       "t": 38817,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4198,11 +3922,7 @@
     },
     {
       "t": 38962,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4219,11 +3939,7 @@
     },
     {
       "t": 39064,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4232,29 +3948,17 @@
     },
     {
       "t": 39118,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 39150,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 39179,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4292,11 +3996,7 @@
     },
     {
       "t": 39640,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4313,11 +4013,7 @@
     },
     {
       "t": 39768,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4379,11 +4075,7 @@
     },
     {
       "t": 40104,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4465,11 +4157,7 @@
     },
     {
       "t": 40641,
-      "status": "open",
-      "sig": "8f3d21aea90e2027",
-      "atoms": [
-        "field:12,7:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4503,38 +4191,22 @@
     },
     {
       "t": 40784,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 41145,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 41174,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 41194,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4555,12 +4227,7 @@
     },
     {
       "t": 41314,
-      "status": "open",
-      "sig": "8d5da48c73e4dc9d",
-      "atoms": [
-        "field:12,3:f26",
-        "field:9,1:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4569,11 +4236,7 @@
     },
     {
       "t": 41637,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4586,11 +4249,7 @@
     },
     {
       "t": 41746,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4599,20 +4258,12 @@
     },
     {
       "t": 41810,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 41835,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4629,29 +4280,17 @@
     },
     {
       "t": 41960,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 41987,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 42018,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4664,11 +4303,7 @@
     },
     {
       "t": 42081,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4756,11 +4391,7 @@
     },
     {
       "t": 42545,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4789,11 +4420,7 @@
     },
     {
       "t": 42707,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4842,11 +4469,7 @@
     },
     {
       "t": 42867,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4859,11 +4482,7 @@
     },
     {
       "t": 42952,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
@@ -4918,29 +4537,20 @@
     {
       "t": 43690,
       "status": "open",
-      "sig": "fda612dee53188a7",
+      "sig": "94d44e7c9f3f3e51",
       "atoms": [
-        "field:10,18:f26",
-        "field:12,3:f26"
+        "field:10,18:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 43823,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 43861,
-      "status": "open",
-      "sig": "77ea4ccde3e801f3",
-      "atoms": [
-        "field:12,3:f26"
-      ],
+      "status": "conforming",
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {

@@ -21,8 +21,9 @@
 //!   command there, the accumulators visibly decay, recovery returns
 //!   a centered stick.
 //!
-//! The world lanes are untouched: the shadow step runs against the
-//! imported world at N (terrain + walls) and never mutates it, and
+//! The world lanes are untouched: the shadow step never mutates the
+//! world (ground reads the pair tick's mid-walk height snapshot —
+//! the mover's own probe phase — walls the settled world), and
 //! fixture signatures cannot drift because `exec_pair` is not
 //! involved.
 
@@ -122,9 +123,17 @@ impl PoseLane {
 
     /// Step one fixture-grade pair through the shadow mover. `world`
     /// is the imported state@N (terrain installed) and is only read.
+    /// `ground_mid` is the reconstructed MID-WALK height plane
+    /// (verify.rs: measured endpoints phased per cell by the pair
+    /// tick's own snapshot oracle) — retail's carpet probes ground
+    /// at its own walk slot, after the tick's lower-slot terraform
+    /// and before the higher-slot digs, an image neither record
+    /// endpoint holds (t=567 vs t=1210, the two failure families).
+    /// When absent, the world's settled planes.
     pub fn run_pair_mc1(
         &mut self,
         world: &World,
+        ground_mid: Option<&[u8]>,
         pst: &RetailMc1,
         st: &RetailMc1,
         human_slot: u16,
@@ -218,14 +227,13 @@ impl PoseLane {
             }
         }
         let knock = consumed_knock(w0.knock_mag, w0.knock_dir, w1.knock_mag, w1.knock_dir);
-        flight::mc1_move(
-            &mut s,
-            &inp,
-            None,
-            knock,
-            &|x, y| world.ground_z_engine(x, y),
-            &|cur, prop| world.player_wall_gate_fixed(cur, prop),
-        );
+        let ground = |x: u16, y: u16| match ground_mid {
+            Some(h) => World::ground_z_on_plane(h, x, y),
+            None => world.ground_z_engine(x, y),
+        };
+        flight::mc1_move(&mut s, &inp, None, knock, &ground, &|cur, prop| {
+            world.player_wall_gate_fixed(cur, prop)
+        });
         self.stepped += 1;
         let ctx = (
             human_slot,

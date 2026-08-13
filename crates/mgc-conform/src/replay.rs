@@ -39,7 +39,7 @@ use mgc_sim::engine::world::conformance::{
     PinnedMc1, PinnedMc2, integer_pose, mc1_state_from_retail, mc2_state_from_retail,
     pose_lanes_mc1, pose_lanes_mc2,
 };
-use mgc_sim::engine::world::{PlayerCommand, PlayerPose, World};
+use mgc_sim::engine::world::{FlightDrive, PlayerCommand, PlayerPose, World};
 use mgc_sim::flight::{self, Mc1Input, Mc1State, Mc2Ext};
 use mgc_sim::mc1::spells::SpellId;
 use std::collections::BTreeMap;
@@ -111,10 +111,13 @@ impl Chain {
     }
 }
 
-/// One free-run tick, MC1/HW — `Simulation::step`'s faithful path
-/// (mgc-sim lib.rs:556-897) in integer space: dead/falling input
-/// override, Accelerate expiry edge, knock drain, the mover, the
-/// death fall + dead-camera turn, `World::tick`, then the
+/// One free-run tick, MC1/HW — `Simulation::step`'s faithful path in
+/// integer space: dead/falling input override, Accelerate expiry
+/// edge, knock drain at the tick head, then `World::tick_flight` —
+/// the MOVER (with the death fall + dead-camera turn) runs INSIDE the
+/// walk at the carpet's slot, so its ground probe reads this tick's
+/// painted terrain and the walkers below the slot read the record's
+/// pre-move pose (the t=563 replay-wall law) — then the
 /// respawn/teleport/speed-zero mailboxes back into the carpet.
 fn step_mc1(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand) {
     let falling = world.player_falling();
@@ -151,44 +154,14 @@ fn step_mc1(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand
         ch.s.act_speed = 80;
     }
     ch.accel_was_active = over.is_some();
-    let knock = world.take_knock_step();
-    let moved = {
-        let w: &World = world;
-        flight::mc1_move(
-            &mut ch.s,
-            &inp,
-            over,
-            knock,
-            &|x, y| w.ground_z_engine(x, y),
-            &|cur, prop| w.player_wall_gate_fixed(cur, prop),
-        )
+    let mut drive = FlightDrive {
+        s: &mut ch.s,
+        inp,
+        over,
+        falling,
+        dead,
     };
-    if moved.flutter {
-        world.push_player_sound(46);
-    }
-    // Death fall (sub_45FC0): gravity on top of the drift, riding to
-    // the ground+128 floor — integer form of the app's flyer-space
-    // integration (the integer carpet is live under this driver).
-    if falling {
-        let dz = world.death_fall_step();
-        let g = world.ground_z_engine(ch.s.x, ch.s.y);
-        ch.s.z = (ch.s.z as i32 + dz as i32)
-            .max(g as i32 + 128)
-            .min(i16::MAX as i32) as i16;
-    }
-    // Dead (sub_463B0): the grey-screen camera turns toward the
-    // killer while it waits for Space.
-    if dead && let Some((kx, kz)) = world.killer_pos() {
-        let tx = (kx.rem_euclid(256.0) * 256.0) as u16;
-        let ty = (kz.rem_euclid(256.0) * 256.0) as u16;
-        let target = flight::angle_between(ch.s.x, ch.s.y, tx, ty);
-        let mut d = (target as i32 - ch.s.yaw as i32) & 0x7FF;
-        if d > 1024 {
-            d -= 2048;
-        }
-        ch.s.yaw = ((ch.s.yaw as i32 + d.clamp(-16, 16)) & 0x7FF) as u16;
-    }
-    world.tick(ch.pose(), cmd);
+    world.tick_flight(&mut drive, cmd);
     // Respawn (sub_44D30): castle, one tile up, flight state re-armed,
     // heading preserved (the app's from_tiles reset — tick_ctr and the
     // private LCG restart with it).
@@ -575,6 +548,50 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     let mut st_prev: Option<(u64, RetailMc1)> = None;
     let mut chain: Option<(Chain, u16)> = None; // (flight chain, human slot)
     let mut printed_import = false;
+    // MGC_CASTLE_TRACE=<t0>:<t1> — the replay-mode castle-story probe:
+    // at every boundary in range, print the retail (3,2) rows beside
+    // the port's live castles — f70 / case machine / f50 shake / level
+    // / life / ch0 mail — the free-run state-drift microscope the
+    // pair-mode probes can't see.
+    let ctrace = std::env::var("MGC_CASTLE_TRACE").ok().and_then(|v| {
+        let (a, b) = v.split_once(':')?;
+        Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
+    });
+    // MGC_SITE_TRACE=<x>,<y>:<t0>:<t1> — the site-roster companion:
+    // every non-castle entity within 8 tiles of the site, both sides,
+    // compact — the crush/effect-lifetime microscope.
+    let strace = std::env::var("MGC_SITE_TRACE").ok().and_then(|v| {
+        let (xy, ts) = v.split_once(':')?;
+        let (x, y) = xy.split_once(',')?;
+        let (a, b) = ts.split_once(':')?;
+        Some((
+            x.parse::<f64>().ok()?,
+            y.parse::<f64>().ok()?,
+            a.parse::<u64>().ok()?,
+            b.parse::<u64>().ok()?,
+        ))
+    });
+    // MGC_CELL_TRACE=<x>,<y>[;<x>,<y>…]:<t0>:<t1> — the terrain-drift
+    // microscope: the port's live height/type/angle planes beside the
+    // truth channel at the watched cells, printed on change. Terrain
+    // is invisible to grading until something stands on it — this is
+    // how a plant tick is found (the spurious castle-paint apron dip,
+    // t=3856; the fire-cell angle split, t=4290).
+    let celltrace = std::env::var("MGC_CELL_TRACE").ok().and_then(|v| {
+        let (cells, ts) = v.split_once(':')?;
+        let (a, b) = ts.split_once(':')?;
+        let cells: Vec<(u8, u8)> = cells
+            .split(';')
+            .filter_map(|c| {
+                let (x, y) = c.split_once(',')?;
+                Some((x.parse::<u8>().ok()?, y.parse::<u8>().ok()?))
+            })
+            .collect();
+        Some((cells, a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
+    });
+    #[allow(clippy::type_complexity)]
+    let mut celltrace_last: Vec<Option<((u8, u8, u8), (u8, u8, u8))>> =
+        vec![None; celltrace.as_ref().map_or(0, |(c, _, _)| c.len())];
     while let Some(r) = rec.next_tick() {
         let tick = r?;
         // The terrain image tracks the take continuously (self-healing
@@ -610,9 +627,9 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             // measurement-less runs — on already-measured planes it
             // DOUBLE-APPLIES them (the pose channel's proven order,
             // verify_mc2.rs pose-lane re-install).
-            if let Some((h, ty, ceil)) = measured_planes(&timg) {
+            if let Some((h, ty, ceil, an)) = measured_planes(&timg) {
                 world
-                    .install_measured_terrain(h, ty, ceil)
+                    .install_measured_terrain(h, ty, ceil, an)
                     .map_err(|e| format!("t={}: terrain: {e}", tick.t))?;
             }
             let (fl, fr) = recover::mc1_fire(st.wizards[st.local_player as usize].move_bits);
@@ -685,6 +702,7 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
             });
             let pre = world.debug_player_knock();
+            mgc_sim::DEBUG_TICK.store(tick.t, std::sync::atomic::Ordering::Relaxed);
             step_mc1(&mut world, ch, inp, cmd);
             if let Some((t0, t1)) = ktrace
                 && pt >= t0
@@ -708,6 +726,146 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 );
             }
             stats.seg().stepped += 1;
+            if let Some((cells, t0, t1)) = &celltrace
+                && tick.t >= *t0
+                && tick.t <= *t1
+            {
+                for (k, &(cx, cy)) in cells.iter().enumerate() {
+                    let idx = ((cy as usize) << 8) | cx as usize;
+                    let p = world.planes();
+                    let port = (p.height[idx], p.tile_type[idx], p.angle[idx]);
+                    let truth = (
+                        timg.as_ref()
+                            .and_then(|i| i.plane("height"))
+                            .map_or(0, |h| h[idx]),
+                        timg.as_ref()
+                            .and_then(|i| i.plane("type"))
+                            .map_or(0, |t| t[idx]),
+                        timg.as_ref()
+                            .and_then(|i| i.plane("angle"))
+                            .map_or(0, |a| a[idx]),
+                    );
+                    if celltrace_last[k] != Some((port, truth)) {
+                        celltrace_last[k] = Some((port, truth));
+                        println!(
+                            "CELL t={} ({cx},{cy}) port h/ty/an={}/{}/{:#04x} truth={}/{}/{:#04x}{}",
+                            tick.t,
+                            port.0,
+                            port.1,
+                            port.2,
+                            truth.0,
+                            truth.1,
+                            truth.2,
+                            if port != truth { "  <-- DRIFT" } else { "" }
+                        );
+                    }
+                }
+            }
+            if let Some((t0, t1)) = ctrace
+                && tick.t >= t0
+                && tick.t <= t1
+            {
+                for (s, re) in st.ents.iter().enumerate() {
+                    if re.class64 == 3 && re.model65 == 2 {
+                        println!(
+                            "CASTLE t={} retail slot {s} own={} f70={} f48={} f50={} lvl={} \
+                             life={} mail={:?} flags={:#x} at ({:.1},{:.1})",
+                            tick.t,
+                            re.id24,
+                            re.f70,
+                            re.f48,
+                            re.f50,
+                            re.f26,
+                            re.act_life,
+                            re.mail,
+                            re.flags,
+                            re.x as f64 / 256.0,
+                            re.y as f64 / 256.0
+                        );
+                    }
+                }
+                let (_, ev) = world.debug_pool();
+                for d in ev.iter().filter(|d| d.class == 3 && d.model == 2) {
+                    let (t70, f59, f50, f26, life, flags) =
+                        world.debug_castle_machine(d.slot).expect("live slot");
+                    println!(
+                        "CASTLE t={}   port slot {} own={} f70={} f59={} f50={} lvl={} \
+                         life={} mail={:?} flags={:#x} at ({},{})",
+                        tick.t,
+                        d.slot,
+                        d.id24,
+                        t70,
+                        f59,
+                        f50,
+                        f26,
+                        life,
+                        world.debug_mail(d.slot),
+                        flags,
+                        d.tx,
+                        d.ty
+                    );
+                }
+            }
+            if let Some((sx, sy, t0, t1)) = strace
+                && tick.t >= t0
+                && tick.t <= t1
+            {
+                let mut line = format!("SITE t={} retail:", tick.t);
+                for (s, re) in st.ents.iter().enumerate() {
+                    let (ex, ey) = (re.x as f64 / 256.0, re.y as f64 / 256.0);
+                    if re.class64 != 0
+                        && !(re.class64 == 3 && re.model65 == 2)
+                        && (ex - sx).abs() < 8.0
+                        && (ey - sy).abs() < 8.0
+                    {
+                        if re.class64 == 10 && re.model65 == 39 {
+                            let _ = write!(
+                                line,
+                                " [{s}]BALL L{} o{} m{} @({ex:.2},{ey:.2},{})",
+                                re.act_life, re.f144, re.f140, re.z
+                            );
+                        } else {
+                            let _ = write!(
+                                line,
+                                " [{s}]({},{})L{}f26={}f70={}",
+                                re.class64, re.model65, re.act_life, re.f26, re.f70
+                            );
+                        }
+                    }
+                }
+                println!("{line}");
+                let (_, ev) = world.debug_pool();
+                let mut line = format!("SITE t={}   port:", tick.t);
+                for d in &ev {
+                    if (d.class == 3 && d.model == 2)
+                        || ((d.tx as f64) - sx).abs() >= 8.0
+                        || ((d.ty as f64) - sy).abs() >= 8.0
+                    {
+                        continue;
+                    }
+                    if d.class == 10 && d.model == 39 {
+                        let l = world.debug_launch(d.slot).expect("live");
+                        let _ = write!(
+                            line,
+                            " [{}]BALL L{} o{} m{} @({:.2},{:.2},{})",
+                            d.slot,
+                            d.life,
+                            d.owner,
+                            d.cargo,
+                            l.0 as f64 / 256.0,
+                            l.1 as f64 / 256.0,
+                            l.2
+                        );
+                    } else {
+                        let _ = write!(
+                            line,
+                            " [{}]({},{})L{}f26={}f70={}",
+                            d.slot, d.class, d.model, d.life, d.f26, d.state
+                        );
+                    }
+                }
+                println!("{line}");
+            }
             // Grade at the boundary (capture-clean pairs only — a torn
             // snapshot grades nothing, the chain runs on regardless).
             if capture_clean(&pst, &obs) {
@@ -806,9 +964,9 @@ fn pose_only_pair_mc1(
         .map_err(|e| format!("t={pt}: import: {e}"))?;
     // Measured@N+1 AFTER the import — the pose channel's order (the
     // importer's terrain replay double-applies on measured planes).
-    if let Some((h, ty, ceil)) = measured_planes(timg) {
+    if let Some((h, ty, ceil, an)) = measured_planes(timg) {
         world
-            .install_measured_terrain(h, ty, ceil)
+            .install_measured_terrain(h, ty, ceil, an)
             .map_err(|e| format!("t={pt}: terrain: {e}"))?;
     }
     // The chained mover consumes the recorded knock reconstruction
@@ -887,9 +1045,9 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 .retail_import_mc2(&st)
                 .map_err(|e| format!("t={}: import: {e}", tick.t))?;
             // Measured planes AFTER the import (see the MC1 anchor).
-            if let Some((h, ty, ceil)) = measured_planes(&timg) {
+            if let Some((h, ty, ceil, an)) = measured_planes(&timg) {
                 world
-                    .install_measured_terrain(h, ty, ceil)
+                    .install_measured_terrain(h, ty, ceil, an)
                     .map_err(|e| format!("t={}: terrain: {e}", tick.t))?;
             }
             let (fl, fr) = recover::mc1_fire(st.players[st.local_player as usize].move_bits);
@@ -1057,9 +1215,9 @@ fn pose_only_pair_mc2(
         .retail_import_mc2(pst)
         .map_err(|e| format!("t={pt}: import: {e}"))?;
     // Measured@N+1 AFTER the import — the pose channel's order.
-    if let Some((h, ty, ceil)) = measured_planes(timg) {
+    if let Some((h, ty, ceil, an)) = measured_planes(timg) {
         world
-            .install_measured_terrain(h, ty, ceil)
+            .install_measured_terrain(h, ty, ceil, an)
             .map_err(|e| format!("t={pt}: terrain: {e}"))?;
     }
     let knock = consumed_knock(p0.knock_mag, p0.knock_dir, p1.knock_mag, p1.knock_dir);

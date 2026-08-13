@@ -197,6 +197,16 @@ pub enum Tag {
     /// Runner-built (computed per pair, no roster provenance),
     /// reported separately.
     SlotDesync,
+    /// A mover's x/y/heading/pitch row on a slot whose z row THIS
+    /// pair is already claimed by a terrain rule: the walker
+    /// knock-on of the terrain closure (the ground under the mover
+    /// diverges, so its ground-following motion diverges with it).
+    /// The mc1l0-terrain-z rule note predicted exactly this family
+    /// ("the walker x/y/heading knock-on"); the 2026-08-13 (5,3)
+    /// t=2978 flock measured it — every shadowed row rides a
+    /// terrain-z-tagged z sibling on the same slot. Runner-built,
+    /// reported separately.
+    TerrainShadow,
 }
 
 impl Tag {

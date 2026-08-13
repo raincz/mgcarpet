@@ -553,48 +553,9 @@
    "model": 12
   },
   {
-   "id": "mc1-spawn-arm-f34-fire",
-   "status": "deviation",
-   "note": "Resolved \"SPAWN-ARM f34 MIRROR\" (ruled deviation 2026-08-01): the port's spawn arms mirror f34/f36 = f30/f32 on every spawn; retail writes +52 only on homing paths, so these non-homing families are born 0. Write-only lane for them in the port (no gameplay bearing); rows are birth-pair-bounded \u2014 a hit-count jump = a new divergence hiding here.",
-   "takes": [
-    "mc1l0",
-    "mc1hwl0"
-   ],
-   "kind": "field",
-   "class": 10,
-   "model": 0,
-   "field": "target_yaw"
-  },
-  {
-   "id": "mc1-spawn-arm-f34-ball",
-   "status": "deviation",
-   "note": "Resolved \"SPAWN-ARM f34 MIRROR\" (ruled deviation 2026-08-01): the port's spawn arms mirror f34/f36 = f30/f32 on every spawn; retail writes +52 only on homing paths, so these non-homing families are born 0. Write-only lane for them in the port (no gameplay bearing); rows are birth-pair-bounded \u2014 a hit-count jump = a new divergence hiding here.",
-   "takes": [
-    "mc1l0",
-    "mc1hwl0"
-   ],
-   "kind": "field",
-   "class": 10,
-   "model": 39,
-   "field": "target_yaw"
-  },
-  {
-   "id": "mc1-spawn-arm-f34-flame",
-   "status": "deviation",
-   "note": "Resolved \"SPAWN-ARM f34 MIRROR\" (ruled deviation 2026-08-01): the port's spawn arms mirror f34/f36 = f30/f32 on every spawn; retail writes +52 only on homing paths, so these non-homing families are born 0. Write-only lane for them in the port (no gameplay bearing); rows are birth-pair-bounded \u2014 a hit-count jump = a new divergence hiding here.",
-   "takes": [
-    "mc1l0",
-    "mc1hwl0"
-   ],
-   "kind": "field",
-   "class": 10,
-   "model": 1,
-   "field": "target_yaw"
-  },
-  {
    "id": "mc1-guard-terrain",
    "status": "capture",
-   "note": "Resolved \"MC1 (5,15) CASTLE-GUARD FAMILY\" (2026-08-01): the MC1 twin of mc2-guard-terrain. Guards are terrain-locked to castle-pad tiles (row 24 v_20=0x20000); the pristine replay reads the pre-regrade tile type, trips the grid_walk die-gate (sub_20480 :25934-40) and draws ZERO where retail runs the 4-draw quadrant vote + move coin. rand/heading(+-512k)/x/y = one root, proven by 0-LCG-step port values on vote ticks + 154/154 heading-rand co-location + one-castle-site clustering. Port laws byte-identical; remedy = the deferred terrain channel.",
+   "note": "RESOLVED 2026-08-15 (\u2018THE WEIGHT TABLE AT 1FF40\u2019): the residual family after the terrain channel was NOT terrain \u2014 sub_20480's 4-way vote weights live at the code/data alias *(_DWORD*)sub_1FF40, EXTRACTED from CARPET.EXE (obj1 VA 0x1FF40, file 0x38738: 58 1b 58 1b 0a 00 58 1b = [7000, 7000, 10, 7000]) \u2014 the uniform [16,16,16,16] stand-in kept the draw count but flipped the CHOICE (reversal capped at 11 vs 17 under uniform): mc1l0 t=2541 guard 500 = the 2542 free-run wall. mc1l0 hits now ZERO \u2014 any hit here = grid_walk/weight regression signal. (Historic note 2026-08-01: pre-terrain-channel the family was graded as pad-tile closure; that half was real and the measured channel absorbed it.)",
    "takes": [
     "mc1l0"
    ],
@@ -723,7 +684,7 @@
   {
    "id": "mc1hw-fire-churn-rand",
    "status": "open",
-   "note": "Ledger 'LIGHTNING/FIRE FIELD-ROW TRIAGE' (2026-08-06), RE-ATTRIBUTED 2026-08-13 (player challenge, measured): the original 'a DIFFERENT fire occupies the slot' story fits ZERO current mc1l0 rows \u2014 of 148 masked pairs, none carries x/y rows (the different-fire shape); 130 ride WITH an mc1l0-terrain-z sibling and 18 stand alone. The measured mechanism (t=1768 slot 555, seed-stepped): SAME fire, SAME position, retail draws 2 per-entity LCG steps on the latch tick where the port draws 1 \u2014 the SCORCH GATE (:28095-98, `z - ground <= 128` + tile-type + angle + water) flips on the terrain closure's divergent ground sample, dropping/adding the scorch draw (the flicker draw then lands on a different stream position). Draw-count parity is per-entity (no global-stream cascade), but the flipped scorch ALSO skips/adds a dig_scorch terrain write, feeding the terrain closure forward in free run. Parent = the terrain closure (mid-tick terraform blind spot), plus the 2026-08-06 spawn-cadence lead for any future different-fire rows. Classified OPEN: dies with the terrain-phase dig, not a fire-code bug (the port's draw structure matches :28085-28118 line-for-line).",
+   "note": "Ledger 'LIGHTNING/FIRE FIELD-ROW TRIAGE' (2026-08-06), RE-ATTRIBUTED 2026-08-13 (player challenge, measured): the original 'a DIFFERENT fire occupies the slot' story fits ZERO current mc1l0 rows \u2014 of 148 masked pairs, none carries x/y rows (the different-fire shape); 130 ride WITH an mc1l0-terrain-z sibling and 18 stand alone. The measured mechanism (t=1768 slot 555, seed-stepped): SAME fire, SAME position, retail draws 2 per-entity LCG steps on the latch tick where the port draws 1 \u2014 the SCORCH GATE (:28095-98, `z - ground <= 128` + tile-type + angle + water) flips on the terrain closure's divergent ground sample, dropping/adding the scorch draw (the flicker draw then lands on a different stream position). Draw-count parity is per-entity (no global-stream cascade), but the flipped scorch ALSO skips/adds a dig_scorch terrain write, feeding the terrain closure forward in free run. Parent = the terrain closure (mid-tick terraform blind spot), plus the 2026-08-06 spawn-cadence lead for any future different-fire rows. Classified OPEN: dies with the terrain-phase dig, not a fire-code bug (the port's draw structure matches :28085-28118 line-for-line). RE-ESCALATED 2026-08-13 (player, measured live at pair 1768\u21921769 via examples/scorch_gate_probe_mc1.rs): from an identical truth-matching pair start, the port's scorch-dig CHAIN writes different terrain than retail within one tick \u2014 cell (131,88): retail h33\u219230 ty3\u21921 vs port h33\u219232 ty3\u219251; cell (135,90): retail ty\u219250 vs port ty\u219248, h 30 vs 29. A LAW divergence (dig depth/count, burnt-type stamp, or the angle-nibble gate input \u2014 angle has NO recorded truth channel), not free-run drift. This chain is the census driver behind the replay castle-3 rescue and shares the t=563 replay-wall family. Fix target: retail :28085-28118 scorch tail + sub_40D30 dig vs port dig_scorch/dig_cell + type/angle bake. LANDED 2026-08-13 (same session): dig_scorch cell ROUNDING (+128, both chassis: :51705-06 / EF:39722-23) + MC1 fire gate rounded cell + the `if (v5)` type-0 wrapper \u2014 mc1l0 148\u2192139 rows (1768-era 14\u21923), every MC1 take improved, mc2_cave/mc2_slice goldens re-pinned attributably. REMAINING rows = the pair-harness ANGLE-IMPORT gap: install_measured_terrain keeps the pristine angle plane (angle unrecorded), so retail's accumulated scorch latches (angle&7==1) are absent at import and the port re-scorches previously-latched cells (564-era castle-1 window). Instrument limitation, not sim law \u2014 free run evolves angle correctly. Also feeds the burnt-TYPE rebake residue.",
    "takes": [
     "mc1hwl0",
     "mc1l0"

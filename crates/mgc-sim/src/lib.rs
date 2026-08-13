@@ -25,6 +25,11 @@ pub mod verbs;
 
 pub use patches::WorldPatches;
 
+/// Debug-trace tick correlation for env-gated probes (MGC_*_TRACE):
+/// harness-side consumers stamp the recording tick here so sim-side
+/// eprintlns can label themselves. Never read by simulation logic.
+pub static DEBUG_TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
 use engine::{features, world};
 use mc1::spells;
 
@@ -733,6 +738,17 @@ impl Simulation {
             self.aim_lead = 0.0;
         }
 
+        // The faithful MC1/HW mover on a live world steps INSIDE the
+        // world turn, at the carpet's walk slot (World::tick_flight):
+        // its ground probe must read terrain the lower-slot painters
+        // stamped THIS tick — the t=563 replay-wall law. MC2 worlds,
+        // world-less sims and the enhanced flyer keep the pre-tick
+        // move.
+        let faithful_walk = self.thrust_model == ThrustModel::Mc1
+            && self
+                .world
+                .as_ref()
+                .is_some_and(|w| w.verbs().flight != verbs::FlightVerb::Mc2);
         match self.thrust_model {
             ThrustModel::Mc1 => {
                 // The faithful mover is game-keyed by the world's
@@ -744,7 +760,7 @@ impl Simulation {
                     .is_some_and(|w| w.verbs().flight == verbs::FlightVerb::Mc2);
                 if mc2 {
                     self.move_mc2(input);
-                } else {
+                } else if !faithful_walk {
                     self.move_mc1(input);
                 }
             }
@@ -789,7 +805,10 @@ impl Simulation {
         // after spawn), so clamping against ground THERE would
         // suspend the corpse mid-air wherever the local ground sits
         // lower.
-        if falling && let Some(w) = &mut self.world {
+        if falling
+            && !faithful_walk
+            && let Some(w) = &mut self.world
+        {
             match self.thrust_model {
                 ThrustModel::Mc1 => {
                     let dz = w.death_fall_step();
@@ -813,8 +832,9 @@ impl Simulation {
         // Dead (sub_463B0 :55575-91): the speeds were already zeroed
         // before the move (the flyer is pinned at the grave); here the
         // grey-screen camera just turns toward the killer while it waits
-        // for Space.
-        if dead {
+        // for Space. (The faithful-walk path runs both this and the
+        // death fall world-side, at the carpet's walk slot.)
+        if dead && !faithful_walk {
             if let Some(w) = &self.world
                 && let Some((kx, kz)) = w.killer_pos()
             {
@@ -835,61 +855,115 @@ impl Simulation {
         }
 
         // The world turn: triggers/portals probe the flyer, events tick.
-        if let Some(w) = &mut self.world {
-            let f = self.flyer;
-            let pose = match self.thrust_model {
-                // Faithful: the INTEGER carpet verbatim — the replay
-                // driver's pose law (`conformance::integer_pose`).
-                // x/y/z/speed round-trip through the flyer exactly
-                // (power-of-two scaling), but heading/pitch do NOT:
-                // `flyer.yaw` is an accumulated float sum of per-tick
-                // radian deltas whose 11-bit re-quantization drifts
-                // off the integer yaw over a session. The speed is
-                // the carpet's +126, sign included — the cast
-                // inherits it onto the projectile's base speed, and
-                // MC2's Speed spell reads its direction from the
-                // sign.
-                ThrustModel::Mc1 => world::conformance::integer_pose(&self.carpet),
-                // Enhanced: the float flyer, quantized at the seam.
-                // The pose heading is the AIM (yaw + lead): under
-                // chase steering casts launch along the crosshair,
-                // not the hull — you shoot where you point while the
-                // carpet is still coming around (player ruling). The
-                // speed is the horizontal velocity's SIGNED component
-                // along the hull axis — the retail-analog signed
-                // carpet speed (backward drift reads negative). The
-                // hull, not the aim: the boost drives along the hull
-                // basis, and right after a sharp mouse turn the aim
-                // projection would misread forward motion as
-                // backward. (The former |v| magnitude could never go
-                // negative — the Speed spell always propelled forward
-                // — and read strafe/fall speed as forward.)
-                ThrustModel::Enhanced => {
-                    let (sy, cy) = f.yaw.sin_cos();
-                    let speed = (f.vx * sy - f.vz * cy) * TICK_DT;
-                    world::PlayerPose::from_tiles(
-                        f.x,
-                        f.y,
-                        f.z,
-                        f.yaw + self.aim_lead,
-                        f.pitch,
-                        speed,
-                    )
-                }
+        let pcmd = world::PlayerCommand {
+            fire_left: input.fire_left,
+            fire_right: input.fire_right,
+            equip_left: input.equip_left,
+            equip_right: input.equip_right,
+            mc2_select: input.mc2_select,
+            spell_ring: input.spell_ring,
+            respawn: input.respawn,
+            demolish: input.demolish,
+        };
+        // Faithful MC1/HW on a live world: the pre-move channels are
+        // sampled at the tick head (the conform replay driver's phase
+        // law — Accelerate restore edge, armed knock), then the world
+        // turn steps the carpet at its walk slot (tick_flight); the
+        // flyer derives after.
+        let mut walked_prev: Option<flight::Mc1State> = None;
+        if faithful_walk && let Some(w) = &mut self.world {
+            // Accelerate expiry/cancel edge: MC1 restores +80 MAX
+            // FORWARD, even out of backwards flight (:65191-97).
+            let over = w.accel_override();
+            if self.accel_was_active && over.is_none() {
+                self.carpet.tgt_speed = 80;
+                self.carpet.act_speed = 80;
+            }
+            self.accel_was_active = over.is_some();
+            let prev = self.carpet;
+            let mut drive = world::FlightDrive {
+                s: &mut self.carpet,
+                inp: mc1_input(input),
+                over,
+                falling,
+                dead,
             };
-            w.tick(
-                pose,
-                world::PlayerCommand {
-                    fire_left: input.fire_left,
-                    fire_right: input.fire_right,
-                    equip_left: input.equip_left,
-                    equip_right: input.equip_right,
-                    mc2_select: input.mc2_select,
-                    spell_ring: input.spell_ring,
-                    respawn: input.respawn,
-                    demolish: input.demolish,
-                },
-            );
+            w.tick_flight(&mut drive, pcmd);
+            walked_prev = Some(prev);
+        }
+        if let Some(prev) = walked_prev {
+            // Enhanced altitude: the desired-altitude law (deliberate
+            // deviation), after the in-walk move — vertical only, the
+            // z-floor stays (see move_mc1's pre-tick twin). Skipped
+            // during the death fall/dead wait.
+            if self.altitude_model == AltitudeModel::ExtendedLift && !falling && !dead {
+                let g = self
+                    .world
+                    .as_ref()
+                    .expect("faithful walk has a world")
+                    .ground_z_engine(self.carpet.x, self.carpet.y);
+                let (hi, cap) = self.lift_caps(g, 1024);
+                self.carpet.z = lift_desired_law(
+                    self.carpet.z,
+                    g,
+                    &mut self.lift_desired,
+                    input.lift,
+                    128,
+                    hi,
+                    cap,
+                    0,
+                    LIFT_DRIFT_MC1,
+                );
+            }
+            self.derive_flyer(prev);
+        }
+        if let Some(w) = &mut self.world {
+            // The pinned-pose turn for the non-deferred paths (the
+            // faithful walk already ticked above).
+            if !faithful_walk {
+                let f = self.flyer;
+                let pose = match self.thrust_model {
+                    // Faithful: the INTEGER carpet verbatim — the replay
+                    // driver's pose law (`conformance::integer_pose`).
+                    // x/y/z/speed round-trip through the flyer exactly
+                    // (power-of-two scaling), but heading/pitch do NOT:
+                    // `flyer.yaw` is an accumulated float sum of per-tick
+                    // radian deltas whose 11-bit re-quantization drifts
+                    // off the integer yaw over a session. The speed is
+                    // the carpet's +126, sign included — the cast
+                    // inherits it onto the projectile's base speed, and
+                    // MC2's Speed spell reads its direction from the
+                    // sign.
+                    ThrustModel::Mc1 => world::conformance::integer_pose(&self.carpet),
+                    // Enhanced: the float flyer, quantized at the seam.
+                    // The pose heading is the AIM (yaw + lead): under
+                    // chase steering casts launch along the crosshair,
+                    // not the hull — you shoot where you point while the
+                    // carpet is still coming around (player ruling). The
+                    // speed is the horizontal velocity's SIGNED component
+                    // along the hull axis — the retail-analog signed
+                    // carpet speed (backward drift reads negative). The
+                    // hull, not the aim: the boost drives along the hull
+                    // basis, and right after a sharp mouse turn the aim
+                    // projection would misread forward motion as
+                    // backward. (The former |v| magnitude could never go
+                    // negative — the Speed spell always propelled forward
+                    // — and read strafe/fall speed as forward.)
+                    ThrustModel::Enhanced => {
+                        let (sy, cy) = f.yaw.sin_cos();
+                        let speed = (f.vx * sy - f.vz * cy) * TICK_DT;
+                        world::PlayerPose::from_tiles(
+                            f.x,
+                            f.y,
+                            f.z,
+                            f.yaw + self.aim_lead,
+                            f.pitch,
+                            speed,
+                        )
+                    }
+                };
+                w.tick(pose, pcmd);
+            }
             // Respawn (sub_44D30): reposition at the castle, one
             // tile up (:54845-63 z = ground+256), flight state
             // zeroed (thrust target, strafe, knock — :54878-83),

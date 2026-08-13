@@ -89,10 +89,6 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     // Stream pairs.
     let mut prev: Option<(u64, RetailMc1, PlayerCommand)> = None;
     let mut prev_cmd = PlayerCommand::default();
-    // --input-delay ring: cmd fed at pair N is the one sampled at
-    // N - input_delay.
-    let mut cmd_ring: std::collections::VecDeque<PlayerCommand> =
-        std::iter::repeat_n(PlayerCommand::default(), args.input_delay as usize + 1).collect();
     let mut stats = Stats::default();
     let mut pose_chan = crate::pose_lane::PoseLane::default();
     let mut printed_import = false;
@@ -129,21 +125,20 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             Some(v) => serde_json::from_value(v.clone()).map_err(|e| format!("obs: {e}"))?,
             None => return Err(format!("t={}: no obs channel", tick.t)),
         };
-        // The recorded raw input (held mouse buttons) reconstructs the
-        // human's casts. ±1-tick attribution caveat per RECORDING.md;
-        // the port's edge trigger sees held-across-consensus presses.
-        let sampled = tick
-            .input
-            .as_ref()
-            .and_then(|i| i.get("mouse_buttons"))
-            .map(|b| PlayerCommand {
-                fire_left: b.get("left").and_then(|v| v.as_bool()).unwrap_or(false),
-                fire_right: b.get("right").and_then(|v| v.as_bool()).unwrap_or(false),
-                ..Default::default()
-            })
-            .unwrap_or_default();
-        cmd_ring.push_back(sampled);
-        let cmd = cmd_ring.pop_front().unwrap_or_default();
+        // The cast lane rides dw_0, the CONSUMED move/fire word in the
+        // record's own state (bits 16/32 = fire L/R): retail's input
+        // layer already edge-filtered it (one bit per click for the
+        // +60==1 launcher set, :20601-34; per-held-tick re-emits for
+        // the hold/channel set) and already dropped UI clicks (a
+        // spellbook click never reaches dw_0). The old lane fed the
+        // RAW sampled mouse levels through a one-record delay ring:
+        // clicks spanned 2-3 sampled ticks (each re-armed a launcher
+        // token mid-burst), landed one pair late, sometimes vanished
+        // between consensus samples (mc1l0 t=75/77), and book clicks
+        // cast — the whole (12,0)/(12,3) f26 cycle-phase family.
+        // dw_0@N drives pair N→N+1 (the move-byte phase law,
+        // docs/RECORDING.md).
+        let cmd = fire_bits_mc1(&st);
         if let Some((pt, pst, pcmd)) = prev.take() {
             // Equips + demolish ride the shared recovery laws (the
             // replay verifier's lane): a recorded hand change across
@@ -178,9 +173,18 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     stats.torn += 1;
                 } else {
                     world.restore_planes(&pristine);
-                    if let Some((h, ty, ceil)) = measured_planes(&timg) {
+                    if let Some((h, ty, ceil, an)) = measured_planes(&timg) {
                         world
-                            .install_measured_terrain(h, ty, ceil)
+                            .install_measured_terrain(
+                                h,
+                                ty,
+                                ceil,
+                                if std::env::var_os("MGC_NO_MEASURED_ANGLE").is_some() {
+                                    None
+                                } else {
+                                    an
+                                },
+                            )
                             .map_err(|e| format!("t={pt}: terrain: {e}"))?;
                     }
                     let report = world
@@ -212,35 +216,85 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         PinPose::N1 => &st.ents[report.human_slot as usize],
                     };
                     let pose = carpet_pose(pose_src);
+                    world.arm_midtick_ground_snapshot();
                     world.tick(pose, pcmd);
                     // The POSE CHANNEL: shadow-step the faithful
                     // mover and diff the human's own motion column at
-                    // N+1. Its terrain probes run on the MEASURED
-                    // terrain@N+1: retail's terraform writers sit at
-                    // low pool slots and run BEFORE the carpet's, so
-                    // the carpet's ground probe saw the pair's END
-                    // terrain (measured on mc1l0 — every eff_pitch/z
-                    // residue row sat on a live terraform window, and
-                    // the port-evolved planes are no substitute where
-                    // the port's own terraform diverges). Applying the
-                    // pending block early is safe: deltas carry
-                    // absolute cell values, so the loop-top re-apply
-                    // is idempotent. The flight seed still comes from
-                    // the recorded closure at N.
+                    // N+1. Its GROUND probes run on a per-cell
+                    // reconstruction of retail's MID-WALK image:
+                    // retail's carpet reads ground at its own walk
+                    // slot — after this tick's lower-slot terraform,
+                    // before the higher-slot digs — and neither
+                    // record endpoint has that image. The pair tick's
+                    // own mid-walk + post-tick planes are the PHASE
+                    // ORACLE, and only that: a cell keeps measured@N
+                    // exactly when the port DEMONSTRABLY wrote it
+                    // after the carpet's slot (untouched at the
+                    // snapshot, changed by tick end); every other
+                    // cell — written early, or not written by the
+                    // port at all — takes measured@N+1. Every cell
+                    // stays a RETAIL value; the port only picks which
+                    // endpoint's phase applies, and a cell whose port
+                    // writer is missing degrades to the OLD rule
+                    // (@N+1), not to a port height. Both single-image
+                    // rules failed a real family: measured@N+1 read
+                    // the post-dig ground where diggers sat ABOVE the
+                    // carpet (t=567, fires 692-705 over carpet 630 —
+                    // floor clamp 3 low), the raw snapshot inherited
+                    // the port's divergent castle-mound terraform
+                    // BELOW it (t=1210/1219, the graded slot-663
+                    // leveler window); the one-witness oracle
+                    // (snapshot-vs-start only) additionally kept @N
+                    // wherever the port writer was MISSING (mc1l2
+                    // t=1112-14, retail wrote below the carpet with
+                    // no port twin). The measured@N+1 install stays
+                    // for the WALL gate (cap bits ride the settled
+                    // planes; applying the pending block early is
+                    // safe — deltas carry absolute cell values, so
+                    // the loop-top re-apply is idempotent). The
+                    // flight seed still comes from the recorded
+                    // closure at N.
                     if !args.no_pose_lane {
+                        let snap = world.take_midtick_ground_snapshot();
+                        // The oracle's second witness: the port's
+                        // settled post-tick heights, cloned BEFORE
+                        // the measured@N+1 re-install below.
+                        let h_post: Option<Vec<u8>> =
+                            snap.is_some().then(|| world.planes().height.clone());
+                        let h_start: Option<Vec<u8>> =
+                            measured_planes(&timg).map(|(h, _, _, _)| h.to_vec());
                         if let (Some(img), Some(block)) = (timg.as_mut(), pending_terrain.as_ref())
                         {
                             img.apply(block)
                                 .map_err(|e| format!("t={pt}: pose terrain: {e}"))?;
                         }
-                        if let Some((h, ty, ceil)) = measured_planes(&timg) {
+                        if let Some((h, ty, ceil, an)) = measured_planes(&timg) {
                             world
-                                .install_measured_terrain(h, ty, ceil)
+                                .install_measured_terrain(
+                                    h,
+                                    ty,
+                                    ceil,
+                                    if std::env::var_os("MGC_NO_MEASURED_ANGLE").is_some() {
+                                        None
+                                    } else {
+                                        an
+                                    },
+                                )
                                 .map_err(|e| format!("t={pt}: pose terrain: {e}"))?;
                         }
+                        let ground_mid = match (snap, h_start, h_post, measured_planes(&timg)) {
+                            (Some(snap), Some(h0), Some(post), Some((h1, _, _, _))) => {
+                                Some(midwalk_ground(snap, &h0, &post, h1))
+                            }
+                            // No terrain channel: the raw mid-walk
+                            // image is still better-phased than the
+                            // settled post-tick planes.
+                            (snap, ..) => snap,
+                        };
                         pose_chan
                             .run_pair_mc1(
                                 &world,
+                                ground_mid.as_deref(),
                                 &pst,
                                 &st,
                                 report.human_slot,
@@ -283,6 +337,10 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                             let pos = |slot: u16| ctx(slot).map(|(_, _, x, y)| (x, y));
                             tg.slot_desync(&pd.missing, &pd.extra, &pos);
                         }
+                        // The terrain-shadow pass (computed): mover
+                        // x/y/heading/pitch rows riding a terrain-
+                        // tagged z sibling on the same slot.
+                        terrain_shadow(&mut tg, &pd, roster.as_ref());
                         tg
                     });
                     // The pose-phase pass: re-run the pair under the
@@ -370,6 +428,30 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     print!("{}", stats.render(args, roster.as_ref()));
     print!("{}", pose_chan.render());
     Ok(stats.clean_pairs == stats.pairs)
+}
+
+/// The local wizard's consumed fire bits (dw_0 bits 16/32) as the
+/// pair command — the cast ground truth (docs/RECORDING.md), shared
+/// by verify-deltas and the fixture runner. dw_0 == 48 exactly is the
+/// DEMOLISH word: it carries both fire bits but retail's :55760
+/// short-circuit casts NEITHER hand (mc1l5 t=711 — the recovery's own
+/// demolish rule, `recover::recover_pair_mc1`).
+pub(crate) fn fire_bits_mc1(st: &RetailMc1) -> PlayerCommand {
+    st.wizards
+        .get(st.local_player as usize)
+        .map(|w| {
+            let (fire_left, fire_right) = if w.move_bits == 48 {
+                (false, false)
+            } else {
+                mgc_formats::recover::mc1_fire(w.move_bits)
+            };
+            PlayerCommand {
+                fire_left,
+                fire_right,
+                ..Default::default()
+            }
+        })
+        .unwrap_or_default()
 }
 
 /// The default committed roster path (docs/CONFORMANCE.md): loaded
@@ -474,6 +556,45 @@ pub(crate) fn pose_reclassify(tags: &mut crate::roster::RuleTags, pd: &PairDiff,
     }
 }
 
+/// The TERRAIN-SHADOW pass — a COMPUTED rule (literal id
+/// `terrain-shadow`), the walker knock-on of the terrain closure
+/// ([`crate::roster::Tag::TerrainShadow`]): a still-unexplained
+/// x/y/heading/pitch row is claimed when the SAME slot's z row in
+/// the SAME pair is already tagged by a terrain roster rule — the
+/// mover's ground diverged (known family), so its ground-following
+/// motion diverged with it. Conservative by construction: no
+/// terrain-tagged z sibling, no claim. Runs after the roster pass
+/// (only `Unexplained` rows are considered), before pose-phase.
+pub(crate) fn terrain_shadow(
+    tags: &mut crate::roster::RuleTags,
+    pd: &PairDiff,
+    roster: Option<&crate::roster::Roster>,
+) {
+    use crate::roster::Tag;
+    use std::collections::BTreeSet;
+    let Some(r) = roster else { return };
+    let zslots: BTreeSet<u16> = pd
+        .fields
+        .iter()
+        .enumerate()
+        .filter_map(|(i, d)| match tags.fields[i] {
+            Tag::Rule(k) if d.field == "z" && r.rules[k].id.contains("terrain") => d.slot,
+            _ => None,
+        })
+        .collect();
+    if zslots.is_empty() {
+        return;
+    }
+    for (i, d) in pd.fields.iter().enumerate() {
+        if tags.fields[i] == Tag::Unexplained
+            && matches!(d.field, "x" | "y" | "heading" | "pitch")
+            && d.slot.is_some_and(|s| zslots.contains(&s))
+        {
+            tags.fields[i] = Tag::TerrainShadow;
+        }
+    }
+}
+
 /// One TSV row per diff event: field mismatches carry the retail
 /// entity's (class, model, x, y, z) as spatial context (falling back
 /// to the port's for extra-in-port slots) so offline triage can
@@ -509,6 +630,7 @@ fn emit_csv(
                     crate::roster::Tag::Rule(k) => roster.map_or("", |r| r.rules[k].id.as_str()),
                     crate::roster::Tag::PosePhase => "pose-phase",
                     crate::roster::Tag::SlotDesync => "slot-desync",
+                    crate::roster::Tag::TerrainShadow => "terrain-shadow",
                     crate::roster::Tag::Unexplained => "",
                 },
                 None => "",
@@ -646,12 +768,38 @@ pub(crate) fn append_charge_diffs(
 /// format-2 terrain channel has anchored the accumulator (a
 /// mid-stream start without the base yields None — relative-only
 /// planes must never be installed as absolute terrain).
-pub(crate) type MeasuredPlanes<'a> = (&'a [u8], &'a [u8], Option<&'a [u8]>);
+pub(crate) type MeasuredPlanes<'a> = (&'a [u8], &'a [u8], Option<&'a [u8]>, Option<&'a [u8]>);
 
 pub(crate) fn measured_planes(
     timg: &Option<mgc_formats::mgcr::TerrainImage>,
 ) -> Option<MeasuredPlanes<'_>> {
     timg.as_ref().and_then(|img| img.measured())
+}
+
+/// The pose channel's per-cell MID-WALK ground reconstruction: the
+/// value retail's carpet mover probed at its own walk slot, phased
+/// between the two measured endpoints by the pair tick's own
+/// terraform as the ORACLE. `snap` is the port's height plane
+/// captured as the walk crossed the carpet anchor, `h0`/`h1` the
+/// measured images at N/N+1, `post` the port's settled post-tick
+/// plane. A cell keeps measured@N exactly when the port DEMONSTRABLY
+/// wrote it after the carpet (untouched at the snapshot, changed by
+/// tick end); every other cell — written early, or not written by
+/// the port at all — takes measured@N+1. Every output cell is a
+/// RETAIL value; the port only picks the phase, and a missing port
+/// writer degrades a cell to @N+1, never to a port height. The three
+/// measured failure families this rule threads: high-slot diggers
+/// (mc1l0 t=567 → @N), divergent low-slot terraform (mc1l0
+/// t=1210/1219 → @N+1), missing port twin (mc1l2 t=1112-14 → @N+1).
+fn midwalk_ground(mut snap: Vec<u8>, h0: &[u8], post: &[u8], h1: &[u8]) -> Vec<u8> {
+    for (c, s) in snap.iter_mut().enumerate() {
+        *s = if *s == h0[c] && post[c] != *s {
+            h0[c]
+        } else {
+            h1[c]
+        };
+    }
+    snap
 }
 
 /// One fixture-grade pair, executed on a prepared world: restore
@@ -673,9 +821,18 @@ pub(crate) fn exec_pair(
     pin_n1: bool,
 ) -> Result<(PairDiff, ObsMc1, u16), String> {
     world.restore_planes(pristine);
-    if let Some((h, ty, ceil)) = measured {
+    if let Some((h, ty, ceil, an)) = measured {
         world
-            .install_measured_terrain(h, ty, ceil)
+            .install_measured_terrain(
+                h,
+                ty,
+                ceil,
+                if std::env::var_os("MGC_NO_MEASURED_ANGLE").is_some() {
+                    None
+                } else {
+                    an
+                },
+            )
             .map_err(|e| format!("terrain: {e}"))?;
     }
     let report = world
@@ -1020,6 +1177,11 @@ pub(crate) struct Stats {
     slotdesync_missing: u64,
     slotdesync_extra: u64,
     slotdesync_pairs: u64,
+    /// Field rows claimed by the computed terrain-shadow rule (mover
+    /// x/y/heading/pitch riding a terrain-tagged z sibling) and the
+    /// pairs touched.
+    shadow_fields: u64,
+    shadow_pairs: u64,
     /// Phase-clock disagreements: retail steps +63 only through state
     /// rows with a live handler. Keyed (class, model, state)@N →
     /// {(retail step, port step) → count}.
@@ -1093,6 +1255,7 @@ impl Stats {
             let mut touched: std::collections::BTreeSet<usize> = Default::default();
             let mut pose_touched = false;
             let mut slotdesync_touched = false;
+            let mut shadow_touched = false;
             // Fields are out of the slot-desync ruled scope — a throw-
             // away sink keeps the lane loop uniform (never incremented).
             let mut fld_sd_sink = 0u64;
@@ -1131,6 +1294,10 @@ impl Stats {
                             *slotdesync += 1;
                             slotdesync_touched = true;
                         }
+                        crate::roster::Tag::TerrainShadow => {
+                            self.shadow_fields += 1;
+                            shadow_touched = true;
+                        }
                         crate::roster::Tag::Unexplained => *unknown += 1,
                     }
                 }
@@ -1143,6 +1310,9 @@ impl Stats {
             }
             if slotdesync_touched {
                 self.slotdesync_pairs += 1;
+            }
+            if shadow_touched {
+                self.shadow_pairs += 1;
             }
             let _ = fld_sd_sink;
             if pd.rng_want == pd.rng_got && tg.all_known() {
@@ -1233,6 +1403,15 @@ impl Stats {
                 self.slotdesync_missing, self.slotdesync_extra, self.slotdesync_pairs
             );
         }
+        if self.shadow_pairs > 0 {
+            let _ = writeln!(
+                s,
+                "   terrain-shadow (mover x/y/heading/pitch riding a terrain-tagged z \
+                 sibling on the same slot — the terrain closure's walker knock-on): \
+                 {} field rows across {} pairs",
+                self.shadow_fields, self.shadow_pairs
+            );
+        }
         if let Some(r) = roster
             && !self.rule_rows.is_empty()
         {
@@ -1320,5 +1499,34 @@ impl Stats {
         }
         let _ = args;
         s
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::midwalk_ground;
+
+    /// The mid-walk phase pick, one cell per measured family: the
+    /// oracle keeps @N only for a demonstrated late write; early,
+    /// silent and divergent writers all land on @N+1 (retail values
+    /// only — a port height must never leak into the output).
+    #[test]
+    fn midwalk_ground_phases_each_cell_by_the_ports_own_terraform() {
+        //          untouched  late-dig  early-write  silent-retail  divergent-early
+        let h0 = [10u8, 20, 30, 40, 50];
+        let h1 = [10u8, 17, 33, 43, 50];
+        let snap = [10u8, 20, 33, 40, 61];
+        let post = [10u8, 17, 33, 40, 61];
+        let out = midwalk_ground(snap.to_vec(), &h0, &post, &h1);
+        assert_eq!(
+            out,
+            [
+                10, // untouched everywhere: endpoints agree
+                20, // port dug AFTER the carpet: keep @N (t=567)
+                33, // port wrote BEFORE the carpet: take @N+1
+                43, // retail wrote, port silent: @N+1 (mc1l2 t=1112)
+                50, // divergent early port write: @N+1, never 61 (t=1210)
+            ]
+        );
     }
 }

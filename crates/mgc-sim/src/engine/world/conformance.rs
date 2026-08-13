@@ -135,17 +135,22 @@ impl World {
 
     /// Overwrite the height and tile-type planes — plus, on MC2 cave
     /// takes, the CEILING (cave carves edit it mid-level and the cave
-    /// clamp laws read it) — with MEASURED images (the recording's
-    /// format-2 terrain channel, accumulated to the pair's start
-    /// tick). The primary terrain source when present, layered over
-    /// [`World::restore_planes`]'s pristine base so shading/angle
-    /// (and the ceiling, when unmeasured) keep their level values.
+    /// clamp laws read it), and the ANGLE plane when the take
+    /// measures it (the sub_11760 water probe, the scorch gates and
+    /// the castle protection bits all read it live; the mid-paint
+    /// walkability/protection dance is not reconstructible from the
+    /// pool closure — mc1l0 pair 565) — with MEASURED images (the
+    /// recording's format-2 terrain channel, accumulated to the
+    /// pair's start tick). The primary terrain source when present,
+    /// layered over [`World::restore_planes`]'s pristine base so
+    /// shading (and unmeasured planes) keep their level values.
     /// Wrong-size slices are an error, never a partial write.
     pub fn install_measured_terrain(
         &mut self,
         height: &[u8],
         tile_type: &[u8],
         ceiling: Option<&[u8]>,
+        angle: Option<&[u8]>,
     ) -> Result<(), String> {
         if height.len() != self.g.t.height.len() || tile_type.len() != self.g.t.tile_type.len() {
             return Err(format!(
@@ -165,10 +170,22 @@ impl World {
                 self.g.t.ceiling.len()
             ));
         }
+        if let Some(a) = angle
+            && a.len() != self.g.t.angle.len()
+        {
+            return Err(format!(
+                "measured angle {} cells, want {}",
+                a.len(),
+                self.g.t.angle.len()
+            ));
+        }
         self.g.t.height.copy_from_slice(height);
         self.g.t.tile_type.copy_from_slice(tile_type);
         if let Some(c) = ceiling {
             self.g.t.ceiling.copy_from_slice(c);
+        }
+        if let Some(a) = angle {
+            self.g.t.angle.copy_from_slice(a);
         }
         self.terrain_dirty = true;
         Ok(())
@@ -179,6 +196,33 @@ impl World {
     /// every imported pair.
     pub fn set_prev_fire(&mut self, left: bool, right: bool) {
         self.prev_fire = (left, right);
+    }
+
+    /// Arm the pose channel's mid-tick ground snapshot: the NEXT tick
+    /// copies the height plane when its entity walk reaches the
+    /// carpet anchor slot — the phase retail's own carpet mover
+    /// probes ground at (:55151/:55103), with every lower-slot
+    /// terraform of the tick applied and every higher-slot one still
+    /// pending. Neither record endpoint has this image: terrain@N
+    /// misses the low-slot digs, terrain@N+1 already carries the
+    /// high-slot ones (the mc1l0 t=567 fire family, slots 692-705
+    /// over carpet 630).
+    pub fn arm_midtick_ground_snapshot(&mut self) {
+        self.midtick_ground_armed = true;
+        self.midtick_ground = None;
+    }
+
+    /// The armed snapshot, if the walk crossed the carpet anchor
+    /// (consumes it; disarms a never-fired arm).
+    pub fn take_midtick_ground_snapshot(&mut self) -> Option<Vec<u8>> {
+        self.midtick_ground_armed = false;
+        self.midtick_ground.take()
+    }
+
+    /// The engine's own bilinear ground sampler over a bare height
+    /// plane (the mid-tick snapshot), engine units.
+    pub fn ground_z_on_plane(plane: &[u8], x: u16, y: u16) -> i16 {
+        crate::engine::features::Gen::interp_plane(plane, x, y) as i16
     }
 
     /// Apply a decoded MC1/HW retail closure onto this (already-built,
@@ -278,13 +322,64 @@ impl World {
             self.g.ent[slot] = Ent::default();
         }
 
-        // Tile lists: the heads live in the map file, not the struct —
-        // rebuild like retail's own per-tick list pass, ascending slot
-        // order. `import_ent` cleared the link bit; `link` re-sets it.
+        // Tile lists: the heads live in the map file, not the struct,
+        // but the per-entity next20/prev22 ARE recorded — and chain
+        // ORDER is observable: the first-hit probes (sub_11D10's cell
+        // walk) resolve ties by it. mc1l0 pair 2371: two balls overlap
+        // a grounding third; retail's chain order feeds the walk slot
+        // 94 before 500, the old ascending re-link handed it 500
+        // (head-insertion reverses slot order), and the merge picked
+        // the wrong partner — a phantom (10,39) desync + mana fork.
+        // So rebuild each cell chain in the RECORDED order: walk the
+        // recorded links from each head (prev22 == 0), then link in
+        // reverse (head-insertion restores the walk order). The human
+        // slot is spliced out (the port's human is out-of-pool);
+        // slots left unreachable by torn links keep the ascending
+        // fallback. `import_ent` cleared the link bit; `link` re-sets
+        // it.
         for h in self.g.map_entity.iter_mut() {
             *h = 0;
         }
+        let mut seen = vec![false; n];
+        let mut chains: Vec<Vec<usize>> = Vec::new();
+        for head in 1..n {
+            let r = &st.ents[head];
+            if r.class64 == 0 || r.flags & 4 == 0 || r.prev22 != 0 || seen[head] {
+                continue;
+            }
+            let mut chain = Vec::new();
+            let mut cur = head;
+            loop {
+                if seen[cur] {
+                    break; // cycle guard — torn capture
+                }
+                seen[cur] = true;
+                if cur != human_slot as usize {
+                    chain.push(cur);
+                }
+                let next = st.ents[cur].next20 as usize;
+                if next == 0 || next >= n {
+                    break;
+                }
+                let nr = &st.ents[next];
+                if nr.class64 == 0 || nr.flags & 4 == 0 {
+                    break;
+                }
+                cur = next;
+            }
+            chains.push(chain);
+        }
+        for chain in &chains {
+            for &slot in chain.iter().rev() {
+                let e = &self.g.ent[slot];
+                let (x, y, z) = (e.x, e.y, e.z);
+                self.g.link(slot, x, y, z);
+            }
+        }
         for slot in 1..n {
+            if seen[slot] || slot == human_slot as usize {
+                continue;
+            }
             let e = &self.g.ent[slot];
             if e.class64 != 0 && st.ents[slot].flags & 4 != 0 {
                 let (x, y, z) = (e.x, e.y, e.z);
@@ -457,6 +552,10 @@ impl World {
             // window applied one heal quantum retail withheld — the
             // persistent life+5/+40 skew family.
             regen_delay: wiz.regen_stall.min(u16::MAX as u32) as u16,
+            // The rate REGISTER (u16_341): applied-then-selected, so
+            // a pair straddling a rate flip must inherit the stale
+            // value (the castle-establish +5-then-+40 staircase).
+            life_rate: wiz.life_rate as i32,
             killer: tr(carpet.f38),
             fall_speed: carpet.f46,
             shield: carpet.flags & 0x4000 != 0,
@@ -2032,7 +2131,19 @@ fn import_ent(r: &RetailEntMc1, row156: u8, tr: &dyn Fn(u16) -> u16) -> Ent {
         // The port keeps a manifestation's burst/refire counter in f26
         // (retail: +48; retail's +26 is the SPELL LEVEL there).
         f26: if r.class64 == 12 { r.f48 as i16 } else { r.f26 },
-        f28: r.f28,
+        // The castle ground LEVELER's "current" rung lives at retail
+        // +48 (sub_28200 :30333-36); the port keeps it in f28.
+        // Without the re-home an imported MID-RUN leveler read
+        // current 0 and stepped (target − 0)/counter — the mound
+        // ROSE runaway where retail translated it down (mc1l0
+        // castle-663 transform windows t=1164-1350, +160/tick
+        // through 52/1 = +1664 at the window end; the terrain
+        // divergence every downstream walker then inherited).
+        f28: if r.class64 == 10 && r.model65 == 41 {
+            r.f48
+        } else {
+            r.f28
+        },
         f30: r.f30,
         f32: r.f32,
         f44: r.f44,

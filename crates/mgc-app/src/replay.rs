@@ -406,8 +406,8 @@ impl ReplayDriver {
             // Measured planes AFTER the import (the importer's
             // terrain replay double-applies on measured planes — the
             // replay verifier's proven order).
-            if let Some((h, ty, ceil)) = self.timg.as_ref().and_then(|i| i.measured()) {
-                w.install_measured_terrain(h, ty, ceil)
+            if let Some((h, ty, ceil, an)) = self.timg.as_ref().and_then(|i| i.measured()) {
+                w.install_measured_terrain(h, ty, ceil, an)
                     .map_err(|e| format!("terrain: {e}"))?;
             }
             let (fl, fr) = recover::mc1_fire(st.wizards[st.local_player as usize].move_bits);
@@ -480,8 +480,8 @@ impl ReplayDriver {
             let report = w
                 .retail_import_mc2(&st)
                 .map_err(|e| format!("import: {e}"))?;
-            if let Some((h, ty, ceil)) = self.timg.as_ref().and_then(|i| i.measured()) {
-                w.install_measured_terrain(h, ty, ceil)
+            if let Some((h, ty, ceil, an)) = self.timg.as_ref().and_then(|i| i.measured()) {
+                w.install_measured_terrain(h, ty, ceil, an)
                     .map_err(|e| format!("terrain: {e}"))?;
             }
             let (fl, fr) = recover::mc1_fire(st.players[st.local_player as usize].move_bits);

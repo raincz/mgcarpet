@@ -1056,40 +1056,48 @@ impl Gen {
         // tf66/tf67 = the target's OWN filter fields (the player
         // entity keeps NewEvent's -1/-1): m6/m8 copy them onto their
         // beams (:23261-64, :22156-60) — hit-anything vs the player.
-        let (tx, ty, tz, tf66, tf67) = if tgt == PLAYER_TARGET {
-            (ctx.px, ctx.py, ctx.pz, 0xFFu8, 0xFFu8)
+        // The position is a RAW struct read with no validity test
+        // (:21657 dereferences +146 before anything looks at the
+        // target's life) — a dead target's coordinates still steer.
+        let (tx, ty, tz, tf66, tf67, lost) = if tgt == PLAYER_TARGET {
+            (ctx.px, ctx.py, ctx.pz, 0xFFu8, 0xFFu8, false)
         } else {
             let t = tgt as usize;
-            // Target lost (:21656-58). Retail's pair is `+12 < 0 ||
-            // (+17 & 4)` — dead OR DESTROY-FLAGGED (+17 bit 2 is the
-            // 0x400 the port names `flags & 0x400`), the second half of
-            // which the port was missing: a target blown up under a
-            // chaser left it chasing a corpse-flagged entity forever,
-            // so its exit trailer never ran.
-            if t == 0
-                || t >= self.ent.len()
-                || self.ent[t].class64 == 0
-                || self.ent[t].act_life < 0
-                || self.ent[t].flags & 0x400 != 0
-            {
+            // Port guard: retail would read the scratch slot / raw
+            // memory here; nothing reaches this with t out of range.
+            if t == 0 || t >= self.ent.len() {
                 self.ent[i].tick70 = base + 1;
                 return false;
             }
+            // Target lost (:21658-61). Retail's pair is `+12 < 0 ||
+            // (+17 & 4)` — dead OR DESTROY-FLAGGED (+17 bit 2 is the
+            // 0x400 the port names `flags & 0x400`); the class-0 test
+            // is a port guard against freed slots. The verdict is
+            // taken here but applied only AFTER the shared re-bear.
             let c = &self.ent[t];
-            (c.x, c.y, c.z, c.f66, c.f67)
+            let lost = c.class64 == 0 || c.act_life < 0 || c.flags & 0x400 != 0;
+            (c.x, c.y, c.z, c.f66, c.f67, lost)
         };
         // Re-aim cadence. The shared chase re-bears every 4th tick
-        // (:21654 `(+63 & 3) == 0`); m9, which drives its own chase in
-        // retail, uses a DECIMAL period instead (sub_1DA60 :24197
-        // `+63 % 10`) — a rooted mound therefore swings onto a moving
-        // target noticeably more slowly than the shared families do.
+        // (:21654 `(+63 & 3) == 0`) BEFORE the target-lost test — the
+        // exit tick still aims at the corpse (mc1l0 t=2217: the
+        // vulture leaves its dead castle target bearing 107, the
+        // bearing to the ruin, not its stale 163). m9, which drives
+        // its own chase in retail, tests FIRST and uses a DECIMAL
+        // period (sub_1DA60 :24190-97 `+63 % 10`) — a rooted mound
+        // therefore swings onto a moving target noticeably more
+        // slowly than the shared families do, and never re-aims on
+        // its own exit tick.
         let e = &self.ent[i];
-        let rebear = if model == 9 {
-            (e.f63 as i16) % 10 == 0
-        } else {
-            e.f63 & 3 == 0
-        };
-        if rebear {
+        if model != 9 && e.f63 & 3 == 0 {
+            self.ent[i].f34 = Self::angle_between(e.x, e.y, tx, ty);
+        }
+        if lost {
+            self.ent[i].tick70 = base + 1;
+            return false;
+        }
+        let e = &self.ent[i];
+        if model == 9 && (e.f63 as i16) % 10 == 0 {
             self.ent[i].f34 = Self::angle_between(e.x, e.y, tx, ty);
         }
         // m6's buffet drag (:23215-31): the counter +26 cycles 1..41
@@ -1877,9 +1885,13 @@ impl Gen {
         }
         let e = &self.ent[i];
         if e.f63 & 3 == 0 {
-            let yaw = Self::angle_between(e.x, e.y, tx, ty);
-            self.ent[i].f34 = yaw;
-            self.ent[i].f30 = yaw;
+            // The shared chase's re-bear writes the TARGET heading
+            // only (:21654) — the movement core's capped turn walks
+            // +30 toward it, ±v_2 a tick even at chase speed 0
+            // (mc1l0 t=5052: retail steps 1392→1414 toward the STALE
+            // 1710 on the very tick the re-bear posts 1027; snapping
+            // +30 = +34 here jumped the whole 365).
+            self.ent[i].f34 = Self::angle_between(e.x, e.y, tx, ty);
         }
         let e = &self.ent[i];
         let row = &BEHAVIOR[e.row156 as usize];
@@ -1890,6 +1902,14 @@ impl Gen {
                 self.ent[i].tick70 = base + 1;
             } else {
                 self.attack_thunk(i, 4, tgt, tx, ty, tz, 0, 0);
+            }
+            // sub_1BB20's own tail (:22705-14): the SAME cadence
+            // refreshes the target's wanted timer, outside the range
+            // gate and only for a carpet-borne target (model ≤ 1;
+            // the out-of-pool player IS the carpet).
+            if self.ent[i].tick70 == base + 2
+                && (tgt == PLAYER_TARGET || self.ent[tgt as usize].model65 <= 1)
+            {
                 self.flag_village_wanted(tgt);
             }
         }
@@ -3003,11 +3023,18 @@ impl Gen {
     /// terrain); every 16th a lane snap to tile centers; same-model
     /// repulsion; then a gated move (aligned, or a 55% coin).
     /// The vote's 4-entry weight table lives at a code/data alias the
-    /// decompile can't express (`*(_DWORD*)sub_1FF40`) — uniform
-    /// weights stand in (identical draw count, so streams align;
-    /// extract from the retail binary someday).
+    /// decompile can't express (`*(_DWORD*)sub_1FF40`) — EXTRACTED
+    /// from the retail binary (CARPET.EXE obj1 VA 0x1FF40, file
+    /// 0x38738: `58 1b 58 1b 0a 00 58 1b`): score = rand % w + 2 per
+    /// candidate k = heading + 512k, so straight/right/left run a
+    /// huge-range roll while the REVERSAL (k=2, w=10) caps at 11 —
+    /// a guard almost never turns around on a free pad. The uniform
+    /// stand-in [16,16,16,16] kept the draw COUNT (streams aligned)
+    /// but flipped the CHOICE wherever a big roll landed: mc1l0
+    /// t=2541, guard 500 reversed onto the vote the free run forked
+    /// on — THE 2542 free-run wall.
     fn grid_walk(&mut self, i: usize, base: u8) {
-        const WEIGHTS: [u32; 4] = [16, 16, 16, 16];
+        const WEIGHTS: [u32; 4] = [7000, 7000, 10, 7000];
         let row = BEHAVIOR[self.ent[i].row156 as usize];
         if self.ent[i].f63 % 8 == 0 {
             let (x, y) = (self.ent[i].x, self.ent[i].y);
@@ -3328,6 +3355,16 @@ impl Gen {
                 // village families it feeds the wanted timer.
                 if matches!(model, 8 | 12 | 13 | 14) {
                     self.flag_village_wanted(src);
+                }
+                // The villager families' hit tick ends HERE: retail's
+                // movement core + wander sit in the ELSE of the
+                // damage test (m12 :25057-67, m13/m14 twins), so the
+                // marked tick freezes the walker — no move, no turn,
+                // no wander draws (mc1l0 t=5026: settler 640 holds
+                // (246.35,237.62) heading 1412 on the tick the fire's
+                // 400 lands; the fall-through walked and re-aimed).
+                if matches!(model, 12 | 13 | 14) {
+                    return;
                 }
                 // m8 DOES retaliate — its IDLE promotes a hit-by-
                 // wizard griffon straight into attack (sub_1CA50

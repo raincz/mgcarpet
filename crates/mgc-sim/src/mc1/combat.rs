@@ -27,7 +27,7 @@
 //! - Mana-shield reflection (+17 bit 7) is ported but nothing sets the
 //!   flag yet (OPEN: wizard shields are the spell track).
 
-use crate::engine::features::{Gen, lcg32, tile};
+use crate::engine::features::{Ent, Gen, lcg32, tile};
 use crate::mc1::behavior::BEHAVIOR;
 use crate::mc1::mobs::{MobCtx, PLAYER_TARGET};
 use crate::mc1::sprite_stats::SPRITE_STATS;
@@ -110,6 +110,18 @@ impl Gen {
     /// ⚠ It is NOT inert under [`Gen::mail_write_single`], MC1's
     /// point-damage writer, whose branches are the exact INVERSE.
     pub(crate) fn mail_write(&mut self, tgt: MailTarget, ch: usize, amt: u32, src: u16) {
+        if ch == 0 && matches!(tgt, MailTarget::Pool(486) | MailTarget::Player) {
+            if let Ok(v) = std::env::var("MGC_MAIL_TRACE") {
+                if !v.is_empty() {
+                    let who = if matches!(tgt, MailTarget::Player) {
+                        "player"
+                    } else {
+                        "castle"
+                    };
+                    eprintln!("[mail] AREA->{who} amt={amt} src={src}");
+                }
+            }
+        }
         let m = match tgt {
             MailTarget::Pool(i) => &mut self.ent[i].mail[ch],
             MailTarget::Player => &mut self.player_mail[ch],
@@ -141,6 +153,18 @@ impl Gen {
     /// pending across four writes and the amounts record
     /// 1200/800/1200/400 with no compounding at all.
     pub(crate) fn mail_write_single(&mut self, tgt: MailTarget, ch: usize, amt: u32, src: u16) {
+        if ch == 0 && matches!(tgt, MailTarget::Pool(486) | MailTarget::Player) {
+            if let Ok(v) = std::env::var("MGC_MAIL_TRACE") {
+                if !v.is_empty() {
+                    let who = if matches!(tgt, MailTarget::Player) {
+                        "player"
+                    } else {
+                        "castle"
+                    };
+                    eprintln!("[mail] SINGLE->{who} amt={amt} src={src}");
+                }
+            }
+        }
         let m = match tgt {
             MailTarget::Pool(i) => &mut self.ent[i].mail[ch],
             MailTarget::Player => &mut self.player_mail[ch],
@@ -241,6 +265,13 @@ impl Gen {
                 if self.ent[j].id24 != id {
                     self.mail_write(MailTarget::Pool(j), 0, amt, id);
                     count += 1;
+                    if std::env::var_os("MGC_AREA_TRACE").is_some() {
+                        let e = &self.ent[i];
+                        eprintln!(
+                            "[area] poster {i} ({},{}) at ({},{},{}) f26={} f80={} f84={} amt={amt} -> castle {j}",
+                            e.class64, e.model65, e.x, e.y, e.z, e.f26, e.f80, e.f84
+                        );
+                    }
                 }
             }
         }
@@ -367,22 +398,31 @@ impl Gen {
         // y=70.63 sweeping tile row 73.
         //
         // MC1's ch0 arm biases the window one tile BACK instead:
-        // `(pos - 128) / 256`, a TRUNCATING divide (the `__CFSHL__`
-        // idiom is signed division by 256, and `pos - 128` does go
-        // negative in the first half-tile of the map, where it
-        // truncates to 0 rather than −1). Byte-identical in all three
-        // MC1 variants — sub_120B0 :17339/17352, sub_124F0
-        // :17427/17439, sub_127E0 :17535/17547 — so it is the law,
-        // not a decompiler artifact of one function.
+        // `(pos - 128) / 256`, a TRUNCATING divide of the coordinate
+        // loaded SIGN-EXTENDED. CARPET.EXE (VA 0x1215B/0x12172,
+        // 0x1259B/0x125B2, 0x1288D/0x128A4 — all three variants,
+        // byte-identical) does `movsx` from the u16 position and then
+        // the `sar 31/shl 8/sbb/sar 8` signed-division idiom, so the
+        // truncation is toward ZERO from both sides: on the west/north
+        // half of the map (pos < 0x8000) the familiar one-tile-back
+        // bias, and on the east/south half (pos as i16 negative) the
+        // toward-zero rounding flips it to the NEAREST-UP centre
+        // `(pos + 127) >> 8`. The listing types the coordinate
+        // unsigned, which hides the movsx and reads as a plain back
+        // bias everywhere — mc1l0 t=2811 is the measured refutation:
+        // the (10,0) fire at x=37278 (tile 145.62) centres tile 146,
+        // its 3x3 window missing the burning tree's tile (144,25),
+        // while the (10,6) flame at x=37234 (tile 145.44) centres 145
+        // and grinds the same tree 5/tick.
         //
         // MC2 does NOT do this: `sub_10C80`'s ch0 arm centres on
         // `(pos + 128) >> 8` like every other channel (EF:4118-19).
-        // The `my_sign32` fixup written around it there is dead for
-        // the same reason as the radius fixups — `axis_3d::x` is
-        // uint16, so `x + 128` is never negative.
+        // The ch1+ arm is sign-agnostic in BOTH games: the binary's
+        // `movsx` + `add 0x80` + `sar 8` (VA 0x12329) is a FLOOR
+        // divide, which commutes with the u8 tile wrap.
         let centre = |p: u16| -> i32 {
             if ch == 0 && !mc2 {
-                (p as i32 - 128) / 256
+                (p as i16 as i32 - 128) / 256
             } else {
                 (p as i32 + 128) >> 8
             }
@@ -420,9 +460,45 @@ impl Gen {
             count += 1;
         }
         // The player probe (the human wizard is outside the pool; the
-        // original reaches it through the same grid).
-        if id != PLAYER_TARGET && Self::filter_admits(f66, f67, 3, 0) && self.player_overlap(i, ctx)
+        // original reaches it through the same grid). BECAUSE it is
+        // the same grid, MC1's probe carries the tile-scan's window
+        // gate too: retail has no separate player arm — the carpet is
+        // a pool record linked at its plain (x>>8,y>>8) tile, so an
+        // area writer reaches it ONLY when its scan window (the ch0
+        // one-tile-back bias included) covers that tile. Pinned by the
+        // mc1l0 t=565-570 castle window: at t=568 fires 692/694
+        // overlap the carpet's AABB but their windows stop one tile
+        // short of tile (117,96) — retail's recorded residue is 3×400,
+        // not 5 (the t=606 castle-gulp Δ=800, whole story). MC2 keeps
+        // the pure AABB probe (unmeasured; its sub_10C80 player reach
+        // is not this code path's pinned lane).
+        let player_in_window = mc2 || {
+            let (ptx, pty) = ((ctx.px >> 8) as u8, (ctx.py >> 8) as u8);
+            (-r..=r).any(|dx| (ctx_ + dx) as u8 == ptx)
+                && (-r..=r).any(|dy| (cty_ + dy) as u8 == pty)
+        };
+        if id != PLAYER_TARGET
+            && player_in_window
+            && Self::filter_admits(f66, f67, 3, 0)
+            && self.player_overlap(i, ctx)
         {
+            if ch == 0 && std::env::var_os("MGC_MAIL_TRACE").is_some() {
+                let e = &self.ent[i];
+                eprintln!(
+                    "[mail]   ^player-post from slot {i} ({},{}) at ({},{},{}) f80={} f84={} f78={} ctx=({},{},{})",
+                    e.class64,
+                    e.model65,
+                    e.x,
+                    e.y,
+                    e.z,
+                    e.f80,
+                    e.f84,
+                    e.f78,
+                    ctx.px,
+                    ctx.py,
+                    ctx.pz
+                );
+            }
             self.mail_write(MailTarget::Player, ch, amt, id);
             count += 1;
         }
@@ -800,6 +876,14 @@ impl Gen {
         pitch_cone: u32,
         creature_pitch: Option<u32>,
     ) {
+        // sub_54520's entry clamp (:63975-76), BEFORE the model
+        // switch: the acquire caps the projectile's +26 at 16 —
+        // every ctor stamp above that (the possess lob's 200, a
+        // fireball's high charge) is cut on the one-shot acquire
+        // tick. The mc1l0 (9,1) f26 family, 234 rows.
+        if self.ent[i].f26 > 16 {
+            self.ent[i].f26 = 16;
+        }
         let (px, py, pz, yaw, pitch, own) = {
             let e = &self.ent[i];
             (e.x, e.y, e.z, e.f30, e.f32, e.id24)
@@ -1580,6 +1664,12 @@ impl Gen {
     /// UNSIGNED (the -1 reject sentinel = u32::MAX). Snaps the heading
     /// on success.
     fn aim_assist_possess_mc1(&mut self, i: usize) {
+        // sub_54520's entry clamp (:63975-76) — shared by every
+        // acquire case; see `aim_assist_mc1_cone2`. This is what
+        // turns the possess lob's ctor +26 = 200 into the corpus 16.
+        if self.ent[i].f26 > 16 {
+            self.ent[i].f26 = 16;
+        }
         let (px, py, pz, yaw, pitch, own) = {
             let e = &self.ent[i];
             (e.x, e.y, e.z, e.f30, e.f32, e.id24)
@@ -1596,35 +1686,87 @@ impl Gen {
         // its +144-vs-+24 skip (hw:60169-60207) and its second
         // graves/dwellings list.
         let magnet = self.ent[i].model65 == 17;
+        // The candidate roster is the TICK-HEAD ball/grave chain
+        // (:64043/:64054 walk `var_u32_36462[1]` — the very list the
+        // magnet stamp reads), severed at any mid-tick record reuse
+        // ([`TickChain`]), then the m45 dwelling list (:64058-71) —
+        // NOT the live pool. Retail's list gates are +144/+58 ALONE
+        // (no class, life, or reap-mark test), so a chain member that
+        // died mid-tick stays a stale-byte candidate, and a ball
+        // spawned mid-tick is invisible until the next rebuild.
+        // Measured: mc1l0 pair 604→605 (chase 104-vs-714 — the lob
+        // reusing ball 642's record sees only the chain prefix; its
+        // sibling in old projectile slot 61 three ticks earlier saw
+        // the intact chain and faithfully chased 714). The MC2
+        // fallback keeps the live-pool walk — its list law is
+        // unmeasured and its reap timing differs (strict-scoped).
+        let mc2_fallback = self.verbs.targeting == TargetingVerb::Mc2;
         let mut best: Option<(u16, u32, u16, u16)> = None;
-        for j in 1..self.ent.len() {
-            let c = &self.ent[j];
-            if c.class64 != 10 || c.flags & 0x400 != 0 {
-                continue;
-            }
-            let candidate = match c.model65 {
-                39 => c.f58 != 0 && (magnet || c.f144 != own),
-                40 | 45 => !magnet && c.f144 != own && c.f58 != 0,
-                _ => false,
-            };
-            if !candidate {
-                continue;
-            }
+        let consider = |c: &Ent, j: usize, best: &mut Option<(u16, u32, u16, u16)>| {
             let (tx, ty, tz) = (c.x, c.y, c.aim_z());
             let ty_yaw = Self::angle_between(px, py, tx, ty);
             let dy = Self::angdist(yaw, ty_yaw) as usize;
             if dy > 0x71 {
-                continue;
+                return;
             }
             let dist = Self::isqrt(Self::dist2_sq(px, py, tx, ty) as u32) as i32;
             let ty_pitch = Self::pitch_toward(pz, tz, dist);
             let dp = Self::angdist(pitch, ty_pitch) as usize;
             if dp > 0x71 || dist > 5120 {
-                continue;
+                return;
             }
             let score = Self::acquire_score(dist, dy, dp);
             if best.is_none() || best.is_some_and(|(_, bs, _, _)| score < bs) {
-                best = Some((j as u16, score, ty_yaw, ty_pitch));
+                *best = Some((j as u16, score, ty_yaw, ty_pitch));
+            }
+        };
+        if mc2_fallback {
+            for j in 1..self.ent.len() {
+                let c = &self.ent[j];
+                if c.class64 != 10 || c.flags & 0x400 != 0 {
+                    continue;
+                }
+                let candidate = match c.model65 {
+                    39 => c.f58 != 0 && (magnet || c.f144 != own),
+                    40 | 45 => !magnet && c.f144 != own && c.f58 != 0,
+                    _ => false,
+                };
+                if candidate {
+                    consider(c, j, &mut best);
+                }
+            }
+        } else {
+            for k in 0..self.ball_chain.visible_len() {
+                let j = self.ball_chain.list[k] as usize;
+                let c = &self.ent[j];
+                // The magnet homes on the ball roster's m39 only
+                // (hw:60386-60405) and skips the claim gate; possess
+                // takes the whole chain behind the shared +144/+58
+                // pair (:64045-49).
+                if magnet && c.model65 != 39 {
+                    continue;
+                }
+                if c.f58 == 0 || (!magnet && c.f144 == own) {
+                    continue;
+                }
+                consider(c, j, &mut best);
+            }
+            if !magnet {
+                // The dwelling list (:64058-71) — chain semantics
+                // unmodeled (m45 records are never reused mid-tick
+                // in the corpus); the live walk with the port's
+                // conservative liveness gates stands in.
+                for j in 1..self.ent.len() {
+                    let c = &self.ent[j];
+                    if c.class64 == 10
+                        && c.model65 == 45
+                        && c.flags & 0x400 == 0
+                        && c.f144 != own
+                        && c.f58 != 0
+                    {
+                        consider(c, j, &mut best);
+                    }
+                }
             }
         }
         if let Some((slot, _, ty_yaw, ty_pitch)) = best {
@@ -1875,6 +2017,12 @@ impl Gen {
             self.ent[i].flags |= 2;
             let (x, y) = (self.ent[i].x, self.ent[i].y);
             if !upgrade && !self.castle_site_ok(i, x, y) {
+                // The launch failure releases the owner's charge pin
+                // BEFORE the despawn (:63614-16, sub_46D20(ball, 0))
+                // — the refused site costs the mana but frees the
+                // hand for the recast.
+                let own = self.ent[i].id24;
+                self.release_castle_charge_pin(own);
                 self.ent[i].flags |= 0x400;
                 return false;
             }
@@ -2064,6 +2212,14 @@ impl Gen {
             let own = self.ent[i].id24;
             let (f68, f69) = (self.ent[i].f68, self.ent[i].f69);
             let (x, y, z) = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
+            if std::env::var_os("MGC_CASTLE_PIN_TRACE").is_some() {
+                eprintln!(
+                    "[pin] t={} homing ball {i} done: own={own} f68={f68} f69={f69} \
+                     at ({x},{y},{z}) life={}",
+                    crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                    self.ent[i].act_life
+                );
+            }
             let bound = |s: &Self| {
                 (1..s.ent.len()).any(|c| {
                     let e = &s.ent[c];
@@ -2091,13 +2247,18 @@ impl Gen {
                     }
                     t
                 };
+                if std::env::var_os("MGC_CASTLE_PIN_TRACE").is_some() {
+                    eprintln!(
+                        "[pin] t={} homing ball {i}: morph spawned={spawned:?}",
+                        crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed)
+                    );
+                }
                 if spawned.is_some() {
                     self.ent[i].flags |= 0x400;
-                } else if let Some(m) = (1..self.ent.len()).find(|&m| {
-                    let e = &self.ent[m];
-                    e.class64 == 12 && e.model65 == 16 && e.f144 == own && e.flags & 0x400 == 0
-                }) {
-                    self.ent[m].f26 = 0;
+                } else {
+                    // Pool full: release the pin, the ball lives and
+                    // retries (:63513-15).
+                    self.release_castle_charge_pin(own);
                 }
             }
         }
@@ -3275,7 +3436,15 @@ impl Gen {
                             e.f146 = shooter;
                             e.id24 = PLAYER_TARGET;
                             e.act_life = e.max_life as i32;
-                            self.move_relink(i, ctx.px, ctx.py, ctx.pz);
+                            // Victim z + victim +84 (:62885-88), as in
+                            // the pool arm — the carpet's +84 is
+                            // PLAYER_HH (sprite 44 height/2).
+                            self.move_relink(
+                                i,
+                                ctx.px,
+                                ctx.py,
+                                ctx.pz.wrapping_add(PLAYER_HH as i16),
+                            );
                             return false;
                         }
                         // Generic refusal: the bolt hits the rebounding
@@ -3293,7 +3462,11 @@ impl Gen {
                     self.move_relink(i, jx, jy, jz);
                 }
                 MailTarget::Player => {
-                    self.move_relink(i, ctx.px, ctx.py, ctx.pz);
+                    // The same +78 lift as the pool arm's `aim_z` —
+                    // the carpet's +78 is PLAYER_HH (sprite 44
+                    // height/2), and the model-2 castle guard can
+                    // never apply to the human.
+                    self.move_relink(i, ctx.px, ctx.py, ctx.pz.wrapping_add(PLAYER_HH as i16));
                 }
             }
             self.proj_explode(i, ctx, Some(v), copy_f44, stamp_victim);
@@ -3358,6 +3531,12 @@ impl Gen {
         self.ent[i].flags |= 0x400;
     }
 
+    /// sub_11810 (:16880) `& 1`: the TILE-TYPE water probe — retail's
+    /// projectile splashes, tree trunks, site scans and the ambient
+    /// loop all switch on `type == 0`. Its sibling sub_11760 (`angle
+    /// nibble == 0`, our `on_water`) is a DIFFERENT law: shore/wave
+    /// cells (type 45, nibble 0) are land here and water there —
+    /// check the caller's retail anchor before picking one.
     pub(crate) fn on_water_pub(&self, x: u16, y: u16) -> bool {
         self.t.tile_type[(((y >> 8) as usize) << 8) | (x >> 8) as usize] == 0
     }
@@ -4275,6 +4454,14 @@ impl Gen {
             self.ent[i].flags |= 0x400;
             return false;
         }
+        // :28073 — the ONE ground sample, taken BEFORE the terrain
+        // reaction and held through it: a fire that scorches its own
+        // cell still gates and z-rules against the PRE-dig ground
+        // (both retail binaries and the MC2 twin pass this v3 into the
+        // z rule). Re-sampling after the dig flips the clamp direction
+        // on a fire spawned under freshly painter-raised ground.
+        let (x, y) = (self.ent[i].x, self.ent[i].y);
+        let g = self.ground_z(x, y);
         let mut dirty = false;
         if self.ent[i].flags & 2 == 0 {
             self.ent[i].flags |= 2;
@@ -4284,11 +4471,17 @@ impl Gen {
             }
             // Terrain reaction (:28083-104): burn conversions, else a
             // small scorch crater on flat, low, dry ground.
-            let (x, y, z) = {
-                let e = &self.ent[i];
-                (e.x, e.y, e.z)
-            };
-            let t = tile((x >> 8) as u8, (y >> 8) as u8);
+            let z = self.ent[i].z;
+            // The reaction cell is ROUNDED (:28075-77 `(x+128)>>8` —
+            // the MC2 twin already had this); the water probe stays on
+            // the plain `>>8` cell AND is the ANGLE probe sub_11760
+            // (:28098), not the tile-type one — a shore cell (type 45,
+            // angle nibble 0) is WATER to this gate. mc1l0 t=4290: the
+            // type probe scorched a wave cell retail leaves alone.
+            let t = tile(
+                (x.wrapping_add(128) >> 8) as u8,
+                (y.wrapping_add(128) >> 8) as u8,
+            );
             let ty = self.t.tile_type[t];
             let conv = match ty {
                 26 => Some(0x14),
@@ -4304,10 +4497,11 @@ impl Gen {
                 // original; they only seed corner_orient ties.
                 self.paint(0, 0, t, c);
                 dirty = true;
-            } else if !(6..=0x22).contains(&ty)
+            } else if ty != 0
+                && !(6..=0x22).contains(&ty)
                 && self.t.angle[t] & 7 != 1
-                && (z as i32 - self.ground_z(x, y)) <= 128
-                && !self.on_water_pub(x, y)
+                && (z as i32 - g) <= 128
+                && !self.on_water(x, y)
             {
                 let d = self.ent_rand(i);
                 self.dig_scorch(i, -((d % 7) as i16));
@@ -4323,8 +4517,7 @@ impl Gen {
         // UP to ground; at ground it stays. The original never pulls
         // a fire down to terrain — a midair explosion (max-range
         // fireball expiry, the meteor's trail) stays at altitude.
-        let (x, y) = (self.ent[i].x, self.ent[i].y);
-        let g = self.ground_z(x, y) as i16;
+        let g = g as i16;
         if self.ent[i].z > g {
             self.ent[i].z = self.ent[i].z.wrapping_add(self.ent[i].f46);
         }
@@ -4526,7 +4719,11 @@ impl Gen {
     /// (10,39), so the explicit family test below IS that filter and
     /// keeps working for native balls (which carry no +66/+67). The
     /// port-only exclusions (fool's-mana spheres, soft-killed
-    /// records) ride along.
+    /// records) ride along. ⚠ The soft-kill exclusion models MC2's
+    /// unlink-at-disable; MC1's sub_11D10 has NO disable gate — a
+    /// castle-absorbed (still-linked) ball is retail-admissible for
+    /// one tick and its mana would DUPE into the survivor. Kept
+    /// port-wide until a corpus row asks for retail's loophole.
     ///
     /// RESIDUAL: the order WITHIN one ring comes from a data table
     /// (`bitmaps_E9980x`) the decompile does not carry; raster order
@@ -4596,14 +4793,22 @@ impl Gen {
     /// physics (gravity 16, quarter-bounce, 250/256 friction, ±64
     /// clamp), merge on overlap (sub_277D0 :29700).
     fn ball_tick(&mut self, i: usize, ctx: &MobCtx) -> bool {
-        // A ball absorbed by an earlier slot THIS tick is already
-        // despawning — without this guard two coincident balls merge
-        // into each other mutually and the mana vanishes (retail's
-        // merged ball is display-disabled and can't re-merge).
-        if self.ent[i].flags & 0x400 != 0 {
+        let mc2 = matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2);
+        // MC2 ONLY: a disabled sphere never runs again (retail's
+        // UpdateEntities gate — the disable unlinks at once; the
+        // strict-mode main walk also skips it, native MC2 needs the
+        // guard here). MC1's walk gates on CLASS alone (:52351) and
+        // sub_27030 has no disable check: a ball soft-disabled
+        // EARLIER THIS TICK still runs its full dispatch — mc1l0
+        // t=1234, castle 663's absorb (:56032, slot 663) banks ball
+        // 754 and the flagged ball still slides/decays at its own
+        // slot before the next tick-top reap frees it. (The old
+        // whole-tick early-out was a fossil of the soft-kill merge
+        // era; the merge hard-frees now, see the sub_277D0 note
+        // below, so mutual merges cannot happen.)
+        if mc2 && self.ent[i].flags & 0x400 != 0 {
             return false;
         }
-        let mc2 = matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2);
         // MC2 stall skip (retail byte[1] & 8 → import bit 26,
         // EF:26062-65): a one-shot whole-tick skip — intakes, modes
         // and the decay tail included. Native MC2 never arms it on
@@ -5183,8 +5388,10 @@ impl Gen {
             let yaw = ((d1 % 0x71) as i32 - 56 + heading as i32) as u16 & 0x7FF;
             let d2 = self.ent_rand(b);
             let speed = (d2 % 0x30 + 16) as i16;
+            // Heading only (:29688 `v2[15]`) — retail never writes the
+            // ball's +34, so the drop is born with target_yaw 0 like
+            // every non-homing (10,x); the ball tick never reads it.
             self.ent[b].f30 = yaw;
-            self.ent[b].f34 = yaw;
             // The launch speed persists in +126 (:29689 `v2[63]`) —
             // the mc1l0 corpus pins it: every castle-preclear house
             // drop carries 16..63 where the unstamped port ball read
@@ -5233,14 +5440,15 @@ impl Gen {
     }
 
     /// The fire's scorch dig (sub_40D30(expl, 0, 0, -depth, 1)):
-    /// a single-cell protected dig at the fire's position. Also the
-    /// MC2 fire's (sub_30D50 → sub_572C0 — same chassis shape).
+    /// the RING-0 DISC around the fire's rounded cell — the SEARCH.DAT
+    /// 2x2 zero block minus the walker's dropped last cell, i.e. THREE
+    /// cells: center, (+1,0), (0,+1). Also the MC2 fire's (sub_30D50 →
+    /// sub_572C0 — same ring walk, EF:39730-40). A zero depth still
+    /// runs the full cell update (MC1 :51647-88, MC2 EF:39535-47):
+    /// the angle LATCH (`|= 1`) + restencil/retile land on all three
+    /// cells, so the fire gate refuses later re-scorches there.
     pub(crate) fn dig_scorch(&mut self, i: usize, delta: i16) {
-        if delta == 0 {
-            return;
-        }
-        let (x, y) = (self.ent[i].x, self.ent[i].y);
-        let _ = self.dig_cell_pub((x >> 8) as i16, (y >> 8) as i16, delta, true);
+        let _ = self.dig_disc_pub(i, 0, 0, delta, true);
     }
 }
 

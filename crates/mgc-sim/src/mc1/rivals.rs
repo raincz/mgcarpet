@@ -332,8 +332,10 @@ impl World {
     }
 
     /// A rival-owned class-12 manifestation (the shared sub_3BF70
-    /// slot economy; f144 = the owner tag — 0 on the human's and on
-    /// ground jars).
+    /// slot economy; f144 = the owner tag — PLAYER_TARGET on the
+    /// human's, 0 on ground jars; retail keeps the owner in +42 and
+    /// +144 dead — the importer and every native mint normalize into
+    /// f144).
     fn mint_manifestation(&mut self, spell: usize, owner: u16) -> Option<usize> {
         let m = self.g.new_event()?;
         let f44 = self.spells()[spell].damage.min(u16::MAX as u32) as u16;

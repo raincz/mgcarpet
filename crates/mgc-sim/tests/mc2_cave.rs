@@ -475,13 +475,22 @@ fn mc2_cave_behaviors_and_goldens() {
     // MC2 spheres (nothing in TransformArcherToMana reads them), so
     // this is bookkeeping toward retail's byte image; see the
     // OBSERVABLE verdict below.
+    // Re-pinned (LAST checkpoint only; 1-3 hold) for the SCORCH DISC —
+    // `dig_scorch` is the ring-0 DISC of sub_40D30 / MC2 sub_572C0
+    // (the SEARCH.DAT 2x2 zero block minus the walker's dropped last
+    // cell): THREE cells per scorch — center, (+1,0), (0,+1) — each
+    // with the full cell update (crater, angle latch, restencil/retile,
+    // cave ceiling counter-shift). Verified attributable to the disc
+    // alone — reverting dig_scorch to the single-cell form restores
+    // this hash with the zero-depth latch change still in. Behavior
+    // change toward retail by design.
     assert_eq!(
         got,
         vec![
             0xd73f49abfb15d3c6u64,
             0xfe5ebe96a6f529d1,
             0xc1c0fa09ce5b635e,
-            0x972d86d49b9e681b,
+            0x33e0d3264fc2327a,
         ],
         "cave goldens moved — re-pin ONLY for an intended fidelity change"
     );
@@ -547,11 +556,16 @@ fn mc2_cave_behaviors_and_goldens() {
     // TILE ROUNDING, `area_write` — MC2 twin EF:3750/3798): edge-tile
     // victims now receive their mail on retail's tick; the mc2l0
     // t=7257 fixture went conforming on the same change.
+    // LAST re-pinned with the state pin above (the SCORCH DISC): a
+    // real behavior change — each flame scorches the ring-0 THREE-cell
+    // disc (center, +x, +y) with the full cell update, so late-run
+    // terrain, its ceiling counter-shifts and everything
+    // ground-following them genuinely move. First three hold.
     const OBSERVABLE: [u64; 4] = [
         0xfb1faf378bf44770,
         0x339f43e8e59380d8,
         0x62f2504ead5e10e0,
-        0xdbd06afdc5dc8cc8,
+        0xbcee5e2f8cbe60fc,
     ];
     assert_eq!(
         obs, OBSERVABLE,

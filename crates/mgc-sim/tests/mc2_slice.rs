@@ -583,12 +583,31 @@ fn mc2_slice_behaviors_and_goldens() {
     // conformance import supplies them separately) — proof right
     // below, the layout-independent OBSERVABLE projection does NOT
     // move on this patch.
+    // A-E re-pinned (post-init holds) for the SCORCH DIG CELL
+    // ROUNDING — `dig_scorch` rounds the cell (+128 before the
+    // shift) like both retail chassis (MC1 sub_40D30 :51705-06, MC2
+    // sub_572C0 EF:39722-23). The MC2 fire already GATED on the
+    // rounded cell; its dig landed one cell over for upper-half
+    // positions. Level-000's ambient village fires scorch from the
+    // first live ticks, so every checkpoint after load moves;
+    // post-init holds because the load settle's authored scorch
+    // rings ride `dig_disc`, which always rounded. Verified
+    // attributable by reverting the one dig_scorch line. Behavior
+    // change toward retail by design.
+    // A-E re-pinned for the SCORCH DISC LAW (`dig_scorch` = the ring-0
+    // disc of sub_40D30 / MC2 sub_572C0: THREE cells — center, +x, +y —
+    // each with the full cell update at ANY depth, 0 included, so
+    // zero-depth scorches still latch + restencil/retile all three).
+    // The ambient village fires scorch from the first live ticks, so
+    // every checkpoint after post-init moves. Verified attributable to
+    // the pair: reverting dig_scorch to the single-cell zero-skipping
+    // form restores all six. Behavior change toward retail by design.
     const GOLDEN: [u64; 6] = [
         0x7633ac8b22e56968, // post-init (GenerateEvents + dis 0)
-        0x762e54b645d0a2de, // A: 64 idle ticks afield
-        0x9d1880b7d8735f24, // B: the type-5 fly-to latched
-        0x3179eded279d02e0, // C: goat awake/flee window
-        0x02ac09150e281be7, // D: fireball combat over the goat
+        0xe98f413166ba5e72, // A: 64 idle ticks afield
+        0xffc80a25dbeb6580, // B: the type-5 fly-to latched
+        0xa8bd56b00be418a0, // C: goat awake/flee window
+        0x28169e0ef6bdaacf, // D: fireball combat over the goat
         // E re-pinned for the AREA-BROADCAST TILE ROUNDING
         // (`area_write` centers on the nearest tile — sub_120B0 /
         // EF:3750; corpus pins: mc1l0 t=91 tent claim, mc2l0 t=7257
@@ -606,7 +625,7 @@ fn mc2_slice_behaviors_and_goldens() {
         // stale amount regardless; only the hashed `player_mail` word
         // moves. (It is NOT inert in MC1, which is the whole point:
         // `mail_write_single` accumulates onto it.)
-        0x41ea338e30462fb4, // E: census + villager/archer provocation
+        0x1ff3ae10f2ca8a6e, // E: census + villager/archer provocation
     ];
     assert_eq!(
         got, GOLDEN,
@@ -633,13 +652,21 @@ fn mc2_slice_behaviors_and_goldens() {
     // law (see the GOLDEN note): antipodal wander turns now commit
     // in retail's direction — creature poses diverge from the first
     // tie on, real behavior, not layout.
+    // Re-pinned (A-E; post-init holds) for the SCORCH DIG CELL
+    // ROUNDING (see the GOLDEN note): ambient fires scorch their
+    // retail cells — terrain, and everything ground-following it,
+    // genuinely moves. Real behavior toward retail, not layout.
+    // Re-pinned (A-E; post-init holds) for the SCORCH DISC LAW (see
+    // the GOLDEN note): every scorch is the ring-0 three-cell disc
+    // with full cell updates at any depth — terrain latches, retiles
+    // and craters land on retail's cells from the first ambient fire.
     const OBSERVABLE: [u64; 6] = [
         0x5951c95adf7436f9,
-        0x85ecf48b01aea7d4,
-        0xdfad9efeef19c845,
-        0x4916d9a44be021d0,
-        0xe5055dd460ec724b,
-        0xb5e88fd57bd138fb,
+        0x3eaed2073972a99e,
+        0x832f419cb3f9716b,
+        0x4532427c5b39ad0e,
+        0xe4c2940d1e4f7951,
+        0x737161c0e6493619,
     ];
     assert_eq!(
         obs, OBSERVABLE,

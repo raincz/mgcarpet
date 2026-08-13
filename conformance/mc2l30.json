@@ -13,11 +13,7 @@
     },
     {
       "t": 13,
-      "status": "open",
-      "sig": "49114d1a906984b8",
-      "atoms": [
-        "field:14,2:life"
-      ],
+      "status": "conforming",
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
     {
@@ -40,11 +36,7 @@
     },
     {
       "t": 33,
-      "status": "open",
-      "sig": "9e41345db0f8ddaa",
-      "atoms": [
-        "field:5,4:z"
-      ],
+      "status": "conforming",
       "note": "auto-triage vs known-deviations: roster: mc2-archer-ground-z, mc2-terraform-houses; 1 row(s) unexplained; rng"
     },
     {

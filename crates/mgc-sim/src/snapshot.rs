@@ -61,7 +61,7 @@ const MAGIC: u32 = 0x5343_474D;
 ///    teleport_return` widened to the full saved axis (x, y, z),
 ///    `World::pending_teleport` gained the arrival altitude,
 ///    `World::pending_speed_zero` joined the stream after it.
-pub const SNAPSHOT_VERSION: u32 = 8;
+pub const SNAPSHOT_VERSION: u32 = 9;
 
 /// Why a snapshot could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]

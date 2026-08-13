@@ -197,6 +197,13 @@ pub struct Player {
     /// Regen stall (u32_383): every processed hit sets 16 — no
     /// health regen for 16 ticks (:55387-90).
     regen_delay: u16,
+    /// The life-regen rate REGISTER (Type_160 u16_341): retail's
+    /// regen tail applies THIS, then re-selects it from the at-castle
+    /// test — so the rate applied at tick N is the one chosen at
+    /// N−1 (mc1l0 t=1144: the castle-663 establish latches var_50 at
+    /// 1143, +5 still lands at 1144 and the first +40 only at 1145).
+    /// The mana delta (+132) has the same apply-then-select shape.
+    life_rate: i32,
     /// Life state (class-3 states 0/2/3).
     pub state: LifeState,
     /// Death-fall vertical speed (var_u16_29841_46), engine units.
@@ -249,6 +256,7 @@ impl Default for Player {
             life: PLAYER_LIFE_MAX,
             grace: 100,
             regen_delay: 0,
+            life_rate: 0,
             state: LifeState::Alive,
             fall_speed: 0,
             killer: 0,
@@ -291,6 +299,7 @@ impl std::hash::Hash for Player {
             life,
             grace,
             regen_delay,
+            life_rate,
             state,
             fall_speed,
             killer,
@@ -304,6 +313,13 @@ impl std::hash::Hash for Player {
         (accel, accel_held, speed_boost.to_bits(), teleport_return).hash(h);
         (life, grace, regen_delay, state, fall_speed, killer).hash(h);
         (death_owned, hit_flash, lost).hash(h);
+        // Transparent at pristine: hashed only once the CASTLE rate
+        // has latched — fixtures that never idle at their own castle
+        // (or a dolmen) keep their goldens (the death_owned_blue
+        // shape). The afield value is derivable from the constants.
+        if *life_rate > PLAYER_LIFE_MAX / 2000 {
+            life_rate.hash(h);
+        }
         // Hashed only when armed: fixtures that never held a
         // blue-granted spell through a death keep their goldens
         // (the mc2_apocalypse precedent).
@@ -531,6 +547,24 @@ pub struct PlayerCommand {
     /// :20496-501): sets the OWN castle's life to −1 (:55846-50) —
     /// one downgrade level per press.
     pub demolish: bool,
+}
+
+/// The chained human flight, handed INTO the world turn so the mover
+/// can run at the carpet's walk slot ([`World::tick_flight`]). The
+/// driver samples the world-coupled channels at the tick head
+/// (retail's own command/input phase, ahead of the frame function):
+/// the input overrides, the Accelerate override + restore edge, and
+/// the falling/dead states. The knock is NOT sampled here — the move
+/// consumes it in-dispatch (:55204-18), right after the mailbox
+/// block armed it, so a same-tick hit shoves this tick's move. The
+/// world steps `s` mid-walk and the driver reads the settled pose
+/// back afterward.
+pub struct FlightDrive<'a> {
+    pub s: &'a mut crate::flight::Mc1State,
+    pub inp: crate::flight::Mc1Input,
+    pub over: Option<f32>,
+    pub falling: bool,
+    pub dead: bool,
 }
 
 /// The runtime world of one loaded MC1/HW level.
@@ -796,6 +830,14 @@ pub struct World {
     /// cast per press) except the traced hold spells; the edges are
     /// derived sim-side from the held booleans.
     prev_fire: (bool, bool),
+    /// Conformance instrument (the pose channel's ground phase): when
+    /// armed, the next tick's entity walk copies the height plane as
+    /// it reaches the carpet anchor slot — the mover's own ground-
+    /// probe phase, with every lower-slot terraform of the tick
+    /// applied and every higher-slot one still pending. Not hashed,
+    /// not snapshotted.
+    midtick_ground_armed: bool,
+    midtick_ground: Option<Vec<u8>>,
     /// The Accelerate brake veto for this tick, fed by
     /// [`World::thrust_cancel`]: .0 blocks type 2 (backward thrust
     /// held), .1 blocks type 21 (forward thrust held).
@@ -1403,6 +1445,8 @@ impl World {
             strict_retail: false,
             patches: WorldPatches::RETAIL,
             prev_fire: (false, false),
+            midtick_ground_armed: false,
+            midtick_ground: None,
             accel_veto: (false, false),
             pending_respawn: None,
             pending_restart: false,
@@ -2030,12 +2074,46 @@ impl World {
     /// The castle/dolmen fast-regen probes (:55346-50 + the dolmen
     /// flag leg, MC1 :55407 / MC2 EF:60018) — shared by both games'
     /// wizard mana steps.
-    fn regen_boost(&self, player: PlayerPose, ctx: &MobCtx) -> (bool, bool) {
-        let at_castle = self.player_castle().is_some_and(|c| {
-            let e = &self.g.ent[c];
-            ((player.x.wrapping_sub(e.x) as i16).unsigned_abs() as u16) <= e.f80
-                && ((player.y.wrapping_sub(e.y) as i16).unsigned_abs() as u16) <= e.f82
-        });
+    ///
+    /// The at-castle test is `sub_11950` = the FULL `sub_118C0`
+    /// overlap of the carpet's record against the bound castle
+    /// (summed extents, strict `<`, z leg included) — the same
+    /// predicate the creature scans run, so `player_overlap` IS it.
+    /// The old bare `<= f80/f82` point test missed the carpet's own
+    /// extent band (~half a tile): mc1l0 t=1827, the carpet hovers
+    /// just off the recast castle's footprint and retail still
+    /// selects the castle rates (the free-run mana fork at 1828,
+    /// retail +1000/tick vs port +100).
+    fn regen_boost(&self, ctx: &MobCtx) -> (bool, bool) {
+        let at_castle = self
+            .player_castle()
+            .is_some_and(|c| self.g.player_overlap(c, ctx));
+        if std::env::var_os("MGC_REGEN_TRACE").is_some() {
+            let c = self.player_castle();
+            let detail = c.map(|c| {
+                let e = &self.g.ent[c];
+                (
+                    c,
+                    e.act_life,
+                    e.f26,
+                    e.tick70,
+                    e.x,
+                    e.y,
+                    e.z,
+                    (e.f80, e.f82, e.f84),
+                    self.g.player_overlap(c, ctx),
+                )
+            });
+            eprintln!(
+                "[regen t={}] at_castle={at_castle} castle={detail:?} player=({}, {}, {}) mana={} delta={}",
+                crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                ctx.px,
+                ctx.py,
+                ctx.pz,
+                self.player.mana,
+                self.player.mana_delta,
+            );
+        }
         let at_dolmen = (1..self.g.ent.len()).any(|j| {
             let e = &self.g.ent[j];
             e.class64 == 2
@@ -2064,6 +2142,7 @@ impl World {
         cmd: PlayerCommand,
         player: PlayerPose,
         ctx: &MobCtx,
+        boost: (bool, bool),
     ) {
         // The wizard mana step (:55385-421): apply the delta the
         // token slots wrote earlier THIS frame (fire debit /
@@ -2071,10 +2150,25 @@ impl World {
         // recompute the regen rate. Ahead of the cast commands so the
         // legacy command-site debits keep their next-tick landing
         // (retail's own debits are all token-side; only the token
-        // lane's same-frame apply is corpus-constrained).
+        // lane's same-frame apply is corpus-constrained). Retail
+        // consumes the COMMANDS before its step, though — the silent
+        // command gate (:55890) compares the PRE-step pool: mc1l32
+        // t=671 refuses a fireball at 148 < 200 with +100 regen
+        // landing the same tick. `pre_mana` carries that read.
+        //
+        // `boost` is the caller's PRE-move `regen_boost` — retail
+        // evaluates bool1 once, at :55345-52 before anything moves,
+        // and feeds BOTH regen rates from that one read (:55407-16).
+        // Re-probing here after the move forked mc1l0 t=2428: the
+        // carpet slid past the level-1 castle's summed extent
+        // (dy 1814 > 1783) on the very tick its upgrade ball was
+        // landing — retail's pre-move read (dy 1751) kept the castle
+        // rate, the port's post-move re-read dropped to the floor
+        // for exactly one tick (+100 vs +1000).
+        let pre_mana = self.player.mana;
         let stepped = self.player.mana as i64 + self.player.mana_delta as i64;
         self.player.mana = stepped.clamp(0, self.player.mana_max as i64) as u32;
-        let (at_castle, at_dolmen) = self.regen_boost(player, ctx);
+        let (at_castle, at_dolmen) = boost;
         self.player.mana_delta = if at_castle || at_dolmen {
             ((self.player.mana_max / 200) as i32).max(1000)
         } else {
@@ -2091,14 +2185,15 @@ impl World {
                 self.g.ent[c].act_life = -1;
             }
         } else if alive {
-            // A conformance recording's fire bits are the CONSUMED
-            // command word — the input layer already edge-filtered
-            // them (one bit per click for +60==1 spells, :20601-34)
-            // — so under strict every set bit IS a command edge.
-            // Native play feeds raw held levels; the tick-head edge
-            // supplies the click discrimination (the hold spells'
-            // legacy arms consume the level themselves, which is the
-            // input layer's held-re-emit in port form).
+            // A conformance pair's fire bits come from dw_0, the
+            // CONSUMED command word (verify::fire_bits_mc1) — the
+            // input layer already edge-filtered them (one bit per
+            // click for +60==1 spells, :20601-34) and dropped UI
+            // clicks — so under strict every set bit IS a command
+            // edge. Native play feeds raw held levels; the tick-head
+            // edge supplies the click discrimination (the hold
+            // spells' legacy arms consume the level themselves, which
+            // is the input layer's held-re-emit in port form).
             let eff = if self.strict_retail {
                 (cmd.fire_left, cmd.fire_right)
             } else {
@@ -2107,12 +2202,12 @@ impl World {
             if cmd.fire_left
                 && let Some(s) = self.player.left
             {
-                self.mc1_cast_command(s, false, eff.0, player, ctx);
+                self.mc1_cast_command(s, false, eff.0, pre_mana, player, ctx);
             }
             if cmd.fire_right
                 && let Some(s) = self.player.right
             {
-                self.mc1_cast_command(s, true, eff.1, player, ctx);
+                self.mc1_cast_command(s, true, eff.1, pre_mana, player, ctx);
             }
         }
         // Next frame's token fires measure from THIS frame's settled
@@ -2132,6 +2227,7 @@ impl World {
         spell: SpellId,
         right: bool,
         edge: bool,
+        pre_mana: u32,
         player: PlayerPose,
         ctx: &MobCtx,
     ) {
@@ -2156,13 +2252,28 @@ impl World {
             if m == 0 {
                 return; // :55858 empty/invalid-hand guard
             }
-            if id == 16 && self.castle_lock_active() {
+            // The one audible command-site refusal (:55903-06): the
+            // castle hand reads its own token's +48 LATCH — armed by
+            // the cast, pinned/released by the castle machine
+            // (sub_46D20) — not a derived predicate.
+            if id == 16 && std::env::var_os("MGC_CASTLE_PIN_TRACE").is_some() {
+                eprintln!(
+                    "[pin] t={} cast cmd 16: m={m} f26={} pre_mana={pre_mana} cost={}",
+                    crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                    self.g.ent[m].f26,
+                    self.spell_cast_cost(16)
+                );
+            }
+            if id == 16 && self.g.ent[m].f26 != 0 {
                 self.g.snd_player(29); // the pinned-charge fizzle (:55905)
                 return;
             }
             let cost = self.spell_cast_cost(id);
-            if !self.dev_spells && self.player.mana < cost {
-                return; // the mana gate is SILENT (:55890/:55908)
+            if !self.dev_spells && pre_mana < cost {
+                // The mana gate is SILENT (:55890/:55908) and reads
+                // the PRE-step pool — retail consumes commands before
+                // its mana step (mc1l32 t=671).
+                return;
             }
             let def = &self.spells()[id];
             self.g.ent[m].f26 = def.count as i16; // :55893 reload
@@ -2198,10 +2309,244 @@ impl World {
         self.player.mana >= self.spell_cast_cost(id)
     }
 
-    /// One game turn (`sub_41780_41AC0`, :52197). `player` feeds the
-    /// trigger volume probes, creature awake checks and aggro scans;
-    /// `cmd` is the rest of the player's tick input (fire).
+    /// The human carpet's own dispatch arms, run AT the walk slot
+    /// under [`Self::tick_flight`]: the mover (sub_455D0 — its ground
+    /// probe reads the SAME-tick terrain the lower-slot painters just
+    /// stamped: the t=563 replay-wall law), the death-fall ride
+    /// (sub_45FC0) and the dead-camera turn (sub_463B0), all class-3
+    /// carpet-dispatch siblings in retail. Input, knock and the accel
+    /// override were sampled by the driver at the tick head; only the
+    /// terrain-coupled integration moves in here.
+    /// The wizard tick's MAILBOX BLOCK (sub_45C90 :55344-78): the
+    /// at-castle redirect, the invincible/grace/intake fork and the
+    /// cast-charge meter. In retail this is the middle of the class-3
+    /// carpet dispatch — casts (sub_46840) have already run, the move
+    /// (sub_455D0, the dispatch TAIL) has not — so a hit posted by a
+    /// lower-slot walker arms the knock the SAME tick's move consumes
+    /// (mc1l0 t=1128: the (5,1) vulture at slot 533 dives, the intake
+    /// arms v_22=10, and retail's 1128 pose already carries the shove
+    /// — decayed to the recorded (6,1659) by the boundary). MC1 calls
+    /// it at the carpet's walk slot; MC2 keeps the post-walk call.
+    fn player_mail_block(&mut self, player: PlayerPose, at_castle: bool) {
+        if self.player.state != LifeState::Alive {
+            // Falling/dead: the landing wipe already cleared the
+            // mailbox; discard anything new (the original's dead
+            // wizard never reads it).
+            self.g.player_mail = [(0, 0); 6];
+            return;
+        }
+        // The at-castle redirect (:55353-62): with the own castle
+        // underfoot, pending ch0 damage FORWARDS into the castle's
+        // mailbox — the castle tanks for you.
+        if at_castle {
+            if self.g.player_mail[0].1 != 0
+                && let Some(c) = self.player_castle()
+            {
+                let (amt, src) = self.g.player_mail[0];
+                if std::env::var_os("MGC_MAIL_TRACE").is_some() {
+                    eprintln!("[mail] REDIRECT amt={amt} src={src}");
+                }
+                // The AREA order — retail inlines the forward at
+                // :55357-60 with pending→ACCUMULATE, NOT the
+                // inverted `sub_12B50` protocol.
+                self.g.mail_write(MailTarget::Pool(c), 0, amt, src);
+                // Retail leaves the player's own mail armed here;
+                // the grace memset below (:55367-71, armed by the
+                // `grace = 2` write) is what clears it.
+                self.g.player_mail[0] = (0, 0);
+            }
+            // The grace re-arm sits in the at-castle branch OUTSIDE
+            // the pending-mail check (:55363; MC2 twin
+            // `AddPlayer03_00_5E010` identically): EVERY tick at home
+            // writes grace = 2, so the memset below wipes the whole
+            // box each of those ticks. Sitting home under fire
+            // deliberately shortens a fresh 100-tick spawn grace —
+            // and the standing wipe is what RESETS the sub_12B50
+            // point-damage snowball: mc1l0 t=1188, the second
+            // vulture melee lands on a wiped box and forwards 100;
+            // an unwiped stale 100 from the t=1128 melee accumulated
+            // to a 200 forward (retail castle −100, port −200).
+            self.player.grace = 2;
+        }
+        if self.invincible {
+            // Dev god-mode = LIFE immunity only, and it OVERRIDES
+            // spawn grace (a tester wants to see hostile effects
+            // immediately, not wait out the 100-tick grace). The mana
+            // steal (ch3) still DRAINS (and arms its 16-tick regen
+            // stall) so the mana economy stays fully testable — a
+            // genie can pin you castless and defenseless, you just
+            // can't be killed. ch0 physical accumulates for the
+            // damage readout and arms the flash/danger, but never
+            // costs life or kills.
+            if self.g.player_mail[3].1 != 0 {
+                let amt = self.g.player_mail[3].0;
+                self.player.mana = self.player.mana.saturating_sub(amt);
+                self.player.regen_delay = 16;
+            }
+            if self.g.player_mail[0].1 != 0 {
+                let (amt, src) = self.g.player_mail[0];
+                self.g.player_damage += if self.player.shield {
+                    amt as u64 / 4
+                } else {
+                    amt as u64
+                };
+                // Positional KNOCKBACK still lands (god-mode is
+                // life-only): a hit shoves the player, so the
+                // kraken's lightning still pushes you OUT.
+                let s = src as usize;
+                if src != 0
+                    && src != PLAYER_TARGET
+                    && s < self.g.ent.len()
+                    && self.g.ent[s].class64 != 0
+                {
+                    let dir =
+                        Gen::angle_between(self.g.ent[s].x, self.g.ent[s].y, player.x, player.y)
+                            & 0x7FF;
+                    self.g.player_knock = (dir, ((amt / 10) as i16).clamp(0, 80));
+                }
+                self.player.hit_flash = 5;
+            }
+            if self.g.player_mail.iter().any(|&(_, from)| from != 0) {
+                self.g.player_danger = 100;
+            }
+            self.g.player_mail = [(0, 0); 6];
+        } else if self.player.grace > 0 {
+            // The spawn-grace memset (:55367-71): every channel
+            // wiped, total immunity — steal and grip included, and
+            // the danger music stays calm (sub_46540 never runs).
+            self.player.grace -= 1;
+            self.g.player_mail = [(0, 0); 6];
+        } else {
+            // The player damage intake — the DamageVerb seam
+            // (MC2 adds channels + the spell-XP decorators).
+            match self.g.verbs.damage {
+                DamageVerb::Mc1 => self.apply_player_damage(player),
+                DamageVerb::Mc2 => {
+                    self.g.note_verb_fallback(VerbKind::Damage);
+                    self.apply_player_damage(player);
+                }
+            }
+        }
+        // The cast-charge meter (u8_326): +1 per live carpet
+        // tick, saturating at 200 (:55377-78) — sits between the
+        // mailbox block and the regen block exactly like retail.
+        if matches!(self.game, GameId::Mc1 | GameId::Mc1Hw) && self.wiz_charge[0] < 200 {
+            self.wiz_charge[0] += 1;
+        }
+    }
+
+    /// The regen tail (:55381-421) — in retail it sits AFTER the move
+    /// call, closing the carpet dispatch; the rate fork reads the
+    /// PRE-move at-castle test (bool1, :55345-52) exactly like the
+    /// redirect does.
+    fn player_regen_block(&mut self, at_castle: bool, at_dolmen: bool) {
+        if self.player.state != LifeState::Alive {
+            return;
+        }
+        // Health regen: stalled 16 ticks by every processed hit, then
+        // the STORED rate per tick (u16_341) — applied FIRST, then
+        // re-selected from the at-castle/dolmen test (:55387-421
+        // apply at :55388, select at :55414-20), so a rate change
+        // lands one tick after the test flips: maxLife/250 at the own
+        // castle OR on a dolmen shrine (the same fork as the mana
+        // delta — :55414 / EF:60021) vs maxLife/2000 afield.
+        let fresh = if at_castle || at_dolmen {
+            PLAYER_LIFE_MAX / 250
+        } else {
+            PLAYER_LIFE_MAX / 2000
+        };
+        if self.player.regen_delay > 0 {
+            self.player.regen_delay -= 1;
+        } else if self.player.life < PLAYER_LIFE_MAX {
+            // MC2 keeps the fresh-select rate: its recorder lane for
+            // the register is undecoded, so an unseeded stale value
+            // would regress every regen pair (unmeasured column).
+            let rate = if matches!(self.game, GameId::Mc2) {
+                fresh
+            } else {
+                self.player.life_rate
+            };
+            self.player.life = (self.player.life + rate).min(PLAYER_LIFE_MAX);
+        }
+        self.player.life_rate = fresh;
+    }
+
+    fn step_player_flight(&mut self, d: &mut FlightDrive<'_>) -> PlayerPose {
+        // The knock is sampled AT the move (:55204-18 sits inside
+        // sub_455D0), not at drive build: the mailbox block just ran
+        // in this same dispatch, so a same-tick hit shoves this move.
+        let knock = self.take_knock_step();
+        let moved = {
+            let w: &Self = self;
+            crate::flight::mc1_move(
+                d.s,
+                &d.inp,
+                d.over,
+                knock,
+                &|x, y| w.ground_z_engine(x, y),
+                &|cur, prop| w.player_wall_gate_fixed(cur, prop),
+            )
+        };
+        if moved.flutter {
+            self.push_player_sound(46);
+        }
+        // Death fall (sub_45FC0): gravity on top of the still-drifting
+        // move, riding down to the ground+128 floor — touchdown is
+        // detected by the tick tail's Falling arm at this same pose.
+        if d.falling {
+            let dz = self.death_fall_step();
+            let g = self.ground_z_engine(d.s.x, d.s.y);
+            d.s.z = (d.s.z as i32 + dz as i32)
+                .max(g as i32 + 128)
+                .min(i16::MAX as i32) as i16;
+        }
+        // Dead (sub_463B0): the grey-screen camera turns toward the
+        // killer while it waits for Space.
+        if d.dead
+            && let Some((kx, kz)) = self.killer_pos()
+        {
+            let tx = (kx.rem_euclid(256.0) * 256.0) as u16;
+            let ty = (kz.rem_euclid(256.0) * 256.0) as u16;
+            let target = Gen::angle_between(d.s.x, d.s.y, tx, ty);
+            let mut delta = (target as i32 - d.s.yaw as i32) & 0x7FF;
+            if delta > 1024 {
+                delta -= 2048;
+            }
+            d.s.yaw = ((d.s.yaw as i32 + delta.clamp(-16, 16)) & 0x7FF) as u16;
+        }
+        conformance::integer_pose(d.s)
+    }
+
+    /// One game turn (`sub_41780_41AC0`, :52197) under a PINNED pose:
+    /// the caller moved (or pinned) the human flight outside and every
+    /// pass reads that single pose — the pair-mode/conformance shape.
     pub fn tick(&mut self, player: PlayerPose, cmd: PlayerCommand) {
+        self.tick_inner(player, cmd, None)
+    }
+
+    /// One game turn with the human flight stepped IN-WALK: the mover
+    /// runs from the carpet's own walk slot (retail's class-3 carpet
+    /// dispatch), so its ground probe reads terrain the lower-slot
+    /// painters already stamped THIS tick, and every walker below the
+    /// slot reads the record's PRE-move pose — the t=563 replay-wall
+    /// law (the carpet must not lag a rising tower by one tick).
+    pub fn tick_flight(&mut self, drive: &mut FlightDrive<'_>, cmd: PlayerCommand) {
+        let entry = conformance::integer_pose(drive.s);
+        self.tick_inner(entry, cmd, Some(drive))
+    }
+
+    /// The shared turn body. `player` feeds the trigger volume probes,
+    /// creature awake checks and aggro scans; `cmd` is the rest of the
+    /// player's tick input (fire). Under `drive` the pose ADVANCES at
+    /// the carpet's walk slot ([`Self::step_player_flight`]); pinned
+    /// lanes see one pose throughout.
+    fn tick_inner(
+        &mut self,
+        player: PlayerPose,
+        cmd: PlayerCommand,
+        mut drive: Option<&mut FlightDrive<'_>>,
+    ) {
+        let mut player = player;
         // The MC2 respawn key (retail PlayerAction 0xF → `sub_5C950`,
         // EF:37650-72), FIRST — retail's `PlayerEvents` input pass
         // runs ahead of the frame function, and mc2l3 t=15315 dates it
@@ -2274,7 +2619,9 @@ impl World {
         let mut buckets = vec![0u32; nb];
         let mut any_creature = false;
         let mut any_transient = false;
-        for e in &self.g.ent {
+        let mut ball_chain = std::mem::take(&mut self.g.ball_chain.list);
+        ball_chain.clear();
+        for (s, e) in self.g.ent.iter().enumerate() {
             if e.class64 == 5 && e.act_life >= 0 && !excluded.contains(&e.tick70) {
                 buckets[(e.model65 as usize).min(nb - 1)] += 1;
                 any_creature = true;
@@ -2284,9 +2631,16 @@ impl World {
             {
                 any_transient = true;
             }
+            // The mana-ball chain rebuild (:52290-97, the case-10
+            // arm of the same sweep — see [`TickChain`]).
+            if e.class64 == 10 && matches!(e.model65, 39 | 40) {
+                ball_chain.push(s as u16);
+            }
         }
+        self.g.ball_chain.list = ball_chain;
+        self.g.ball_chain.cut = usize::MAX;
 
-        let ctx = MobCtx {
+        let mut ctx = MobCtx {
             px: player.x,
             py: player.y,
             pz: player.z,
@@ -2369,7 +2723,7 @@ impl World {
             if !mc2_corpse {
                 let stepped = self.player.mana as i64 + self.player.mana_delta as i64;
                 self.player.mana = stepped.clamp(0, self.player.mana_max as i64) as u32;
-                let (at_castle, at_dolmen) = self.regen_boost(player, &ctx);
+                let (at_castle, at_dolmen) = self.regen_boost(&ctx);
                 self.player.mana_delta = if at_castle || at_dolmen {
                     ((self.player.mana_max / 200) as i32).max(1000)
                 } else {
@@ -2565,8 +2919,49 @@ impl World {
             // above every spell token, so a fresh arm can never fire
             // the same frame and a token's mana write applies the
             // SAME frame (the l0 trace: debit visible with the spawn).
+            // Retail's dispatch semantics: the at-castle test
+            // (:55345-52) reads the PRE-move pose; the mailbox block
+            // (:55344-78) runs BEFORE the move (sub_455D0 is the
+            // dispatch tail), so a hit posted by a lower-slot walker
+            // arms the knock the SAME tick's move consumes (mc1l0
+            // t=1128: the slot-533 vulture's 100-melee — retail's
+            // 1128 pose already carries the shove, decayed to the
+            // recorded (6,1659) by the boundary). The cast pass runs
+            // AFTER the move: a fresh bolt's stamped attitude is the
+            // SETTLED pose (mc1l0 t=64 bolt 627 heading/pitch/speed
+            // 415/40/400 = post-move — the pre-move stamp misses by
+            // one integration step), the corpus overruling the
+            // listing's raw 46840-before-455D0 call order (the arm →
+            // next-frame token fire double-buffer is what makes the
+            // effective cast phase post-move). The pose and mob ctx
+            // advance mid-walk: walkers below keep the record's
+            // pre-move pose, walkers above see the settled one (pair
+            // mode pins n1 throughout).
             if !matches!(self.game, GameId::Mc2) && i == self.mc1_carpet_slot as usize {
-                self.mc1_wizard_pass(alive, edge, cmd, player, &ctx);
+                // The armed pose-channel ground snapshot: the mover's
+                // probe phase is HERE (sub_455D0 is the dispatch
+                // tail), after every lower-slot terraform and before
+                // every higher-slot one. The mail block writes no
+                // terrain, so capturing at the block top is exact.
+                if self.midtick_ground_armed {
+                    self.midtick_ground_armed = false;
+                    self.midtick_ground = Some(self.g.t.height.clone());
+                }
+                let (at_castle, at_dolmen) = self.regen_boost(&ctx);
+                self.player_mail_block(player, at_castle);
+                if let Some(d) = drive.as_deref_mut() {
+                    player = self.step_player_flight(d);
+                    ctx = MobCtx {
+                        px: player.x,
+                        py: player.y,
+                        pz: player.z,
+                        pyaw: player.heading,
+                        ..ctx
+                    };
+                    self.human_pose = (player.x, player.y, player.z);
+                }
+                self.mc1_wizard_pass(alive, edge, cmd, player, &ctx, (at_castle, at_dolmen));
+                self.player_regen_block(at_castle, at_dolmen);
             }
             if self.g.ent[i].class64 == 0 {
                 continue;
@@ -2931,7 +3326,51 @@ impl World {
                     self.g.mc2_balloon_tick(i)
                 }
                 3 if self.g.ent[i].model65 == 2 => {
+                    let (pre59, pre50, pre70) = {
+                        let e = &self.g.ent[i];
+                        (e.f59, e.f50, e.tick70)
+                    };
                     self.g.castle_tick(i, self.patches);
+                    // sub_46D20_47060 (:55949): the castle machine
+                    // PINS (+48 = +50 − 1 = 100) or RELEASES (0) its
+                    // owner's Create-Castle token — resolved through
+                    // wizard +708, our castle_owner_token — at the
+                    // castle's own pass position. The pin census:
+                    // every blast-shake countdown tick (:55995-96,
+                    // pre +50 >= 2 — the ==1 tick transitions
+                    // without pinning), the repaint/leveler actions
+                    // (cases 3/5, :56085/:56089), and the downgrade
+                    // teardown (:56529). The releases: the machine
+                    // settling to established (case 2, :56081) and
+                    // total destruction (:56533). This is why a
+                    // castle under repaint re-arms the lockout with
+                    // NO cast — and the latch, not any per-tick
+                    // predicate, is what the corpus (12,16) slot-28
+                    // stream shows.
+                    let count1 = SPELLS[16].count as i16 - 1;
+                    let stamp = if pre70 == 6 {
+                        // The deferred downgrade tick: teardown pins
+                        // (:56529); a level-0 death releases instead
+                        // (:56533 — flags 0x400 set by the arm).
+                        if self.g.ent[i].flags & 0x400 != 0 {
+                            Some(0)
+                        } else {
+                            Some(count1)
+                        }
+                    } else {
+                        match pre59 {
+                            2 => Some(0),
+                            3 | 5 => Some(count1),
+                            4 if pre50 >= 2 => Some(count1),
+                            _ => None,
+                        }
+                    };
+                    if let Some(v) = stamp {
+                        let own = self.g.ent[i].id24;
+                        if let Some(m) = self.castle_owner_token(own) {
+                            self.g.ent[m].f26 = v;
+                        }
+                    }
                     // sub_47DD0 (:56617-73), run every tick from the
                     // wizard handler whenever a castle is bound
                     // (wizext+50): the owner's Create-Castle
@@ -3088,10 +3527,31 @@ impl World {
         }
         // Native MC1/HW likewise has no pooled carpet: retail's own
         // level build allocates the carpet ABOVE the level entities,
-        // so post-walk IS its slot position — the wizard pass runs
-        // here (conformance anchors it at the recorded slot above).
+        // so post-walk IS its slot position — the whole dispatch body
+        // runs here in the same sub_45C90 order as the in-walk anchor
+        // above (conformance anchors it at the recorded slot).
         if !matches!(self.game, GameId::Mc2) && self.mc1_carpet_slot == 0 {
-            self.mc1_wizard_pass(alive, edge, cmd, player, &ctx);
+            // The native (post-walk) carpet anchor: same pose-channel
+            // ground-snapshot phase as the in-walk arm above.
+            if self.midtick_ground_armed {
+                self.midtick_ground_armed = false;
+                self.midtick_ground = Some(self.g.t.height.clone());
+            }
+            let (at_castle, at_dolmen) = self.regen_boost(&ctx);
+            self.player_mail_block(player, at_castle);
+            if let Some(d) = drive {
+                player = self.step_player_flight(d);
+                ctx = MobCtx {
+                    px: player.x,
+                    py: player.y,
+                    pz: player.z,
+                    pyaw: player.heading,
+                    ..ctx
+                };
+                self.human_pose = (player.x, player.y, player.z);
+            }
+            self.mc1_wizard_pass(alive, edge, cmd, player, &ctx, (at_castle, at_dolmen));
+            self.player_regen_block(at_castle, at_dolmen);
         }
         if any_creature || any_transient {
             // Creatures/projectiles/effects move: poses refresh.
@@ -3123,116 +3583,13 @@ impl World {
         }
 
         // ---- player damage intake (the wizard tick's mailbox block,
-        // sub_45C90 :55344-74 + sub_46540 :55641-737) ----
-        let (at_castle, at_dolmen) = self.regen_boost(player, &ctx);
-        if self.player.state == LifeState::Alive {
-            // The at-castle redirect (:55353-62): with the own castle
-            // underfoot, pending ch0 damage FORWARDS into the
-            // castle's mailbox — the castle tanks for you — and the
-            // grace re-arms to 2 (:55363, an unconditional write:
-            // sitting home under fire deliberately shortens a fresh
-            // 100-tick spawn grace).
-            if at_castle && self.g.player_mail[0].1 != 0 {
-                if let Some(c) = self.player_castle() {
-                    let (amt, src) = self.g.player_mail[0];
-                    // The AREA order — retail inlines the forward at
-                    // :55357-60 with pending→ACCUMULATE, NOT the
-                    // inverted `sub_12B50` protocol.
-                    self.g.mail_write(MailTarget::Pool(c), 0, amt, src);
-                    // Retail leaves the player's own mail armed here;
-                    // the grace memset below (:55367-71, armed by the
-                    // `grace = 2` write) is what clears it.
-                    self.g.player_mail[0] = (0, 0);
-                    self.player.grace = 2;
-                }
-            }
-            if self.invincible {
-                // Dev god-mode = LIFE immunity only, and it OVERRIDES
-                // spawn grace (a tester wants to see hostile effects
-                // immediately, not wait out the 100-tick grace). The mana
-                // steal (ch3) still DRAINS (and arms its 16-tick regen
-                // stall) so the mana economy stays fully testable — a
-                // genie can pin you castless and defenseless, you just
-                // can't be killed. ch0 physical accumulates for the
-                // damage readout and arms the flash/danger, but never
-                // costs life or kills.
-                if self.g.player_mail[3].1 != 0 {
-                    let amt = self.g.player_mail[3].0;
-                    self.player.mana = self.player.mana.saturating_sub(amt);
-                    self.player.regen_delay = 16;
-                }
-                if self.g.player_mail[0].1 != 0 {
-                    let (amt, src) = self.g.player_mail[0];
-                    self.g.player_damage += if self.player.shield {
-                        amt as u64 / 4
-                    } else {
-                        amt as u64
-                    };
-                    // Positional KNOCKBACK still lands (god-mode is
-                    // life-only): a hit shoves the player, so the
-                    // kraken's lightning still pushes you OUT.
-                    let s = src as usize;
-                    if src != 0
-                        && src != PLAYER_TARGET
-                        && s < self.g.ent.len()
-                        && self.g.ent[s].class64 != 0
-                    {
-                        let dir = Gen::angle_between(
-                            self.g.ent[s].x,
-                            self.g.ent[s].y,
-                            player.x,
-                            player.y,
-                        ) & 0x7FF;
-                        self.g.player_knock = (dir, ((amt / 10) as i16).clamp(0, 80));
-                    }
-                    self.player.hit_flash = 5;
-                }
-                if self.g.player_mail.iter().any(|&(_, from)| from != 0) {
-                    self.g.player_danger = 100;
-                }
-                self.g.player_mail = [(0, 0); 6];
-            } else if self.player.grace > 0 {
-                // The spawn-grace memset (:55367-71): every channel
-                // wiped, total immunity — steal and grip included, and
-                // the danger music stays calm (sub_46540 never runs).
-                self.player.grace -= 1;
-                self.g.player_mail = [(0, 0); 6];
-            } else {
-                // The player damage intake — the DamageVerb seam
-                // (MC2 adds channels + the spell-XP decorators).
-                match self.g.verbs.damage {
-                    DamageVerb::Mc1 => self.apply_player_damage(player),
-                    DamageVerb::Mc2 => {
-                        self.g.note_verb_fallback(VerbKind::Damage);
-                        self.apply_player_damage(player);
-                    }
-                }
-            }
-            // The cast-charge meter (u8_326): +1 per live carpet
-            // tick, saturating at 200 (:55377-78) — sits between the
-            // mailbox block and the regen block exactly like retail.
-            if matches!(self.game, GameId::Mc1 | GameId::Mc1Hw) && self.wiz_charge[0] < 200 {
-                self.wiz_charge[0] += 1;
-            }
-            // Health regen (:55381-421): stalled 16 ticks by every
-            // processed hit, then maxLife/250 per tick at the own
-            // castle OR on a dolmen shrine (the same fork as the mana
-            // delta — :55414 / EF:60021) vs maxLife/2000 afield.
-            if self.player.regen_delay > 0 {
-                self.player.regen_delay -= 1;
-            } else if self.player.life < PLAYER_LIFE_MAX {
-                let rate = if at_castle || at_dolmen {
-                    PLAYER_LIFE_MAX / 250
-                } else {
-                    PLAYER_LIFE_MAX / 2000
-                };
-                self.player.life = (self.player.life + rate).min(PLAYER_LIFE_MAX);
-            }
-        } else {
-            // Falling/dead: the landing wipe already cleared the
-            // mailbox; discard anything new (the original's dead
-            // wizard never reads it).
-            self.g.player_mail = [(0, 0); 6];
+        // sub_45C90 :55344-74 + sub_46540 :55641-737). MC1 ran it at
+        // the carpet's walk slot above (the whole dispatch body lives
+        // there); MC2 keeps the post-walk call. ----
+        if matches!(self.game, GameId::Mc2) {
+            let (at_castle, at_dolmen) = self.regen_boost(&ctx);
+            self.player_mail_block(player, at_castle);
+            self.player_regen_block(at_castle, at_dolmen);
         }
         if self.g.player_danger > 0 {
             self.g.player_danger -= 1;
@@ -3627,6 +3984,10 @@ impl World {
                 let e = &mut self.g.ent[m];
                 e.tick70 = DROPPED_JAR;
                 e.f26 = (d3 % 90 + 200) as i16;
+                // Back to the ground-jar convention (f144 = 0): a
+                // stale owner tag would let a post-death charge-pin
+                // release zero this jar's decay timer.
+                e.f144 = 0;
             }
             self.g.move_relink(m, x, y, z);
         }
@@ -3677,6 +4038,7 @@ impl World {
         self.player.life = PLAYER_LIFE_MAX;
         self.player.grace = 100;
         self.player.regen_delay = 0;
+        self.player.life_rate = 0;
         self.player.killer = 0;
         self.player.hit_flash = 0;
         self.g.player_knock = (0, 0);
@@ -4026,6 +4388,13 @@ impl World {
             e.flags &= !8; // never a damage victim
             e.f26 = 0;
             e.f44 = f44;
+            // The port's owner tag (retail keeps +144 = 0 and the
+            // owner in +42; the importer normalizes +42 into f144).
+            // Without it the Gen-side charge-pin releases (the upgrade
+            // token's MISS, the homing ball's failure arms) can't
+            // resolve the human's token and the castle hand stays
+            // buzzed forever (mc1l0 t=2174).
+            e.f144 = PLAYER_TARGET;
             // The spell-16 cost-cache seed (sub_3C060 → sub_3BF70
             // :48026/:47996): +136 = the ctor price 1000, +140 =
             // 1000/101 (the +50 count divisor — the HUD dot unit).
@@ -4222,6 +4591,11 @@ impl World {
             strict_retail: _,
             patches: _,
             prev_fire,
+            // Conformance instrument (pose-channel ground snapshot):
+            // armed/consumed around a single pair tick, no in-engine
+            // reader — hash-quiet like the cast-arm hand bits.
+            midtick_ground_armed: _,
+            midtick_ground: _,
             accel_veto: _,
             pending_respawn: _,
             pending_restart: _,
@@ -5471,6 +5845,15 @@ impl World {
         let Some(pr) = self.g.spawn_castle_ball(bx, by, z) else {
             return;
         };
+        if std::env::var_os("MGC_CASTLE_PIN_TRACE").is_some() {
+            eprintln!(
+                "[pin] t={} cast_castle: ball={pr} at ({bx},{by},{z}) bound={castle:?} \
+                 speed={} pitch={}",
+                crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                p.speed,
+                p.pitch
+            );
+        }
         let tgt = if let Some(c) = castle {
             (self.g.ent[c].x, self.g.ent[c].y, 0i16)
         } else {
@@ -5511,6 +5894,14 @@ impl World {
         } else {
             e.f68 = 3;
             e.f69 = 2;
+        }
+        // The charge move (:65910-11): the castle ball banks the
+        // caster's accumulated meter in its +26 and zeroes it —
+        // the same law as the fireball/quake family (a consumer the
+        // first +326 sweep missed; the corpus (9,10) f26 rows).
+        if !mc2 {
+            self.g.ent[pr].f26 = self.wiz_charge[0] as i16;
+            self.wiz_charge[0] = 0;
         }
         // MC2: stamp the castle research for the stage this cast
         // builds (the A.5 shortcut — retail's research child
@@ -5630,10 +6021,13 @@ impl World {
     fn class12_tick(&mut self, i: usize, ctx: &MobCtx) {
         let t = self.g.ent[i].tick70;
         if t >= MANIFEST_BASE {
-            // Rival-owned manifestations (f144 = the owner tag) are
-            // driven by the rival tick, not the player's channels.
-            if self.g.ent[i].f144 == 0 {
-                self.manifestation_tick(i, (t - MANIFEST_BASE) as usize, ctx);
+            // The player's channels drive only the player's own
+            // tokens (the mint registry, same discriminator as the
+            // strict arm below); rival-owned manifestations are
+            // driven by the rival tick.
+            let spell = (t - MANIFEST_BASE) as usize;
+            if spell < SPELL_COUNT && self.player.owned[spell] == i as u16 {
+                self.manifestation_tick(i, spell, ctx);
             }
             return;
         }
@@ -5770,6 +6164,10 @@ impl World {
                 self.g.ent[i].tick70 = (spell * 3) as u8;
                 self.player.owned[spell] = i as u16;
                 self.player.left = Some(SpellId(spell as u8));
+                // The port's owner tag (see `grant_spell`): without it
+                // the Gen-side charge-pin releases can't resolve this
+                // token (mc1l0 t=2161 → the t=2174 refused recast).
+                self.g.ent[i].f144 = PLAYER_TARGET;
                 self.g.snd_player(18);
                 self.entities_dirty = true;
             }
@@ -5846,6 +6244,9 @@ impl World {
             e.flags &= !8;
             e.f26 = 0;
             e.f44 = f44;
+            // Owner tag on conversion (the ground jar carried 0) —
+            // same normalization as `grant_spell` / the importer.
+            e.f144 = PLAYER_TARGET;
         }
         self.player.owned[spell] = i as u16;
         self.player.left = Some(SpellId(spell as u8)); // auto-equip LEFT
@@ -5867,28 +6268,40 @@ impl World {
     /// spawn at arm+1).
     fn manifestation_tick(&mut self, i: usize, spell: usize, ctx: &MobCtx) {
         // CASTLE (16): the fresh arm fires the ball from the token
-        // (:65862-924: gate → debit → spawn → `+48 = +50 − 1`, the
-        // re-cast lockout latch). Otherwise `f26` mirrors the UPGRADE
-        // LOCK, not a timed burst: it tracks the castle transform
-        // (the flying ball / the `f59` build-upgrade-downgrade
-        // machine) and does NOT suppress mana regen. Mirrors the MC2
-        // fix (`mc2_castle_spell_tick`).
+        // (sub_57610 :65862-924: gate → debit → spawn → `+48 = +50 −
+        // 1`, the re-cast lockout LATCH; gate failure releases,
+        // :65918-21). `f26` is not a timed burst and does NOT
+        // suppress mana regen: no decrement touches it — it HOLDS
+        // its value until the castle machine's pin/release writes it
+        // (sub_46D20_47060 :55949, applied at the castle's own tick
+        // in the World dispatch). Unmodeled residuals: retail
+        // re-runs the gate on every latched tick (a mid-latch caster
+        // death / negative pool releases); the ball's own failure
+        // paths release too (pool-full :63513, water-fail :63620),
+        // and a pool-full BALL spawn leaves +48 at the full 101 to
+        // retry (:65883 latches only inside `if (v3)`).
         if spell == 16 {
+            if self.g.ent[i].f26 != 0 && std::env::var_os("MGC_CASTLE_PIN_TRACE").is_some() {
+                eprintln!(
+                    "[pin] t={} manif {i} tick: f26={} count={} gate={}",
+                    crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                    self.g.ent[i].f26,
+                    self.spells()[16].count,
+                    self.mc1_token_gate(16)
+                );
+            }
             if self.g.ent[i].f26 == self.spells()[16].count as i16 {
                 if self.mc1_token_gate(16) {
                     self.mana_debit(self.spell_cast_cost(16));
                     let p = self.mc1_cast_pose;
                     let right = self.mc1_hand_bits & 0x200 != 0;
                     self.emit_spell(16, i, p, right, ctx);
+                    self.g.ent[i].f26 = SPELLS[16].count as i16 - 1; // :65885
                 } else {
                     self.g.snd_player(29); // the token gate's buzz (:64931)
+                    self.g.ent[i].f26 = 0; // :65920 — fail releases
                 }
             }
-            self.g.ent[i].f26 = if self.castle_lock_active() {
-                (SPELLS[16].count as i16 - 1).max(1)
-            } else {
-                0
-            };
             return;
         }
         // `sub_55E80` (:64936): on the FULL tick the launcher fires
@@ -9757,6 +10170,50 @@ impl World {
         }
     }
 
+    /// A slot's mailbox, read-only (the conformance mail microscope).
+    #[doc(hidden)]
+    pub fn debug_mail(&self, i: usize) -> Vec<(u32, u16)> {
+        self.g
+            .ent
+            .get(i)
+            .map(|e| e.mail.to_vec())
+            .unwrap_or_default()
+    }
+
+    /// A slot's launch/motion lane raw fields, read-only — (x, y, z,
+    /// f30, f34, f46, f126, f140, f144, dest_x, dest_y) — the
+    /// conformance spawn-stamp microscope.
+    #[doc(hidden)]
+    #[allow(clippy::type_complexity)]
+    pub fn debug_launch(
+        &self,
+        i: usize,
+    ) -> Option<(u16, u16, i16, u16, u16, i16, i16, i32, u16, u16, u16)> {
+        self.g.ent.get(i).map(|e| {
+            (
+                e.x, e.y, e.z, e.f30, e.f34, e.f46, e.f126, e.f140, e.f144, e.dest_x, e.dest_y,
+            )
+        })
+    }
+
+    /// A slot's per-entity LCG state, read-only — the conformance
+    /// draw-parity microscope (fire-churn-rand attribution).
+    #[doc(hidden)]
+    pub fn debug_rand(&self, i: usize) -> Option<u32> {
+        self.g.ent.get(i).map(|e| e.rand)
+    }
+
+    /// A slot's castle-machine fields, read-only — (tick70, f59 case,
+    /// f50 shake countdown, f26 level, act_life, flags) — the
+    /// conformance castle-story microscope.
+    #[doc(hidden)]
+    pub fn debug_castle_machine(&self, i: usize) -> Option<(u8, u8, i16, i16, i32, u32)> {
+        self.g
+            .ent
+            .get(i)
+            .map(|e| (e.tick70, e.f59, e.f50, e.f26, e.act_life, e.flags))
+    }
+
     /// An m27 body's `(tick70, branches)` where each branch reports
     /// `(f71 sub-state, f63 tick counter)` — the kraken stage-command
     /// oracle.
@@ -10369,6 +10826,7 @@ impl Snap for Player {
             life,
             grace,
             regen_delay,
+            life_rate,
             state,
             fall_speed,
             killer,
@@ -10400,6 +10858,7 @@ impl Snap for Player {
         w.put(life);
         w.put(grace);
         w.put(regen_delay);
+        w.put(life_rate);
         w.put(state);
         w.put(fall_speed);
         w.put(killer);
@@ -10433,6 +10892,7 @@ impl Snap for Player {
             life: r.get()?,
             grace: r.get()?,
             regen_delay: r.get()?,
+            life_rate: r.get()?,
             state: r.get()?,
             fall_speed: r.get()?,
             killer: r.get()?,
@@ -10517,6 +10977,11 @@ impl World {
             mc1_carpet_slot: _,
             mc1_hand_bits: _,
             mc1_cast_pose: _,
+            // Conformance instrument (pose-channel ground snapshot),
+            // armed/consumed around a single pair tick — never live
+            // in a playable world.
+            midtick_ground_armed: _,
+            midtick_ground: _,
             prev_fire,
             accel_veto,
             pending_respawn,
@@ -10776,6 +11241,61 @@ mod tests {
             );
             w.g.ent[s].id24 = 0;
             w.g.ent[b].flags |= 0x400; // retire before the next model
+        }
+    }
+
+    /// The shared chase re-bears BEFORE the target-lost test (:21656
+    /// precedes :21658, both raw reads through +146): the tick a
+    /// chaser loses its target to death still re-aims +34 at the
+    /// corpse's position — mc1l0 t=2217, where the vulture leaves its
+    /// dead castle target bearing 107 (the ruin), not its stale 163.
+    /// m9 drives its own chase (sub_1DA60 :24190-97) with the two
+    /// steps the other way around: a mound's exit tick keeps its
+    /// stale aim.
+    #[test]
+    fn a_chase_exit_tick_still_aims_at_the_corpse_except_for_the_mound() {
+        use crate::mc1::mobs::MobCtx;
+
+        // (model, chase state, wander state, exit tick re-aims?)
+        for (model, chase, wander, rebears) in [(1u16, 8u8, 7u8, true), (9, 56, 55, false)] {
+            let mut w = flat_world();
+            let v = w.g.spawn_creature(model, 100 << 8, 100 << 8, 100).unwrap();
+            let prey = w.g.spawn_creature(4, 110 << 8, 100 << 8, 100).unwrap();
+            w.g.ent[prey].act_life = -1; // died under the chaser
+            w.g.ent[v].tick70 = chase;
+            w.g.ent[v].f146 = prey as u16;
+            w.g.ent[v].f63 = 0; // & 3 == 0 and % 10 == 0: both cadences due
+            w.g.ent[v].f34 = 1234; // sentinel bearing
+            let far = MobCtx {
+                px: 200 << 8,
+                py: 100 << 8,
+                pz: 100,
+                pyaw: 0,
+                pmana: 0,
+                pdead: false,
+                strict: false,
+                patches: crate::patches::WorldPatches::RETAIL,
+                mc2_turn: 0,
+            };
+            w.g.creature_tick(v, &far);
+            assert_eq!(w.g.ent[v].tick70, wander, "m{model} leaves the chase");
+            if rebears {
+                let bearing = Gen::angle_between(
+                    w.g.ent[v].x,
+                    w.g.ent[v].y,
+                    w.g.ent[prey].x,
+                    w.g.ent[prey].y,
+                );
+                assert_eq!(
+                    w.g.ent[v].f34, bearing,
+                    "m{model}: the exit tick aims at the corpse"
+                );
+            } else {
+                assert_eq!(
+                    w.g.ent[v].f34, 1234,
+                    "m{model}: the mound's exit keeps its stale aim"
+                );
+            }
         }
     }
 
@@ -11361,6 +11881,10 @@ mod tests {
         let mut p = (0x8000u16, 0x8000u16, 3200i16);
         Gen::polar_step(&mut p, (aim + 0x50) & 0x7FF, 0, 700);
         let ball = w.g.spawn_mana_ball(p.0, p.1, 3200).expect("ball");
+        // The scan reads the tick-head ball chain (§THE SEVERED BALL
+        // CHAIN) — a Gen-level test supplies what World::tick builds.
+        w.g.ball_chain.list = vec![ball as u16];
+        w.g.ball_chain.cut = usize::MAX;
         let ctx = MobCtx {
             px: 0,
             py: 0,
@@ -14222,6 +14746,12 @@ mod tests {
             w.tick(firing_line(), PlayerCommand::default());
         }
         assert!(count(&w, 10, 39) >= 1, "a mana ball dropped");
+        // The drop births target_yaw 0 (sub_27690 writes only +30;
+        // the port used to mirror f34 = the launch yaw — the mc1l0
+        // pair-564 (10,39) family).
+        let bslot = find_slot(&w, 10, 39);
+        assert_ne!(w.g.ent[bslot].f30, 0, "the launch yaw draw landed");
+        assert_eq!(w.g.ent[bslot].f34, 0, "target yaw is born 0");
         // Ball size class by mana (sub_274D0): the lunger's 1500
         // (life/2) lands in class 3 → sprite type 55.
         let ball = w
@@ -15709,6 +16239,93 @@ mod tests {
         assert_eq!(count(&w, 9, 10), 1, "funded upgrade launches the ball");
     }
 
+    /// mc1l0 t=2159-2175: with a bound castle, a cast from afield
+    /// launches the homing upgrade ball; it expires en route, the
+    /// (10,43) receipt lands wide and rules MISS (:31040-44), and the
+    /// miss RELEASES the owner's m16 charge pin (sub_46D20(_, 0)) —
+    /// mana gone, no level, and the very next cast fires again.
+    /// Retail resolves the token through wizext+708; the port's
+    /// Gen-side stand-in joins on the f144 owner tag, which every
+    /// native mint/pickup must therefore stamp (the t=2174 refused
+    /// recast was a granted token the release-find could not see).
+    #[test]
+    fn a_missed_upgrade_delivery_releases_the_charge_pin_for_the_recast() {
+        use crate::mc1::spells::SpellId;
+        let mut w = flat_world();
+        let m = w.grant_spell(SpellId(16)).unwrap();
+        w.player.left = Some(SpellId(16));
+        let c = w.g.spawn_castle(110 << 8, 110 << 8).unwrap();
+        w.g.ent[c].id24 = PLAYER_TARGET;
+        w.g.ent[c].f144 = PLAYER_TARGET;
+        for _ in 0..80 {
+            w.tick(away(), PlayerCommand::default());
+        }
+        assert_eq!(w.loadout().castle.map(|(_, _, l)| l), Some(1));
+        let b = w.g.spawn_mana_ball(50 << 8, 50 << 8, 100 * 32).unwrap();
+        w.g.ent[b].f140 = 40_000;
+        w.g.ent[b].f144 = PLAYER_TARGET;
+        w.tick(away(), PlayerCommand::default()); // census
+        w.player.mana = w.player.mana_max;
+        let fire = PlayerCommand {
+            fire_left: true,
+            ..Default::default()
+        };
+        w.tick(away(), fire); // arms the castle token
+        w.tick(away(), PlayerCommand::default()); // the token fires
+        assert_eq!(count(&w, 9, 10), 1, "the upgrade ball launched");
+        // ~100 tiles out, the ball can never reach the castle: fly it
+        // to its failure and the receipt's one armed tick.
+        for _ in 0..40 {
+            w.tick(away(), PlayerCommand::default());
+        }
+        assert_eq!(count(&w, 9, 10), 0, "the ball failed en route");
+        assert_eq!(
+            w.loadout().castle.map(|(_, _, l)| l),
+            Some(1),
+            "a missed delivery never levels the castle"
+        );
+        assert_eq!(w.g.ent[m].f26, 0, "the miss released the charge pin");
+        // The user-facing law: as long as the pool covers it, the next
+        // cast fires — no phantom "previous cast still active" lockout.
+        w.player.mana = w.player.mana_max;
+        w.tick(away(), fire);
+        w.tick(away(), PlayerCommand::default());
+        assert_eq!(count(&w, 9, 10), 1, "the recast fires — the pin is free");
+    }
+
+    /// The launch-fail sibling of the miss release: an unbound cast
+    /// onto a refused site (a foreign castle inside the sub_12F70
+    /// exclusion) despawns the create ball on its latch tick AND
+    /// releases the charge pin first (:63614-16, sub_46D20(ball, 0))
+    /// — mana spent, hand free.
+    #[test]
+    fn a_refused_launch_site_releases_the_charge_pin() {
+        use crate::mc1::spells::SpellId;
+        let mut w = flat_world();
+        let m = w.grant_spell(SpellId(16)).unwrap();
+        w.player.left = Some(SpellId(16));
+        // A FOREIGN flag at the cast site: castle_site_ok refuses any
+        // (3,2) within extents+2048, owner-blind.
+        let c = w.g.spawn_castle(10 << 8, 10 << 8).unwrap();
+        w.g.ent[c].id24 = 999;
+        w.player.mana = 1000;
+        let fire = PlayerCommand {
+            fire_left: true,
+            ..Default::default()
+        };
+        w.tick(away(), fire); // arms the token
+        w.tick(away(), PlayerCommand::default()); // fires + latches
+        // The ball's latch tick ran the scan and despawned it.
+        for _ in 0..2 {
+            w.tick(away(), PlayerCommand::default());
+        }
+        assert_eq!(count(&w, 9, 10), 0, "the refused launch despawned");
+        assert_eq!(
+            w.g.ent[m].f26, 0,
+            "the launch failure released the charge pin"
+        );
+    }
+
     #[test]
     fn active_spell_burst_blocks_mana_regen() {
         // docs/spell-audit/mana-regen.md (general note 2): while a
@@ -16530,6 +17147,65 @@ mod tests {
             assert_eq!(w.accel_override(), Some(2.0), "still unaffordable");
             assert!(w.player.mana < cost, "regen has not refunded an arm yet");
         }
+    }
+
+    /// The regen-rate select honors the caller's PRE-move probe and
+    /// never re-probes the settled pose: retail reads bool1 once at
+    /// :55345-52, before the carpet moves, and feeds both regen rates
+    /// from it (:55407-16). mc1l0 t=2428 is the receipt: the carpet
+    /// slid past the level-1 castle's summed extent on the tick its
+    /// upgrade ball landed — the pre-move read keeps the castle rate,
+    /// a post-move re-probe dropped to the floor for one tick.
+    #[test]
+    fn the_regen_select_honors_the_premove_probe_not_the_settled_pose() {
+        use crate::mc1::mobs::MobCtx;
+        let ctx = |px: u16, py: u16| MobCtx {
+            px,
+            py,
+            pz: 100,
+            pyaw: 0,
+            pmana: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        let mut w = flat_world();
+        w.player.mana = 0;
+        w.player.mana_delta = 0;
+
+        // Probe said at-castle; the settled pose (and the world — no
+        // castle exists) says otherwise. A re-probe would floor it.
+        w.mc1_wizard_pass(
+            true,
+            (false, false),
+            PlayerCommand::default(),
+            away(),
+            &ctx(200 << 8, 200 << 8),
+            (true, false),
+        );
+        assert_eq!(
+            w.player.mana_delta, 1000,
+            "pre-move TRUE selects castle rate"
+        );
+
+        // The mirror: a castle stands right under the settled pose,
+        // but the pre-move probe said NO. A re-probe would boost it.
+        let c = w.g.spawn_class3(2, 100 << 8, 100 << 8, 100).unwrap();
+        w.g.ent[c].id24 = PLAYER_TARGET;
+        assert!(
+            w.player_castle().is_some(),
+            "fixture: the castle resolves as the player's"
+        );
+        w.mc1_wizard_pass(
+            true,
+            (false, false),
+            PlayerCommand::default(),
+            away(),
+            &ctx(100 << 8, 100 << 8),
+            (false, false),
+        );
+        assert_eq!(w.player.mana_delta, 100, "pre-move FALSE keeps the floor");
     }
 
     #[test]
@@ -20649,25 +21325,37 @@ mod tests {
         );
     }
 
-    /// **MC1's CHANNEL-0 AREA WINDOW SITS ONE TILE BACK — AND MC2's
-    /// DOES NOT.**
+    /// **MC1's CHANNEL-0 AREA WINDOW SITS ONE TILE BACK — ON THE
+    /// WEST/NORTH HALF OF THE MAP — AND MC2's DOES NOT.**
     /// Channels 1+ centre the broadcast window on the NEAREST tile,
     /// `(pos + 128) >> 8`. MC1's channel 0 does not: it centres on
-    /// `(pos - 128) / 256`, one tile back, byte-identical in all three
-    /// variants (`sub_120B0` :17339/17352, `sub_124F0` :17427/17439,
-    /// `sub_127E0` :17535/17547). MC2's `sub_10C80` ch0 arm rounds like
-    /// every other channel (EF:4118-19) — the `my_sign32` fixup written
-    /// around it is dead, `axis_3d::x` being uint16.
+    /// `(pos - 128) / 256` with the coordinate loaded SIGN-EXTENDED —
+    /// CARPET.EXE's `movsx` + truncating-signed-division idiom, byte-
+    /// identical in all three variants (VA 0x1215B/0x12172 in
+    /// sub_120B0, 0x1259B/0x125B2 in sub_124F0, 0x1288D/0x128A4 in
+    /// sub_127E0). Truncation toward zero cuts BOTH ways: below
+    /// 0x8000 the one-tile-back bias, at/after 0x8000 (pos as i16
+    /// negative) a nearest-up centre `(pos + 127) >> 8`. MC2's
+    /// `sub_10C80` ch0 arm rounds like every other channel
+    /// (EF:4118-19); the ch1+ arm's `movsx`+`sar 8` is a FLOOR divide
+    /// and therefore sign-agnostic in both games.
     ///
     /// The port rounded on every channel in both games, so every MC1
-    /// area DAMAGE window sat one tile +x/+y of retail's.
+    /// area DAMAGE window sat one tile +x/+y of retail's; then it
+    /// back-biased UNSIGNED, which held only on the west half —
+    /// mc1l0 t=2811 was the measured refutation (the fireball fire at
+    /// x=37278 centres 146 and must MISS the burning tree at tile
+    /// (144,25); the unsigned bias centred 145 and torched it 62
+    /// ticks early).
     ///
     /// Pinned as the pair that separates the two windows: a writer at
     /// x = 100·256 + 200 truncates to tile 100 and rounds to 101, so at
     /// radius 1 retail's MC1 ch0 window is 99..=101 and the rounded one
     /// is 100..=102. A victim chained at tile 99 is reachable only
     /// through MC1's, one at 102 only through MC2's — and both sit well
-    /// inside the AABB, so the overlap test admits either.
+    /// inside the AABB, so the overlap test admits either. The east-half
+    /// arm pins the sign flip with the same geometry mirrored across
+    /// 0x8000.
     #[test]
     fn the_mc1_channel_zero_area_window_sits_one_tile_back() {
         let ctx = MobCtx {
@@ -20726,6 +21414,31 @@ mod tests {
             );
         }
 
+        // ---- MC1 east half: the movsx flips the bias to nearest-up --
+        // x = 200·256 + 200 = 51400 → as i16 −14136 → (−14264)/256
+        // truncates toward zero to −55 → tile 201 (the nearest tile),
+        // window 200..=202: tile 199 (the unsigned back-bias's reach)
+        // is OUT, tile 202 is IN — the exact inverse of the west half.
+        let (ex, ey) = (200u16 << 8 | 200, 200u16 << 8 | 200);
+        let eback = (199u16 << 8 | 128, 199u16 << 8 | 128);
+        let efwd = (202u16 << 8 | 128, 202u16 << 8 | 128);
+        for (target, reached) in [(eback, false), (efwd, true)] {
+            let mut w = flat_world();
+            let gz = w.g.ground_z(ex, ey) as i16;
+            let writer = w.g.spawn_creature(16, ex, ey, gz).expect("writer");
+            let victim =
+                w.g.spawn_creature(16, target.0, target.1, gz)
+                    .expect("victim");
+            arm(&mut w.g, writer, victim);
+            w.g.area_write(writer, 0, 400, &ctx, false, false);
+            assert_eq!(
+                w.g.ent[victim].mail[0].1 != 0,
+                reached,
+                "east of x=0x8000 the sign-extended ch0 centre rounds \
+                 nearest-up: tile 201, covering 200..=202"
+            );
+        }
+
         // ---- MC2: the mirror image, its ch0 rounding intact ---------
         for (target, reached) in [(back, false), (fwd, true)] {
             let mut w = mc2_flat_world();
@@ -20762,6 +21475,192 @@ mod tests {
                 "the ch1 window keeps the nearest-tile rounding in MC1 too"
             );
         }
+    }
+
+    /// **MC1's PLAYER PROBE CARRIES THE TILE-SCAN WINDOW TOO.**
+    /// Retail has no separate player arm — the carpet is a pool
+    /// record linked at its plain `(x>>8, y>>8)` tile, reached
+    /// through the same windowed grid walk as every other victim. A
+    /// writer whose window stops one tile short of the carpet's tile
+    /// never posts, even with the AABBs overlapping (mc1l0 t=568:
+    /// fires 692/694 overlap the carpet but miss tile (117,96) —
+    /// retail's recorded carpet-mail residue is 3×400, not 5×400,
+    /// and the two phantom posts were the whole t=606 castle-gulp
+    /// Δ=800). Non-vacuous: the pure-AABB probe posts in both cases.
+    #[test]
+    fn the_mc1_player_probe_carries_the_tile_scan_window() {
+        // The measured pair, verbatim: the carpet settled at
+        // (30015, 24636) = tile (117, 96); fire 692 at (29784, 24691)
+        // truncates-back to centre (115, 95) — window x 114..=116
+        // misses tile 117 with the AABB overlapping (dx 231 < 247);
+        // fire 698 at (30058, 24723) centres (116, 96) and reaches.
+        let ctx = MobCtx {
+            px: 30015,
+            py: 24636,
+            pz: 1056,
+            pyaw: 0,
+            pmana: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        for ((fx, fy), reached) in [((29784u16, 24691u16), false), ((30058, 24723), true)] {
+            let mut w = flat_world();
+            let fire = w.g.new_event().expect("fire");
+            {
+                let e = &mut w.g.ent[fire];
+                e.class64 = 10;
+                e.id24 = 61;
+                e.f66 = 0xFF;
+                e.f67 = 0xFF;
+                e.x = fx;
+                e.y = fy;
+                e.z = ctx.pz;
+                e.f78 = 0;
+                e.f80 = 128;
+                e.f82 = 128;
+                e.f84 = 8192;
+            }
+            w.g.area_write(fire, 0, 400, &ctx, false, false);
+            assert_eq!(
+                w.g.player_mail[0].1 != 0,
+                reached,
+                "the player is reachable only when the writer's window \
+                 covers the carpet's map tile"
+            );
+            if reached {
+                assert_eq!(w.g.player_mail[0], (400, 61));
+            }
+        }
+    }
+
+    /// **THE AT-CASTLE TICK RE-ARMS GRACE AND WIPES THE WHOLE
+    /// MAILBOX — PENDING MAIL OR NOT.** The `grace = 2` write sits in
+    /// the at-castle branch OUTSIDE the pending-ch0 check (:55363;
+    /// MC2's `AddPlayer03_00_5E010` identically), so every tick at
+    /// home runs the memset (:55367-71) over all six channels — the
+    /// standing wipe is what resets the `sub_12B50` point-damage
+    /// snowball. mc1l0 t=1188: the second vulture melee lands 100 on
+    /// a box the at-castle ticks kept wiping since t=1144, and the
+    /// redirect forwards exactly 100; the unwiped stale 100 from the
+    /// t=1128 melee accumulated to a 200 forward (retail castle −100
+    /// vs port −200, the banked ch5-lane fork's real cause).
+    #[test]
+    fn the_at_castle_tick_rearms_grace_and_wipes_stale_mail() {
+        let mut w = flat_world();
+        let home = away();
+        let c = w.g.new_event().expect("castle");
+        {
+            let e = &mut w.g.ent[c];
+            e.class64 = 3;
+            e.model65 = 2;
+            e.id24 = PLAYER_TARGET;
+            e.f26 = 1;
+            e.f59 = 4;
+            e.tick70 = 4;
+            e.x = home.x;
+            e.y = home.y;
+            e.z = home.z;
+            e.f80 = 1664;
+            e.f82 = 1664;
+            e.f78 = 0;
+            e.f84 = 0x4000;
+            e.f136 = 10000;
+        }
+        // The stale snowball residue: a consumed melee keeps its
+        // amount with the source cleared.
+        w.g.player_mail[0] = (100, 0);
+        w.tick(home, PlayerCommand::default());
+        assert_eq!(
+            w.g.player_mail,
+            [(0, 0); 6],
+            "the at-castle tick wipes the whole box with nothing pending"
+        );
+        assert_eq!(w.player.grace, 1, "grace re-armed to 2, one decay");
+        // The next melee lands on the wiped box — the redirect
+        // forwards the fresh amount alone (the old pending-gated
+        // re-arm left the residue and forwarded 200).
+        w.g.mail_write_single(MailTarget::Player, 0, 100, 44);
+        w.tick(home, PlayerCommand::default());
+        assert_eq!(
+            w.g.ent[c].mail[0],
+            (100, 44),
+            "the redirect forwards the melee alone, no snowball"
+        );
+    }
+
+    /// **A BALL SOFT-DISABLED EARLIER THE SAME TICK STILL RUNS ITS
+    /// FINAL DISPATCH.** MC1's walk gates on class alone (:52351) and
+    /// `sub_27030` has no disable check: the castle absorb (:56032)
+    /// banks the ball and sets 0x400 from the castle's lower slot,
+    /// and the flagged ball still slides at its own slot before the
+    /// next tick-top reap frees it — mc1l0 t=1234, ball 754 moves
+    /// (−14, −11) with the flag already set. The old whole-tick
+    /// early-out froze the ball one boundary early.
+    #[test]
+    fn a_soft_disabled_ball_still_runs_its_final_dispatch() {
+        let mut w = flat_world();
+        let pos = away();
+        let c = w.g.new_event().expect("castle");
+        {
+            let e = &mut w.g.ent[c];
+            e.class64 = 3;
+            e.model65 = 2;
+            e.id24 = PLAYER_TARGET;
+            e.f26 = 1;
+            e.f59 = 4;
+            e.tick70 = 4;
+            e.f63 = 0; // the every-other-tick block (absorb) runs
+            e.x = pos.x;
+            e.y = pos.y;
+            e.z = pos.z;
+            e.f80 = 1664;
+            e.f82 = 1664;
+            e.f78 = 0;
+            e.f84 = 0x4000;
+            e.f136 = 10000;
+            e.f140 = 0;
+        }
+        let b = w.g.new_event().expect("ball");
+        assert!(b > c, "the ball must dispatch after the castle");
+        {
+            let e = &mut w.g.ent[b];
+            e.class64 = 10;
+            e.model65 = 39;
+            e.tick70 = 41;
+            e.f144 = PLAYER_TARGET; // claimed to the castle's owner
+            e.f140 = 1000;
+            e.flags = 12;
+            e.f58 = 90; // awake — the mover runs
+            e.f80 = 46;
+            e.f82 = 46;
+            e.f78 = 75;
+            e.f84 = 37;
+            e.dest_x = (-14i16) as u16;
+            e.dest_y = (-11i16) as u16;
+        }
+        let (bx, by) = (pos.x.wrapping_add(300), pos.y.wrapping_add(300));
+        let bz = w.g.ground_z(bx, by) as i16;
+        {
+            let e = &mut w.g.ent[b];
+            e.x = bx;
+            e.y = by;
+            e.z = bz;
+        }
+        w.g.link(b, bx, by, bz);
+        w.tick(pos, PlayerCommand::default());
+        assert_eq!(w.g.ent[c].f140, 1000, "the castle banked the ball");
+        assert!(
+            w.g.ent[b].flags & 0x400 != 0 && w.g.ent[b].class64 == 10,
+            "the absorbed ball lingers one snapshot, soft-disabled"
+        );
+        assert!(
+            (w.g.ent[b].x, w.g.ent[b].y) != (bx, by),
+            "the flagged ball still took its final slide"
+        );
+        w.tick(pos, PlayerCommand::default());
+        assert_eq!(w.g.ent[b].class64, 0, "the tick-top reap frees it");
     }
 
     /// **A PROJECTILE ACQUIRES ITS VICTIM EXACTLY ONCE, AT THE MUZZLE
@@ -20924,6 +21823,73 @@ mod tests {
              (retail ~1.5M vs FAR's ~8.4M)"
         );
         let _ = far;
+    }
+
+    /// **A MID-TICK SLOT REUSE SEVERS THE TICK-HEAD BALL CHAIN.**
+    /// Retail's per-tick model lists are singly linked THROUGH the
+    /// entity records (:52246 build, :64043 walk), so NewEvent's
+    /// ctor wipe on a freed, still-listed ball record cuts the chain
+    /// at that node: a possess lob spawned into a collected ball's
+    /// slot scans only the chain prefix below itself (mc1l0 pair
+    /// 604→605 — retail chases far ball 104 while the full-pool walk
+    /// picks the closer-scoring 714 above the cut). Non-vacuous:
+    /// remove the sever in `new_event` and the NEAR ball (better
+    /// score, above the cut) wins the pick.
+    #[test]
+    fn a_lob_reusing_a_ball_slot_scans_only_the_severed_chain_prefix() {
+        use crate::mc1::mobs::{MobCtx, PLAYER_TARGET};
+        let ctx = MobCtx {
+            px: 0,
+            py: 0,
+            pz: 0,
+            pyaw: 0,
+            pmana: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        let mut w = flat_world();
+        let (bx, by) = (100u16 << 8, 100u16 << 8);
+        let ground = w.g.ground_z(bx, by) as i16;
+        let bz = ground + 512;
+        let ball = |w: &mut World, x: u16, y: u16| -> usize {
+            let b = w.g.new_event().expect("ball");
+            let e = &mut w.g.ent[b];
+            e.class64 = 10;
+            e.model65 = 39;
+            e.x = x;
+            e.y = y;
+            e.z = bz;
+            e.f58 = 100;
+            e.f78 = 0;
+            b
+        };
+        // FAR: 8 tiles up-range dead ahead; MID: the sacrifice; NEAR:
+        // 4 tiles dead ahead — the better score, and the HIGHER slot.
+        let far = ball(&mut w, bx, 108 << 8);
+        let mid = ball(&mut w, bx + (2 << 8), 104 << 8);
+        let near = ball(&mut w, bx, 104 << 8);
+        assert!(far < mid && mid < near, "ascending spawn slots");
+        w.g.ball_chain.list = vec![far as u16, mid as u16, near as u16];
+        w.g.ball_chain.cut = usize::MAX;
+        // MID is collected mid-tick; the lob's spawn reuses its slot.
+        w.free_slot(mid);
+        let lob = w.g.spawn_spell_lob(1, bx, by, bz).expect("lob");
+        assert_eq!(lob, mid, "the lob must land in the freed ball slot");
+        {
+            let e = &mut w.g.ent[lob];
+            e.id24 = PLAYER_TARGET;
+            e.f30 = 1024; // +y, toward the balls; bearing-to-self 0 stays cone-rejected
+            e.f32 = 0;
+        }
+        w.g.proj_tick(lob, &ctx);
+        assert_eq!(
+            w.g.ent[lob].f146, far as u16,
+            "only the chain prefix below the reused slot is scannable — \
+             NEAR outscores FAR but sits beyond the cut"
+        );
+        let _ = near;
     }
 
     /// **THE MUZZLE-ACQUIRE 34-STEP IS STORED RAW.** On a HIT the

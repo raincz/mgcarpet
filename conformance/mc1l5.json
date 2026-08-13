@@ -87,24 +87,18 @@
     {
       "t": 86,
       "status": "open",
-      "sig": "15eea166038bd3c9",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,2:f26",
-        "field:12,3:f26",
-        "field:wizard0.charge",
-        "missing:9,1"
+        "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
     {
       "t": 88,
       "status": "open",
-      "sig": "2125edc6f4055f77",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "extra:9,1",
-        "field:12,2:f26",
-        "field:12,3:f26",
-        "field:wizard0.charge"
+        "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
@@ -191,11 +185,10 @@
     {
       "t": 677,
       "status": "open",
-      "sig": "1bf5d569900461d8",
+      "sig": "054468d05bab533e",
       "atoms": [
         "field:12,3:f26",
-        "field:3,1:mana",
-        "field:9,1:f26"
+        "field:3,1:mana"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
@@ -264,9 +257,8 @@
     {
       "t": 1083,
       "status": "open",
-      "sig": "d1a48553b4e92eb3",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:10,39:z",
         "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
@@ -320,13 +312,10 @@
     {
       "t": 1182,
       "status": "open",
-      "sig": "b1e9787f3ad68669",
+      "sig": "ba083d8f2444ade6",
       "atoms": [
-        "extra:9,0",
-        "field:12,0:f26",
         "field:12,2:f26",
-        "field:12,3:f26",
-        "field:wizard0.charge"
+        "field:12,3:f26"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
@@ -352,12 +341,9 @@
     {
       "t": 1199,
       "status": "open",
-      "sig": "ad9b90a12aa3ef29",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,0:f26",
-        "field:12,2:f26",
-        "field:wizard0.charge",
-        "missing:9,0"
+        "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
@@ -491,22 +477,19 @@
     {
       "t": 2477,
       "status": "open",
-      "sig": "be5dbc37185b4eca",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,2:f26",
-        "field:9,0:f26",
-        "field:wizard0.charge"
+        "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained; f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 2519,
       "status": "open",
-      "sig": "2fa1733bd4442715",
+      "sig": "ba083d8f2444ade6",
       "atoms": [
         "field:12,2:f26",
-        "field:12,3:f26",
-        "field:5,15:heading"
+        "field:12,3:f26"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },
@@ -559,9 +542,8 @@
     {
       "t": 2872,
       "status": "open",
-      "sig": "2188c4d267a01493",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:10,0:z",
         "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
@@ -761,12 +743,10 @@
     {
       "t": 5742,
       "status": "open",
-      "sig": "57482b8144e2cae6",
+      "sig": "ba083d8f2444ade6",
       "atoms": [
         "field:12,2:f26",
-        "field:12,3:f26",
-        "field:9,0:f26",
-        "field:wizard0.charge"
+        "field:12,3:f26"
       ],
       "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
     },

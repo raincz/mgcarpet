@@ -123,25 +123,22 @@ pub struct BuildDef {
 }
 
 /// Which retail builder's water-conversion law a flatten pass carries.
-/// All three walk the same BUILD RLE cell decode, but convert a water
+/// Both walk the same BUILD RLE cell decode, but convert a water
 /// tile to land under different conditions:
 /// - `Building` (sub_27D30 :30101-11, authored construction): flip a
 ///   slope-nibble-0 tile whenever the cell carries a goal, `& 0xF0 |
 ///   1`, flag-mode retile (sub_33B90).
-/// - `CastleLive` (sub_285C0 :30550-62, the live castle painter): a
-///   cell whose goal equals its height is never touched; the flip
-///   requires height 0, writes `& 0xF8 | 1`, dig-mode retile
-///   (sub_33E10). A castle raised on water therefore keeps LIVE WATER
-///   between its walls — the courtyard sits at the water-level datum
-///   (zero delta) until a collapse rubbles it.
 /// - `CastleInit` (sub_279D0 :29863-917, the level-init instant
 ///   stamp): height = goal outright, flip like Building but
 ///   `& 0xF8 | 1` — authored starting castles DO drain their
 ///   courtyards.
+///
+/// The live castle painter (sub_285C0) is NOT a flatten pass: its
+/// rows fill a goal-delta buffer that the painter applies in one
+/// separate sweep — see `fill_castle_goal_row`.
 #[derive(Clone, Copy, PartialEq)]
 pub(crate) enum FlattenLaw {
     Building,
-    CastleLive,
     CastleInit,
 }
 
@@ -644,6 +641,8 @@ pub(crate) struct Gen {
     pub(crate) slot_gen: SlotGens,
     /// Free stack; built 999→1 so allocation pops 1, 2, 3, …
     pub(crate) free: Vec<u16>,
+    /// Tick-start mana-ball roster (see [`TickChain`]).
+    pub(crate) ball_chain: TickChain,
     /// MC2's recycle-victim stack — the allocator's FALLBACK once
     /// `free` is dry (see [`Mc2Recycle`]). Empty on MC1, whose
     /// allocator has the opposite priority.
@@ -1098,6 +1097,43 @@ impl std::hash::Hash for SlotGens {
     fn hash<H: std::hash::Hasher>(&self, _: &mut H) {}
 }
 
+/// The tick-start mana-ball chain — retail's `var_u32_36462[1]`
+/// roster, rebuilt from a single ascending slot sweep at the TOP of
+/// every tick (:52246-312, the same pass that counts the trigger
+/// buckets) and holding every class-10 model-39/40 record live at
+/// that moment. Chain WALKERS (the (10,54) magnet stamp sub_29920
+/// :31247, the castle absorb :56024, …) see THIS list, not the live
+/// pool: an entity spawned mid-walk is invisible to every chain
+/// consumer until the next tick's rebuild (measured: the castle
+/// death's ejected ball gets its first magnet ch4 stamp one tick
+/// AFTER the teardown, mc1l0 t=1831→1832). Derived per tick —
+/// hash-silent like [`SlotGens`].
+#[derive(Default)]
+pub(crate) struct TickChain {
+    pub list: Vec<u16>,
+    /// THE SEVERED CHAIN (ledger §THE SEVERED BALL CHAIN): retail's
+    /// tick-head lists are singly linked THROUGH the entity records,
+    /// so a freed record REUSED mid-tick (the NewEvent ctor wipe —
+    /// a plain free keeps the link, the freed-slot stale-bytes law)
+    /// severs the chain at that node: every walk later in the tick
+    /// sees the prefix, the reused node itself (with its NEW bytes),
+    /// and nothing beyond. `cut` = visible member count from the
+    /// walk head; `usize::MAX` = intact. Reset at the tick-top
+    /// rebuild, lowered only by [`Gen::new_event`].
+    pub cut: usize,
+}
+
+impl TickChain {
+    /// The member prefix a retail chain walk reaches this tick.
+    pub fn visible_len(&self) -> usize {
+        self.list.len().min(self.cut)
+    }
+}
+
+impl std::hash::Hash for TickChain {
+    fn hash<H: std::hash::Hasher>(&self, _: &mut H) {}
+}
+
 /// One sound request: engine sound id (the SNDS bank-0 index), the
 /// emitter's position on the u16 torus, and its slot as the instance
 /// tag (the original's entity+24). `player` marks requests the
@@ -1159,6 +1195,7 @@ impl Gen {
             ent: vec![Ent::default(); chassis.pool_slots],
             slot_gen: SlotGens(vec![0; chassis.pool_slots]),
             free: (1..chassis.pool_slots as u16).rev().collect(),
+            ball_chain: TickChain::default(),
             mc2_recycle: Mc2Recycle::default(),
             rand: seed,
             pseudo,
@@ -1328,6 +1365,15 @@ impl Gen {
             }
         };
         let idx = idx as usize;
+        // THE SEVERED CHAIN: reusing a freed record wipes its list
+        // link, so retail walks of the tick-head ball chain stop at
+        // this node for the rest of the tick. Measured: mc1l0 pair
+        // 604→605 — the (9,1) lob reusing collected ball 642's slot
+        // must not see balls 643+ (chase want 104, not the
+        // closer-scoring 714 its own predecessor lob chases).
+        if let Ok(pos) = self.ball_chain.list.binary_search(&(idx as u16)) {
+            self.ball_chain.cut = self.ball_chain.cut.min(pos + 1);
+        }
         // A reallocated slot must leave any tile chain BEFORE its
         // record resets — a stale linked record (an imported ghost,
         // or any future free path that forgets) would otherwise leave
@@ -1577,7 +1623,7 @@ impl Gen {
         Self::interp_plane(&self.t.ceiling, x, y)
     }
 
-    fn interp_plane(plane: &[u8], x: u16, y: u16) -> i32 {
+    pub(crate) fn interp_plane(plane: &[u8], x: u16, y: u16) -> i32 {
         let h = |dx: u8, dy: u8| plane[tile(dx, dy)] as i32;
         let (cx, cy) = ((x >> 8) as u8, (y >> 8) as u8);
         let (fx, fy) = ((x & 0xFF) as i32, (y & 0xFF) as i32);
@@ -1847,6 +1893,19 @@ impl Gen {
         self.dig_cell(ax, ay, delta, protect)
     }
 
+    /// Combat-effect access to the ring-walk disc dig (sub_40D30 /
+    /// MC2 sub_572C0).
+    pub(crate) fn dig_disc_pub(
+        &mut self,
+        i: usize,
+        lo: i32,
+        hi: i32,
+        delta: i16,
+        protect: bool,
+    ) -> bool {
+        self.dig_disc(i, lo, hi, delta, protect)
+    }
+
     pub(crate) fn ring_cells(&self, lo: i32, hi: i32) -> Vec<(u8, u8)> {
         let mut out = Vec::new();
         if lo < 0 || lo > 31 {
@@ -1908,9 +1967,12 @@ impl Gen {
         }
     }
 
-    /// sub_11760 (:16869): true when the tile under the position (plain
-    /// >>8, no rounding) is water (angle nibble 0) — the walker/digger
-    /// > > stop probe.
+    /// sub_11760 (:16869) `& 1`: the ANGLE-NIBBLE water probe on the
+    /// plain `>>8` cell — the terraform diggers and the fire scorch
+    /// gate use this one, and it counts shore/wave cells (type 45,
+    /// nibble 0) as WATER. The tile-type sibling (sub_11810,
+    /// `on_water_pub`) does not — check the caller's retail anchor
+    /// before picking one.
     pub(crate) fn on_water(&self, x: u16, y: u16) -> bool {
         self.t.angle[tile((x >> 8) as u8, (y >> 8) as u8)] & 0xF == 0
     }
@@ -2981,20 +3043,6 @@ impl Gen {
                 let t = tile(x, y);
                 let goal = if b < 0xF {
                     if b > 6 { Some(target) } else { None }
-                } else if law == FlattenLaw::CastleLive {
-                    // The live painter's fill (:30637-41) has NO 3x
-                    // arm — every 0xF.. cell with a nonzero low
-                    // nibble steps to 4*(lo-1)+target. The +12/+16
-                    // fork below is the INIT stamp's law (:29877-95);
-                    // sharing it here mis-heighted the tower-wall
-                    // cells one sub-step per tick (mc1l0 t=563
-                    // pose.z, ground under the hovering caster).
-                    let lo = b % 16;
-                    if lo != 0 {
-                        Some(4 * (lo as i32 - 1) + target)
-                    } else {
-                        None
-                    }
                 } else if b >> 4 == 3 {
                     match (b % 16) % 3 {
                         1 => Some(target + 12),
@@ -3021,20 +3069,6 @@ impl Gen {
                                 self.recompute_protected(x, y, x, y);
                             }
                         }
-                        FlattenLaw::CastleLive => {
-                            // :30550 — a cell whose goal equals its
-                            // height is not written AT ALL; the flip
-                            // tests the HEIGHT (:30558), pre-step,
-                            // and retiles dig-mode (:30561).
-                            if goal != hh {
-                                if hh == 0 {
-                                    self.t.angle[t] = (self.t.angle[t] & 0xF8) | 1;
-                                    self.recompute_unprotected(x, y, x, y);
-                                }
-                                self.t.height[t] =
-                                    self.t.height[t].wrapping_add(((goal - hh) / divisor) as u8);
-                            }
-                        }
                         FlattenLaw::CastleInit => {
                             self.t.height[t] = goal as u8;
                             if self.t.angle[t] & 7 == 0 {
@@ -3045,6 +3079,88 @@ impl Gen {
                     }
                 }
                 x = x.wrapping_add(1);
+            }
+        }
+    }
+
+    /// The live castle painter's goal FILL (sub_285C0 :30592-668):
+    /// walk build row `bt`'s RLE and write each covered cell's
+    /// `goal − height` delta into the level-rect buffer at the row's
+    /// centered offset — the caller applies the buffer in one sweep.
+    /// The decode has NO 3x arm (:30637-41): every 0xF.. cell with a
+    /// nonzero low nibble goals 4*(lo-1)+target (the +12/+16 fork is
+    /// the INIT stamp's law; sharing it mis-heighted the tower-wall
+    /// cells — mc1l0 t=563 pose.z); bytes 7..14 goal the bare
+    /// target; bytes 1..6 and lo-nibble 0 leave the buffer cell
+    /// alone, so an inner row's delta survives only until a later
+    /// row rewrites it. A castle raised on water keeps LIVE WATER
+    /// between its walls — the courtyard sits at the water-level
+    /// datum (zero delta) until a collapse rubbles it.
+    fn fill_castle_goal_row(
+        &self,
+        bt: usize,
+        cx: u8,
+        cy: u8,
+        target: i32,
+        ldef: BuildDef,
+        buf: &mut [i16],
+    ) {
+        let def = self.assets.build_tab[bt % self.assets.build_tab.len()];
+        let (w, h) = (def.w as u16, def.h as u16);
+        let x0 = cx.wrapping_sub((w >> 1) as u8);
+        let y0 = cy.wrapping_sub((h >> 1) as u8);
+        // Row bt's rect sits centered inside the level rect
+        // (:30594-97 — v34/v32, the x/y offsets of the smaller rect).
+        let lw = ldef.w as i32;
+        let dx = ((ldef.w >> 1) as i32) - ((def.w >> 1) as i32);
+        let dy = ((ldef.h >> 1) as i32) - ((def.h >> 1) as i32);
+        let mut rows = h;
+        let (mut x, mut y) = (x0, y0);
+        let (mut rx, mut ry) = (0i32, 0i32);
+        let mut c = def.offset as usize;
+        while rows != 0 {
+            let ctl = self.assets.build_dat[c] as i8;
+            c += 1;
+            if ctl == 0 {
+                y = y.wrapping_add(1);
+                ry += 1;
+                rows -= 1;
+                x = x0;
+                rx = 0;
+                continue;
+            }
+            if ctl < 0 {
+                x = x.wrapping_add((-(ctl as i32)) as u8);
+                rx -= ctl as i32;
+                continue;
+            }
+            for _ in 0..ctl {
+                let b = self.assets.build_dat[c];
+                c += 1;
+                let goal = if b < 0xF {
+                    if b > 6 { Some(target) } else { None }
+                } else {
+                    let lo = b % 16;
+                    if lo != 0 {
+                        Some(4 * (lo as i32 - 1) + target)
+                    } else {
+                        None
+                    }
+                };
+                if let Some(goal) = goal {
+                    let hh = self.t.height[tile(x, y)] as i32;
+                    let idx = (dy + ry) * lw + dx + rx;
+                    // In-bounds for every shipped table (row rects
+                    // never outgrow the level rect); skip, not
+                    // panic, on a malformed one.
+                    if idx >= 0
+                        && let Some(cell) = buf.get_mut(idx as usize)
+                    {
+                        *cell = (goal - hh) as i16;
+                    }
+                }
+                x = x.wrapping_add(1);
+                rx += 1;
             }
         }
     }
@@ -3106,7 +3222,13 @@ impl Gen {
                         // corrupt the free list. Vacuous otherwise.
                         if self.ent[j].id24 != owner && self.ent[j].flags & 0x400 == 0 {
                             match self.ent[j].class64 {
-                                2 => self.free_entity(j),
+                                // :51747 — sub_41E80, the SOFT kill:
+                                // the swept scenery lingers dead-
+                                // flagged for one snapshot and the
+                                // tick-top reap frees it (mc1l0
+                                // t=3855, the lvl-4 commit's 39
+                                // trees carry flags 0x2040C at 3856).
+                                2 => self.ent[j].flags |= 0x400,
                                 5 if !matches!(self.ent[j].model65, 6 | 8 | 16) => {
                                     self.ent[j].act_life = -1;
                                     self.ent[j].f38 = owner;
@@ -3239,8 +3361,49 @@ impl Gen {
         let level = e.f71.min(8) as usize;
         // :30563 — the divisor is the POST-decrement counter itself.
         let divisor = (e.f26 as i32).max(1);
+        // :30538-45 — the flatten is BUFFERED: one goal-delta per
+        // cell of the LEVEL row's rect, zeroed each work tick, rows
+        // 1..=level each writing `goal − height` at their centered
+        // offset, so a cell under several rows keeps the LAST row's
+        // delta. Stepping the map row-by-row instead replays every
+        // stale inner-level sculpt against the standing terrain — an
+        // L3 courtyard byte drags a cell toward the datum while the
+        // L3 ring byte hauls it back, every tick (the mc1l0
+        // t=3856-73 apron dip the truth channel never shows).
+        let ldef = self.assets.build_tab[level % self.assets.build_tab.len()];
+        let (lw, lh) = (ldef.w as usize, ldef.h as usize);
+        let mut deltas = vec![0i16; lw * lh];
         for r in 1..=level {
-            self.flatten_build_row(r, cx, cy, target, divisor, FlattenLaw::CastleLive);
+            self.fill_castle_goal_row(r, cx, cy, target, ldef, &mut deltas);
+        }
+        // The apply pass (:30550-70), one sweep over the level rect:
+        // a cell whose (surviving) goal equals its height is not
+        // written AT ALL; the water flip tests the HEIGHT (:30558),
+        // pre-step, and retiles dig-mode (:30561); height steps by
+        // delta/divisor. Counter 1 parks the moved protected cells
+        // at pending-0x08 (:30565-69 — the finish re-promotes);
+        // counter 2 sweeps bit 3 off the whole rect (:30571-72).
+        let x0 = cx.wrapping_sub((ldef.w >> 1) as u8);
+        let y0 = cy.wrapping_sub((ldef.h >> 1) as u8);
+        for gy in 0..lh {
+            for gx in 0..lw {
+                let (x, y) = (x0.wrapping_add(gx as u8), y0.wrapping_add(gy as u8));
+                let t = tile(x, y);
+                let d = deltas[gy * lw + gx] as i32;
+                if d != 0 {
+                    if self.t.height[t] == 0 {
+                        self.t.angle[t] = (self.t.angle[t] & 0xF8) | 1;
+                        self.recompute_unprotected(x, y, x, y);
+                    }
+                    self.t.height[t] = self.t.height[t].wrapping_add((d / divisor) as u8);
+                    if divisor == 1 && self.t.angle[t] & 0x80 != 0 {
+                        self.t.angle[t] = (self.t.angle[t] & 0x77) | 8;
+                    }
+                }
+                if divisor == 2 {
+                    self.t.angle[t] &= !8;
+                }
+            }
         }
         // THE CASTLE WEAPON (sub_40E20 :51729, called per footprint
         // tile per paint tick :30631-34): the rising transformation
@@ -3442,9 +3605,18 @@ impl Gen {
     /// m16 manifestation charge pin releases (sub_46D20(_, 0) →
     /// +48 = 0).
     fn tick_upgrade_token(&mut self, i: usize) {
+        let trace = std::env::var_os("MGC_CASTLE_PIN_TRACE").is_some();
         let life = self.ent[i].act_life;
         self.ent[i].f26 = self.ent[i].f26.wrapping_add(1);
         self.ent[i].act_life = life - 1;
+        if trace {
+            eprintln!(
+                "[pin] t={} token slot {i} tick: life={life} flags={:#x} own={}",
+                crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                self.ent[i].flags,
+                self.ent[i].id24
+            );
+        }
         if life >= 0 && self.ent[i].flags & 2 == 0 {
             self.ent[i].flags |= 2;
             let own = self.ent[i].id24;
@@ -3463,22 +3635,45 @@ impl Gen {
             });
             if let Some(c) = castle {
                 if self.ent_overlap(i, c) {
+                    if trace {
+                        eprintln!(
+                            "[pin] t={} token slot {i}: HIT castle {c}",
+                            crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed)
+                        );
+                    }
                     self.ent[c].mail[5] = (10, own);
                     self.ent[i].flags |= 0x400;
                     return;
                 }
             }
-            // The miss releases the manifestation's charge pin
-            // (retail +48; the port keeps class-12 state in f26 —
-            // the importer's `f26: r.f48` mapping).
-            if let Some(m) = (1..self.ent.len()).find(|&m| {
-                let e = &self.ent[m];
-                e.class64 == 12 && e.model65 == 16 && e.f144 == own && e.flags & 0x400 == 0
-            }) {
-                self.ent[m].f26 = 0;
+            // The miss releases the owner's charge pin.
+            if trace {
+                eprintln!(
+                    "[pin] t={} token slot {i}: MISS own={own} castle={castle:?}",
+                    crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed)
+                );
             }
+            self.release_castle_charge_pin(own);
         }
         self.ent[i].flags |= 0x400;
+    }
+
+    /// sub_46D20(_, 0) (:55949-71): zero the owner's Create-Castle
+    /// charge pin (+48 → our f26). Retail resolves the token through
+    /// the OWNER's wizext+708 off any owner-stamped entity; the
+    /// Gen-side stand-in joins on the f144 owner tag, which every
+    /// native mint/pickup/import stamps (a dropped (12,16) ground
+    /// jar rides f144 = 0 and can't alias). Callers: the upgrade
+    /// token's MISS (:31037), the homing ball's pool-full morph
+    /// (:63513-15) and the create ball's launch-scan failure
+    /// (:63614-16).
+    pub(crate) fn release_castle_charge_pin(&mut self, own: u16) {
+        if let Some(m) = (1..self.ent.len()).find(|&m| {
+            let e = &self.ent[m];
+            e.class64 == 12 && e.model65 == 16 && e.f144 == own && e.flags & 0x400 == 0
+        }) {
+            self.ent[m].f26 = 0;
+        }
     }
 
     /// sub_47DD0 (:56617): castle mana capacity by level (level 0 =
@@ -4099,11 +4294,20 @@ impl Gen {
             // max level 7), and the every-other-tick block
             // (:56016-37): overflow ejector, balloons, absorption.
             4 => {
+                // The blast shake (:55983-99) is CHECK-then-decrement:
+                // the ==1 tick transitions to the repaint (f50 zeroed
+                // WITHOUT decrementing — the boundary shows 1 for a
+                // full tick), a >1 tick only counts down (that arm is
+                // the one the wrapper's pin census tags, pre50 >= 2).
+                // Decrement-first fired the repaint one boundary early
+                // — mc1l0 t=1294 vs 1295, the free-run entity-set
+                // fork's extra (10,42) painter.
                 if self.ent[i].f50 > 0 {
-                    self.ent[i].f50 -= 1;
                     if self.ent[i].f50 == 1 {
                         self.ent[i].f50 = 0;
                         self.ent[i].f59 = 3;
+                    } else {
+                        self.ent[i].f50 -= 1;
                     }
                     return;
                 }
@@ -4126,14 +4330,21 @@ impl Gen {
                     // one-level downgrade, deferred through action 6,
                     // with the killer stamped into +38 (:56695-97).
                     let (amt, src) = self.ent[i].mail[0];
-                    self.ent[i].mail[0] = (0, 0);
+                    self.ent[i].mail[0].1 = 0;
                     self.ent[i].act_life -= amt as i32;
                     if self.ent[i].act_life < 0 {
+                        // The lethal arm clears only the SOURCE
+                        // (:56695-97) — the amount stands as residue,
+                        // and sub_12B50 single hits ACCUMULATE onto
+                        // it once the source is clear.
                         self.ent[i].f38 = src;
                         lethal = true;
-                    } else if self.ent[i].id24 == crate::mc1::mobs::PLAYER_TARGET {
-                        // "Castle under attack" flash (Type_160+391=4).
-                        self.castle_alert = 4;
+                    } else {
+                        self.ent[i].mail[0].0 = 0; // :56703
+                        if self.ent[i].id24 == crate::mc1::mobs::PLAYER_TARGET {
+                            // "Castle under attack" flash (Type_160+391=4).
+                            self.castle_alert = 4;
+                        }
                     }
                 }
                 if lethal {
@@ -4141,7 +4352,12 @@ impl Gen {
                 } else {
                     if self.ent[i].mail[5].1 != 0 {
                         let sender = self.ent[i].mail[5].1;
-                        self.ent[i].mail[5] = (0, 0);
+                        // The intake reads and clears ONLY the ch5
+                        // source word (:56707-11) — the amount is
+                        // never read and never cleared, so the
+                        // token's `10` stands as permanent residue
+                        // (mc1l0 t=1188+, castle 663 ch5 (10,0)).
+                        self.ent[i].mail[5].1 = 0;
                         if sender == self.ent[i].id24 && self.ent[i].f26 < 7 {
                             // sub_47EC0 :56707-11 — the inbox arms the
                             // upgrade-request BIT (+16 |= 0x40), and the
@@ -4465,7 +4681,18 @@ impl Gen {
         }
         let (x, y) = (self.ent[i].x, self.ent[i].y);
         let wd = |p: u16, q: u16| (p.wrapping_sub(q) as i16 as i64).abs();
-        for j in 1..self.ent.len() {
+        // The stamp walks the TICK-START ball chain (:31247 reads
+        // `var_u32_36462[1]`), not the live pool: a ball ejected
+        // mid-walk is invisible to every magnet until next tick's
+        // rebuild ([`TickChain`]; mc1l0 castle-3 teardown, the
+        // t=1830 ejected ball turns at 1832 not 1831), and a chain
+        // severed by mid-tick slot reuse ends early for the stamp
+        // exactly as for the acquire scans. The class/model recheck
+        // guards the port's eager mid-tick free (a freed-not-reused
+        // member keeps its link in retail but must not be stamped
+        // fresh mail here).
+        for k in 0..self.ball_chain.visible_len() {
+            let j = self.ball_chain.list[k] as usize;
             if self.ent[j].class64 == 10
                 && self.ent[j].model65 == 39
                 && self.ent[j].flags & 0x400 == 0
@@ -4618,8 +4845,21 @@ impl Gen {
                 let sx = x.wrapping_add(f80);
                 let z = self.ground_z(sx, y) as i16;
                 self.spawn_creature(4, sx, y, z);
+                // The wanted arm rides INSIDE the occupied-house
+                // branch (sub_28DC0 :30790-97) and only marks a
+                // carpet-borne attacker (+40's model ≤ 1; the
+                // out-of-pool player IS the carpet): torching an
+                // emptied house (+26 ≤ 2) marks NOBODY. The
+                // unconditional flag kept player_aggro alive through
+                // the mc1l0 endgame — the t=4948 collapse-evac
+                // militia acquired the human where retail's scan,
+                // wanted 0, found no admissible target.
+                if src == crate::mc1::mobs::PLAYER_TARGET
+                    || self.ent.get(src as usize).is_some_and(|e| e.model65 <= 1)
+                {
+                    self.flag_village_wanted(src);
+                }
             }
-            self.flag_village_wanted(src);
         }
         if self.ent[i].f63 % 40 == 0 {
             self.ent[i].f140 = (self.ent[i].f26 as i32) << 8;
@@ -5495,6 +5735,8 @@ impl Gen {
             // A restored world simply has no ranked victims until the
             // list next refreshes.
             mc2_recycle: _,
+            // Rebuilt at every tick top — never saved.
+            ball_chain: _,
         } = self;
         w.put(t);
         w.put(map_entity);
@@ -5984,6 +6226,47 @@ mod tests {
         g.free.push(spares[2] as u16);
         g.castle_tick(i, crate::patches::WorldPatches::RETAIL);
         assert_eq!(g.ent[i].f59, 1, "freed slot: the repaint painter wait");
+    }
+
+    /// **THE BLAST SHAKE COUNTS DOWN TO ONE BEFORE THE REPAINT.**
+    /// Retail (:55983-99) checks FIRST: the f50==1 tick transitions
+    /// to the repaint with NO decrement (the boundary shows 1 for a
+    /// full tick), a >1 tick only counts down. A shake armed at 5
+    /// therefore snapshots 4, 3, 2, 1 and fires the repaint on the
+    /// FIFTH tick — decrement-first fired it on the fourth, spawning
+    /// the (10,42) painter one boundary early (the mc1l0 free-run
+    /// entity-set fork at t=1295 after self-destruct #1's downgrade).
+    #[test]
+    fn the_blast_shake_counts_to_one_before_the_repaint() {
+        let mut g = Gen::new(
+            flat_land(8),
+            synthetic_assets(),
+            1,
+            ChassisParams::MC1,
+            VerbSet::MC1,
+        );
+        let i = g.new_event().unwrap();
+        {
+            let e = &mut g.ent[i];
+            e.class64 = 3;
+            e.model65 = 2;
+            e.f26 = 1;
+            e.f59 = 4;
+            e.f50 = 5;
+            e.x = 0x8000;
+            e.y = 0x8000;
+        }
+        for want in [4, 3, 2, 1] {
+            g.castle_tick(i, crate::patches::WorldPatches::RETAIL);
+            assert_eq!(g.ent[i].f50, want, "a countdown tick only decrements");
+            assert_eq!(g.ent[i].f59, 4, "no transition above 1");
+        }
+        g.castle_tick(i, crate::patches::WorldPatches::RETAIL);
+        assert_eq!(g.ent[i].f50, 0, "the ==1 tick zeroes without decrementing");
+        assert_eq!(
+            g.ent[i].f59, 3,
+            "the repaint fires only after the f50=1 boundary was seen"
+        );
     }
 
     /// The balloon claim ticket is a RAW slot index — a collected
