@@ -583,8 +583,19 @@ fn level_005_golden_state_hashes() {
         // conforming pairs, unexplained field rows 322 -> 136,
         // (9,10)+(10,43) dead, (5,3) 119 -> 52; mc1l5 -28.9k rows,
         // 10/10 suites 0 regressions.
-        0xb434bbf03c8792a2, // D: 64 ticks of two-hand fireball combat
-        0x730d68a20eff2d8d, // E: 100 aftermath ticks
+        // D/E re-pinned for THE CAST-CHARGE METER (Type_160 u8_326,
+        // the raw-lane surfacing session): every wizard banks a
+        // +1/tick 200-cap meter (human :55377-78, rival :17987-89)
+        // and the fireball/earthquake/meteor/volcano spawners move it
+        // into the new bolt's +26 and zero it (:65072-73 and
+        // siblings; possess :65246 zeroes without stamping). The
+        // meter itself is hash-quiet (no in-engine reader); what
+        // moves D/E is the HASHED f26 stamp on the D-window combat
+        // fireballs, previously born 0. Post-init..C hold — no bolt
+        // exists before D. OBSERVABLE holds byte-for-byte: the stamp
+        // is bookkeeping on a lane nothing in-engine reads.
+        0x4d55b9b9a8698f6c, // D: 64 ticks of two-hand fireball combat
+        0x70d58338adcf8837, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,

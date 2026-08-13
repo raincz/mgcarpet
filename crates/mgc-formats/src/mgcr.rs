@@ -998,6 +998,11 @@ pub struct RetailWizardMc1 {
     pub castle: u16,      // +50 (established castle slot)
     /// Claimed-house mana tally (u32_308).
     pub banked_houses: i32, // +308
+    /// Cast-charge meter (u8_326): +1 per carpet tick to a 200 cap
+    /// (:55377-78); every manifestation bolt spawner moves it into
+    /// the new bolt's +26 and zeroes it (:65072-73 and siblings —
+    /// possess :65246 forces the bolt's 200 but still zeroes).
+    pub charge: u8, // +326
     pub roll_acc: u16,    // +327
     pub pitch_acc: u16,   // +329
     /// Spawn grace (u16_331): mailbox wiped while > 0.
@@ -1178,6 +1183,7 @@ fn decode_retail_wizard_mc1(d: &[u8], i: u16) -> RetailWizardMc1 {
         danger: i16_(d, t + 46),
         castle: u16_(d, t + 50),
         banked_houses: i32_(d, t + 308),
+        charge: u8_(d, t + 326),
         roll_acc: u16_(d, t + 327),
         pitch_acc: u16_(d, t + 329),
         grace: u16_(d, t + 331),

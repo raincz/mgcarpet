@@ -449,6 +449,8 @@ pub struct SuiteReport {
     pub ok: u64,
     /// Conforming fixtures that now fail — the red signal.
     pub regressions: Vec<u64>,
+    /// Regressions acknowledged by `--demote` (status → open).
+    pub demoted: Vec<u64>,
     /// Open/capture fixtures that now PASS — progress, but red until
     /// promoted so the manifest never silently rots.
     pub fixed: Vec<u64>,
@@ -518,12 +520,30 @@ pub fn run_one(manifest_path: &Path, args: &Args) -> Result<SuiteReport, String>
         match (f.status, pass) {
             (Status::Conforming, true) => rep.ok += 1,
             (Status::Conforming, false) => {
-                rep.regressions.push(f.t);
-                println!(
-                    "  REGRESSION t={}: was conforming, now {}",
-                    f.t,
-                    atoms.join(" ")
-                );
+                // --demote: the deliberate twin of --promote, for when
+                // a NEW comparison lane reveals a frozen-conforming
+                // pair was never truly conforming — acknowledge it as
+                // the open lead it always was, with attribution.
+                if let Some(note) = &args.demote {
+                    f.status = Status::Open;
+                    f.sig = sig_hash(atoms);
+                    f.atoms = atoms.clone();
+                    if f.note.is_empty() {
+                        f.note = note.clone();
+                    } else {
+                        f.note = format!("{}; {note}", f.note);
+                    }
+                    changed = true;
+                    rep.demoted.push(f.t);
+                    println!("  DEMOTED t={}: open, {}", f.t, atoms.join(" "));
+                } else {
+                    rep.regressions.push(f.t);
+                    println!(
+                        "  REGRESSION t={}: was conforming, now {}",
+                        f.t,
+                        atoms.join(" ")
+                    );
+                }
             }
             (_, true) => {
                 rep.fixed.push(f.t);
@@ -568,12 +588,13 @@ pub fn run_one(manifest_path: &Path, args: &Args) -> Result<SuiteReport, String>
         println!("  manifest rewritten: {}", manifest_path.display());
     }
     println!(
-        "== {}: {} fixtures ran, {} as expected, {} regressions, {} fixed, \
-         {} drifted, {} not reached",
+        "== {}: {} fixtures ran, {} as expected, {} regressions, {} demoted, \
+         {} fixed, {} drifted, {} not reached",
         manifest_path.display(),
         rep.ran,
         rep.ok,
         rep.regressions.len(),
+        rep.demoted.len(),
         rep.fixed.len(),
         rep.drifted.len(),
         rep.skipped.len()

@@ -64,6 +64,11 @@ fn usage() -> ! {
          fixtures flags:\n\
            --promote         accept fixed fixtures (status → conforming) and\n\
                              refresh drifted signatures, rewriting the manifest\n\
+           --demote <note>   acknowledge regressions (status → open, signature\n\
+                             recorded, <note> appended): for when a NEW\n\
+                             comparison lane reveals a frozen-conforming pair\n\
+                             was never truly conforming — the suite doctrine's\n\
+                             deliberate twin of --promote\n\
          verify-deltas flags:\n\
            --baked <dir>     baked tree root (default: baked)\n\
            --pin-pose n|n1   drive the human with the pre- or post-tick\n\
@@ -123,6 +128,7 @@ pub struct Args {
     pub sample_every: u64,
     pub max_open: usize,
     pub promote: bool,
+    pub demote: Option<String>,
     /// Feed the input channel k ticks late (retail's mouse→control→
     /// consume pipeline shows ~2-3 ticks of latency vs the sampled
     /// externals).
@@ -172,6 +178,7 @@ fn parse_args() -> Args {
         pose_only: false,
         max_open: 24,
         promote: false,
+        demote: None,
         input_delay: 0,
         start: None,
     };
@@ -203,6 +210,7 @@ fn parse_args() -> Args {
             "--no-pose-lane" => a.no_pose_lane = true,
             "--pose-only" => a.pose_only = true,
             "--promote" => a.promote = true,
+            "--demote" => a.demote = Some(it.next().unwrap_or_else(|| usage())),
             "--out" => a.out = Some(it.next().map(PathBuf::from).unwrap_or_else(|| usage())),
             "--baseline" => {
                 a.baseline = Some(it.next().map(PathBuf::from).unwrap_or_else(|| usage()))

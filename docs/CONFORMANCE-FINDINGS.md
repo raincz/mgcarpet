@@ -10198,3 +10198,93 @@ castle pipeline. The wizext +326 charge byte (the upgrade ball's
 +26 stamp source) is not decoded at all — add it to the wizard
 decode + diff while there. Expect a new row family on first run
 (f26 was never compared); triage before trusting.
+
+# THE f26 + CHARGE RAW LANES LANDED (2026-08-13, the surfacing session)
+
+**The banked ask above is DELIVERED — two new comparison lanes ride
+the RAW state channel (the obs schema is check-decode-locked, so
+they take the same lane the hands ride, `append_charge_diffs`):**
+
+- **Per-entity `f26`** — the castle level / establishment lane, the
+  token burst counter, the charge stamp. Class-12 rows compare
+  retail **+48** (the port keeps a manifestation's burst counter in
+  f26; retail's +26 is the spell level there — `import_ent`'s own
+  mapping). Port side exported by `World::charge_lane_mc1`.
+- **wizext +326 (`charge`)** — decoded into `RetailWizardMc1` and
+  MODELED in the port: `World::wiz_charge[8]`, +1 per live carpet
+  tick to a 200 cap (human :55377-78, rival :17987-89, each in its
+  own handler right before the mana-regen step), seeded at import
+  like the regen stall, **consumed by exactly the arms the
+  decompile shows touching +326**: fireball :65072-73 (spells 0/23),
+  earthquake :65356, meteor :65414, volcano :65472 bank the meter in
+  the new bolt's +26 and zero it; possess :65246 zeroes WITHOUT
+  stamping (its bolt carries the forced 200). Crater/duel/steal/
+  magnet/bolt never touch it. Same stamps on the rival emit path
+  (same class-12 spawners). Hash-quiet + not in the savestate (no
+  in-engine reader); the L005 golden D/E re-pin is the HASHED bolt
+  f26 stamp alone — post-init..C hold, OBSERVABLE holds
+  byte-for-byte.
+
+**mc1l0 (7,097 pairs): the new lanes are PURELY ADDITIVE — every old
+family byte-identical, unexplained 136 → 2,081 field rows, all new:**
+
+| family | rows / pairs | reading |
+|---|---|---|
+| (12,3) f26, slot 139 | 854 | HUMAN possess manifestation (f42=630): burst-counter CYCLE PHASE skew — retail counts 3→2→1→0, port cycles offset 1-2 ticks |
+| (12,0) f26, slot 305 | 782 | HUMAN fireball manifestation: same cycle-phase class |
+| (9,1) f26 | 234 (all `16→200`) | retail's possess lob/possessed ball carries +26=16 (the drain-period constant); the port carries the spawner's forced 200 — post-claim +26 law unmodeled |
+| (12,16) f26, slot 28 | 44 | ⭐ the CASTLE manifestation's cast/lockout state machine ({0,100,101}) — rows sit EXACTLY on the castle timeline (559-606, 802-805, 1138-1294, 1761-1925, 2158-2515, 3845-3897, incl. t=1807/1830 = castle A's death window and t=1870 the recast): the port arms/releases its 100-lockout on different TICKS than retail's 101, plus an armed-value off-by-one (100 vs 101) |
+| wizard0.charge | 12 | cast-tick consume skew (retail 1 vs port 200 = port missed the cast that pair; small values = port cast n ticks early) — same phase story as (12,x) |
+| (9,10) 8, (9,0) 6, (5,12) 1 | 15 | minor; (9,0)'s `16→…` repeats the in-flight-16 signature |
+
+**⭐ THE CASTLE HEADLINE: castle (3,2) f26 has ZERO rows — the
+castle LEVEL conforms on all 7,097 pairs.** Within-pair castle
+leveling/establishment is exact; the replay's castle-A drift stays a
+free-run phenomenon, and the (12,16) lockout skew is the only
+castle-pipeline residue the pair harness can see.
+
+**mc1l1/l2/l5 refreshed (baselines mc1l1/l2/l5.tsv):** l1 +5,386
+f26 / +2,986 charge, l2 +9,063 / +4,103 + 1,206 rival.charge, l5
++44,113 / +9,104 + 3,061 rival.charge. Reading: honest new dials on
+the KNOWN cast-cadence/phase skew of the messy takes — l1's retail
+meter cycles 0/2/3 (firehose take, zeroed every emission) vs the
+port's offset cycle; first-cast rows (e.g. l1 t=46 `0→65`) are the
+meter's level-start climb consumed one tick apart. NOT harness
+noise.
+
+**Fixture fallout (NOT re-frozen — player call):** mc1l0 65
+regressions + 5 drifted, mc1l32 119+7, mc1l32-bee-height 26+6,
+mc1l5 56+16, mc1hwl0 383+18 — every one a new-lane row on a
+previously-conforming pair (the pre-authorized noise: "the new rows
+are the deliverable"). ⚠ mc1hwl0's bulk is a NEW family: **(10,18)
+f26** — an HW effect-counter lane, uncharacterized. MC2 suites
+untouched by construction: 5/5 green, 0 regressions.
+
+**OPEN (categorize+ask, in ask order):** ① the (12,0)/(12,3) human
+burst-counter cycle phase — one cast-arm phase story or a counter
+law? ② the (12,16) castle lockout arm ticks + 100-vs-101; ③
+suite doctrine for the 649 new-lane reds (re-freeze with attribution
+vs hold red until the phase digs land); ④ (9,1) post-claim +26=16;
+⑤ mc1hwl0 (10,18) f26; ⑥ possess-family +50=3 note: slot 139
+carries +50=3 (emit at counter==3) — the port fires at count, worth
+a look during ①.
+
+## ADDENDUM (same session): SUITE DOCTRINE RULED + THE DEMOTE FLAG
+
+**⚖ PLAYER RULING on open question ③:** the 649 new-lane reds were
+never truly conforming — the comparison simply didn't cover the
+lanes at freeze time. Mark them as what they are. **Landed:**
+`fixtures --demote <note>` — the deliberate twin of `--promote`:
+acknowledges regressions as OPEN with the signature recorded and
+the note appended (existing curation notes are kept, the
+attribution is appended). All five MC1 suites re-frozen with note
+"f26/charge raw-lane surfacing — lanes not compared at freeze":
+mc1l0 65 demoted + 5 drift-refreshed, mc1l32 119+7, bee-height
+26+6, mc1l5 56+16, mc1hwl0 383+18. Confirmation pass: **10/10
+suites fully as-expected, 0 regressions / 0 drifted.**
+
+**Ordering ①/② left to the port (player): ① first** — the
+(12,0)/(12,3) cycle-phase story is the bulk and the castle
+lockout's arm-tick skew (②) most likely shares the cast-arm phase
+root; ② gets the 100-vs-101 armed-value check during the same dig.
+④/⑤ deferred until ①/② settle (player ruling).

@@ -698,6 +698,17 @@ pub struct World {
     /// The human player's spell/mana state (spells cast through the
     /// per-hand dispatcher, sub_46B00_46E40 :55851).
     pub(crate) player: Player,
+    /// MC1 per-wizard cast-charge meters (Type_160 u8_326), index =
+    /// wizard slot (0 = the human). +1 per live carpet tick to a 200
+    /// cap (human :55377-78, rival :17987-89); the manifestation bolt
+    /// spawners for fireball/earthquake/meteor/volcano move the
+    /// owner's meter into the new bolt's +26 and zero it (:65072-73
+    /// and siblings; possess :65246 forces the bolt's 200 but still
+    /// zeroes). No surviving in-engine READER of the meter or the
+    /// bolt's +26 is known — modeled so the conformance raw lane can
+    /// compare both (see mgc-conform `append_charge_diffs`) — so the
+    /// meters stay hash-quiet and out of the savestate.
+    pub(crate) wiz_charge: [u8; 8],
     /// Live AI wizards (player slots 1..=7) — see [`crate::mc1::rivals`].
     pub(crate) rivals: Vec<crate::mc1::rivals::Rival>,
     /// Live MC2-column AI wizards (colors 1..player_count) — see
@@ -1398,6 +1409,7 @@ impl World {
             invincible: false,
             rivals: Vec::new(),
             mc2_rivals: Vec::new(),
+            wiz_charge: [0; 8],
             kill_tally: [[0; 8]; 8],
             start_markers,
             human_pose: (0, 0, 0),
@@ -3196,6 +3208,12 @@ impl World {
                     }
                 }
             }
+            // The cast-charge meter (u8_326): +1 per live carpet
+            // tick, saturating at 200 (:55377-78) — sits between the
+            // mailbox block and the regen block exactly like retail.
+            if matches!(self.game, GameId::Mc1 | GameId::Mc1Hw) && self.wiz_charge[0] < 200 {
+                self.wiz_charge[0] += 1;
+            }
             // Health regen (:55381-421): stalled 16 ticks by every
             // processed hit, then maxLife/250 per tick at the own
             // castle OR on a dolmen shrine (the same fork as the mana
@@ -4182,6 +4200,10 @@ impl World {
             player,
             rivals,
             mc2_rivals,
+            // Conformance-only meters with no in-engine reader
+            // (import-reseeded every pair) — hash-quiet like the
+            // cast-arm hand bits above.
+            wiz_charge: _,
             kill_tally,
             human_pose,
             // A one-tick echo of the (hashed) pose stream, fully
@@ -4729,6 +4751,10 @@ impl World {
         // corpus: fireball 40, not the 200 total).
         e.f44 = def.damage.min(u16::MAX as u32) as u16;
         e.f140 = (def.possess_mana / def.count.max(1) as u32) as i32;
+        // The charge move (:65072-73): the spawner banks the caster's
+        // accumulated meter in the bolt's +26 and zeroes it.
+        e.f26 = self.wiz_charge[0] as i16;
+        self.wiz_charge[0] = 0;
         self.entities_dirty = true;
     }
 
@@ -4833,6 +4859,19 @@ impl World {
             // Player bolts detonate as the hit flash, like the mob
             // zigzags (:63421- endpoint effect 23).
             15 => e.f69 = 23,
+            _ => {}
+        }
+        // The charge move: of this family only earthquake (:65356),
+        // meteor (:65414) and volcano (:65472) bank the caster's
+        // meter in the bolt's +26; possess zeroes WITHOUT stamping
+        // (:65246 — its forced 200 is set above). The other arms
+        // (crater/duel/steal/magnet/bolt) never touch +326.
+        match id {
+            6 | 7 | 8 => {
+                self.g.ent[pr].f26 = self.wiz_charge[0] as i16;
+                self.wiz_charge[0] = 0;
+            }
+            3 => self.wiz_charge[0] = 0,
             _ => {}
         }
         self.entities_dirty = true;
@@ -10446,6 +10485,9 @@ impl World {
             player,
             rivals,
             mc2_rivals,
+            // Not saved: no in-engine reader; a restored world's
+            // meter re-ramps to the 200 cap within 200 ticks.
+            wiz_charge: _,
             kill_tally,
             human_pose,
             // Re-derived on the first tick after a restore (prev :=

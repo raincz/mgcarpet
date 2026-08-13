@@ -467,6 +467,12 @@ impl World {
             ..Player::default()
         };
 
+        // Per-wizard cast-charge meters (Type_160 u8_326) — seeded
+        // like the regen stall: unseeded, every bolt spawned inside a
+        // pair would bank a made-up charge in its +26.
+        for (i, w) in st.wizards.iter().enumerate().take(8) {
+            self.wiz_charge[i] = w.charge;
+        }
         // World-level latches: cleared like retail's load discards its
         // mode block; the tick mailboxes must not leak across pairs.
         self.human_pose = (carpet.x, carpet.y, carpet.z);
@@ -624,6 +630,25 @@ impl World {
             player,
             entities,
         }
+    }
+
+    /// The conformance RAW-lane projection: per-slot f26 (the burst/
+    /// level lane) plus the per-wizard charge meters. These never
+    /// entered the recorder's obs schema (adding them would break
+    /// `check-decode` against the whole corpus), so the comparator
+    /// reads them from the raw state channel instead — this is the
+    /// port-side half of that comparison.
+    pub fn charge_lane_mc1(&self) -> (Vec<(u16, i16)>, [u8; 8]) {
+        let f26 = self
+            .g
+            .ent
+            .iter()
+            .enumerate()
+            .skip(1)
+            .filter(|(_, e)| e.class64 != 0)
+            .map(|(s, e)| (s as u16, e.f26))
+            .collect();
+        (f26, self.wiz_charge)
     }
 
     /// Apply a decoded MC2 retail closure onto this (already-built,

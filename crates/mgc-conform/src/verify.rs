@@ -260,6 +260,7 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     stats.absorb_phase(&pst, &obs, &port, report.human_slot);
                     let mut pd = compare(&obs, &port, report.human_slot);
                     append_hand_diffs(&mut pd, &st, &port, pst.local_player as usize);
+                    append_charge_diffs(&mut pd, &st, &world, report.human_slot);
                     let pd = pd;
                     let mut tags = (roster.is_some() || !args.no_pose_alt).then(|| {
                         let rmap: BTreeMap<u16, &EntObsMc1> =
@@ -589,6 +590,57 @@ pub(crate) fn append_hand_diffs(pd: &mut PairDiff, st: &RetailMc1, port: &ObsMc1
     }
 }
 
+/// The RAW-lane rows (player ask 2026-08-13): per-entity `f26` — the
+/// castle LEVEL / establishment lane, until now invisible except via
+/// mana_max — and the per-wizard +326 cast-charge meters. Neither
+/// ever entered the recorder's obs schema (which is check-decode-
+/// locked against the corpus), so they ride the raw state channel
+/// like the hands above. Class-12 rows compare retail +48: the port
+/// keeps a manifestation's burst counter in f26 (retail's +26 is the
+/// spell level there — unmodeled, see `import_ent`).
+pub(crate) fn append_charge_diffs(
+    pd: &mut PairDiff,
+    st: &RetailMc1,
+    world: &World,
+    human_slot: u16,
+) {
+    let (f26, charge) = world.charge_lane_mc1();
+    let port: BTreeMap<u16, i16> = f26.into_iter().collect();
+    for (slot, e) in st.ents.iter().enumerate().skip(1) {
+        let slot = slot as u16;
+        if e.class64 == 0 || slot == human_slot {
+            continue;
+        }
+        // Slots absent on either side are the missing/extra story.
+        let Some(&got) = port.get(&slot) else {
+            continue;
+        };
+        let want = if e.class64 == 12 { e.f48 as i16 } else { e.f26 };
+        if want != got {
+            pd.fields.push(FieldDiff {
+                slot: Some(slot),
+                field: "f26",
+                want: want.to_string(),
+                got: got.to_string(),
+            });
+        }
+    }
+    for (i, w) in st.wizards.iter().enumerate().take(8) {
+        if w.charge != charge[i] {
+            pd.fields.push(FieldDiff {
+                slot: None,
+                field: if i == 0 {
+                    "wizard0.charge"
+                } else {
+                    "rival.charge"
+                },
+                want: w.charge.to_string(),
+                got: charge[i].to_string(),
+            });
+        }
+    }
+}
+
 /// The measured height/type planes — plus the cave CEILING when the
 /// take declares it — for pair execution, when the recording's
 /// format-2 terrain channel has anchored the accumulator (a
@@ -646,6 +698,7 @@ pub(crate) fn exec_pair(
     let port = world.obs_project_mc1(&pin);
     let mut pd = compare(obs, &port, report.human_slot);
     append_hand_diffs(&mut pd, st, &port, pst.local_player as usize);
+    append_charge_diffs(&mut pd, st, world, report.human_slot);
     Ok((pd, port, report.human_slot))
 }
 

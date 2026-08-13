@@ -558,6 +558,13 @@ impl World {
         // Movement (sub_14EB0 :18780).
         self.rival_movement(ri, i);
 
+        // The cast-charge meter (u8_326): +1 per live rival tick,
+        // saturating at 200 (:17987-89) — right before the regen
+        // block, exactly like retail's rival handler.
+        let ws = self.rivals[ri].slot as usize;
+        if self.wiz_charge[ws] < 200 {
+            self.wiz_charge[ws] += 1;
+        }
         // Regen (:17990-18021): mana += delta then recompute; life
         // regen at the AI's own (faster) rates. The dolmen-shrine
         // flag (+17 0x10, our 0x1000 — stamped by the dolmen's
@@ -2235,6 +2242,20 @@ impl World {
                 e.f69 = 25;
             }
             15 => self.g.ent[pr].f69 = 23,
+            _ => {}
+        }
+        // The charge move — the AI's manifestations run the SAME
+        // class-12 spawners as the human's: fireball (:65072-73),
+        // meteor (:65414) and volcano (:65472) bank the rival's
+        // u8_326 meter in the bolt's +26; possess zeroes without
+        // stamping (:65246). The other rival arms never touch +326.
+        let ws = self.rivals[ri].slot as usize;
+        match s {
+            0 | 7 | 8 => {
+                self.g.ent[pr].f26 = self.wiz_charge[ws] as i16;
+                self.wiz_charge[ws] = 0;
+            }
+            3 => self.wiz_charge[ws] = 0,
             _ => {}
         }
         self.entities_dirty = true;
