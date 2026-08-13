@@ -9973,3 +9973,228 @@ self-destruct chain is now retail's. The free-run wall remains
 pose.z t=563 (the mid-walk restructure) — the worm-kill segment sits
 far behind it and needs that wall down before the replay shows the
 kill.
+
+# THE PROBE RING + THE CASTLE BALL'S TWO ARMS + THE THUNK MUZZLE (2026-08-13) — ✅ mc1l0 −58%, FOUR LAWS
+
+**mc1l0: conforming pairs 5,983 → 6,007, unexplained field rows 322 →
+136 (−58%), missing 46 → 42, extra 2 → 1. Cross-level: mc1l5 200,306
+→ 171,099 (−29.2k), mc1l1 15,974 → 15,629, mc1l2 31,897 → 31,447.
+The (9,10)+(10,43) castle-ball block is DEAD (60 → 0), (5,3) 119 →
+52, (9,0) 62 → 18. 406 mgc-sim tests (2 new pins), 10/10 suites 0
+regressions, L005 goldens D/E re-pinned (OBSERVABLE moved D/E only —
+correct signal, behavior by design).**
+
+## 1. THE MUZZLE-ACQUIRE 34-STEP IS STORED RAW (:62824)
+
+The fireball's one-shot acquire, on a HIT, turns yaw ≤34 toward the
+pick and stores the sum UNMASKED — a step across 0 parks an
+out-of-range u16 in +30 for a tick (t=2739: 65512 = −24; port masked
+2024 = same angle). Every consumer masks on read; the next homing
+write canonicalizes (sub_52550 masks, `HIBYTE &= 7`). Worth 4 rows.
+Pin: `the_muzzle_acquire_34_step_stores_the_heading_raw`.
+
+## 2. A THUNK BOLT AIMS FROM THE UNLIFTED MUZZLE AND IS BORN WITH +34/+36 = 0
+
+Every creature thunk (sub_1A8E0 :21874 and its whole family,
+:21893/:21922/:21949/:22120/:22153/:23257/:25855, ×4-lift :26171,
+seeker :24693) computes BOTH bearings from the SHOOTER's +72 struct —
+the muzzle lift `+76 += +84` never enters the aim — and none writes
++34/+36 (NewEvent zeroes them; the first homing/arm tick fills them).
+The port aimed from the lifted z and mirrored f34/f36 at the arm.
+`arm_projectile` now takes the lift and applies it AFTER the aim.
+ALSO settled here: the four "want 0" pairs (t=3051/3081/4194/4254)
+are the WALK-CURSOR law, not a latch — a creature-cast bolt born
+BEHIND the ascending walk cursor (caster slot > bolt slot) never
+ticks on its spawn tick, so retail surfaces it with target_yaw 0 and
+the ctor pitch; player casts spawn from the carpet's walk position
+and tick the same pass when they land ahead. The port's natural
+ascending walk already models this once the ctor stops pre-arming.
+Pin: `a_thunk_bolt_aims_from_the_unlifted_muzzle_and_is_born_with_zero_target_yaw`.
+
+## 3. THE MC1 PROBE WINDOW IS RETAIL'S RING (held-back #2 LANDED, per-game seam)
+
+`victim_scan` (sub_11980 :16999-17001) and `claim_victim_scan`
+(sub_108B0 EF:3798-3802) now walk the SEARCH.DAT ring iterator over
+the `(pos + 128) >> 8` rounded centre with NO radius floor on
+MC1/HW — retail's exact forward-biased narrow window, matching
+retail's ONE-probe-per-move cadence which the MC1 movers already
+had. The probe-cadence dig resolved to: **MC1 movers never march**
+(endpoint-only `victim_scan_at`), so the ring is retail-exact there
+with no compensation needed; the chord march is MC2's alone
+(mc2/proj.rs ≤128-unit sub-steps, the anti-tunnel deviation), so
+MC2 KEEPS the truncated-centre square + `.max(1)` floor as the
+march's compensating window — the five 2026-08-12 pin casualties
+(fools-trap muzzle, meteor homing lock, arrow collateral, two
+muzzle-admission guards) all survive because MC2 is untouched. The
+seam is `Gen::probe_window` (game-keyed on the movement verb). The
+forfeited mc2l4/mc2l30 ring pairs (+1/+2) stay forfeited with the
+march, documented at the seam. Worth −114 rows / +8 pairs on mc1l0
+alone, zero new rows.
+
+## 4. THE CASTLE BALL'S TWO ARMS SPLIT ON +146, AND THE CTOR BINDS ROW [1]
+
+sub_53980 (:63459) dispatches on the TARGET, not the model: a castle
+ball with a homing slot in +146 (the upgrade cast stamps the bound
+castle, :65906-08) runs the HOMING arm — sub_52610 every tick (the
+twin WITHOUT the aim-lift wrap: bearing to the target's RAW z), ±2
+speed ease, arrival on plain OVERLAP (blind — no class/dead guard)
+teleports onto the target, terrain touch delivers in place, life
+decrements only AIRBORNE (:63494-96 short-circuit), and the launch
+latch (+16 bit 1) is NEVER touched — the corpus balls fly with flags
+4 throughout (t=2174-77). Delivery morphs into (+68, +69) at the
+current position, owner-stamped; a class-3 morph is REFUSED when the
+owner already holds a bound castle (:63500-04, wizext+50); a FULL
+POOL releases the owner's m16 charge pin instead of killing the ball
+(:63513-15 — it retries next tick). +146 = 0 falls to the sub_53B50
+create arm (dest +150 steering, the launch latch, the site scans —
+the port already had this arm right). The port had routed BOTH
+variants through the create arm, so the per-pair upgrade ball
+steered at IMPORTED ZEROS (+150 is never written by the upgrade
+cast — dest_x 0 in every record) and stamped the latch bit: the
+whole (9,10) 56-row + (10,43) 4-row block. ALSO: sub_39F40 binds
+`unk_98F38[1]` (:46185) — the port's ctor bound row 0; the recorded
+ball's model_ptr resolves to row [1] (anchor: the player fireball's
+row [5]).
+
+## REMAINING mc1l0 (136 field rows) — catalogued for the NEXT digs
+
+1. **(5,3) 52 = the t=2978 TERRAIN-SHADOW burst** (55 rows one tick,
+   whole worm chain, sub-pixel x/y + heading/pitch ±1-40): every
+   segment also carries EXPLAINED `mc1l0-terrain-z` rows — the
+   knock-on that rule's own note predicts ("walker x/y/heading
+   knock-on stays UNexplained"). A mid-tick terraform writer is the
+   terrain channel's documented blind spot. Classification decision
+   (categorize+ask): extend the rule vs leave catalogued — ASK.
+2. **(10,39) 37** (ball flight residue) + **(9,0) 18** (2978
+   collateral, 3005-3127 sub-pixel drift band, t=4285, t=5026).
+3. **THE t=3855 ECOLOGY BURST: 39 missing (2,0) TREES in one tick**
+   (+ 3 missing (2,1) at t=1883). Retail mass-plants; the port has
+   NO tree-reproduction/ecology spawner for MC1 (tree_tick handles
+   damage/burn only; retail's sub_49890 likewise — the spawner is
+   elsewhere, dig wanted: find sub_37BC0's periodic caller).
+4. **t=5026 (5,12) rand divergence** (slot 640: rand + heading +
+   target_yaw + x/y, one draw off) with (9,0) 785 collateral.
+5. The t=1187 (3,2) life−100 capture-point row (held open, 1 row).
+
+## RECEIPTS
+
+Pins: `the_muzzle_acquire_34_step_stores_the_heading_raw`,
+`a_thunk_bolt_aims_from_the_unlifted_muzzle_and_is_born_with_zero_target_yaw`.
+The worm-chain test now aims PITCH at the head too (the level-only
+aim left the kill to the dive phase; the deterministic chase settles
+into orbits that never present one — second occurrence of this
+phase-sensitivity, after the class-10 fire fix). L005 GOLDEN +
+OBSERVABLE D/E re-pinned with attribution (post-init..C hold both).
+406 mgc-sim, workspace green, fmt + clippy clean, 10/10 suites 0
+regressions. Repo-root mc1l0/l1/l2/l5.tsv baselines refreshed.
+
+⭐ REPLAY NOTE: free-run wall holds at pose.z t=563 (unchanged — the
+mid-walk restructure lane). Post-wall traffic benchmark for the
+fraction-of-a-second castle-destruction lateness: 18,351 pose rows /
+96,212+356,706 set atoms / 1,469,581 field rows (record here, compare
+after each block; no prior benchmark existed).
+
+## ADDENDUM (same session): THE CASTLE TIMELINE GROUND TRUTH + THE BOUND-CASTLE CAST DISCRIMINATOR
+
+**The player's either/or on the replay's castle lateness ("demolition
+too slow at ~2100" vs "the 1750 castle was never meant to reach L3")
+is settled by the state channel — NEITHER, exactly: the retail castle
+NEVER LEVELS AT ALL in this era.** Dump-state ground truth (slots
+533/107, t=1765-2420):
+
+- t=1765 castle A raised at tile (132,90), establishes to f26=1 /
+  cap 10000 by t=1780 (kills the worm on the footprint).
+- t=1800-1830 **castle A is KILLED**: life 20000 → 0 inside ~15
+  ticks (monster-fight class — the snowballing single-target melee
+  scale), −100 death stamp at t=1830 (= the (10,39) dig's t=1830
+  teardown), slot freed t=1832. The player's recollection has no
+  castle death here — the record does.
+- t=1880 cast: with NO castle standing this is a CREATE — castle B
+  rises at tile (148,104), 16 tiles away, level 1. The t=1910
+  "makes no sense" cast produced NO ball at all (fizzled in
+  retail).
+- t=2159-2177: two UPGRADE balls home at B (f146=107, today's
+  homing-arm corpus), tokens deliver, and B STAYS level 1 / cap
+  10000 — bank 8302 < the 10000 ladder; delivery without a full
+  bank does not level (the port matches per-pair: 0 rows).
+- t=2310 Shift+L kills B (life −1, the balloon-session date);
+  t=2350 castle C rises at tile (169,77) — the worm hill — legal
+  because B is GONE.
+
+⇒ The REPLAY's L3-castle-blocks-everything story hinges on ONE
+load-bearing event: **castle A must die at t≈1830.** In the drifted
+free run the fight goes elsewhere, A survives, and the t=1880/1910
+recasts become UPGRADES on a standing bound castle — L2/L3 at site
+A, no move to B, the 2350 site-C cast blocked by the stub, and the
+rng stream diverges from there (the player's shore-worm hunch).
+Demolition cadence is EXONERATED (per-pair clean through the whole
+window; there is only one Shift+L kill of an L1 castle to
+reproduce). This family converges only as pre-1880 drift falls —
+same lane as the pose.z t=563 wall, not a castle law.
+
+**One genuine law landed from the dig:** the cast's create-vs-
+upgrade split reads **wizext+50 — the BOUND castle** (:65893-94),
+not "any owned (3,2)": +50 is written only by the level-up commit
+(:56484) and cleared by the removal path (:56534), so a fresh
+level-0 flag is UNBOUND and a recast over it re-SITES. The port's
+`cast_castle` used any-live-castle; it now filters on the
+established stand-in (f26 > 0, the same stand-in the upgrade
+token's delivery resolves). Corpus-NEUTRAL by construction (at
+every recorded cast both discriminators agree — verified: mc1l0
+byte-identical, 10/10 suites, all tests green); the arm it fixes is
+native/free-run recasts over an unestablished flag and the
+death-notice window.
+
+## ADDENDUM 2 (same session): CASTLE A'S DEATH IS A TWO-TICK CREATURE KILL + THE DEMOLISH READS wizext+50 + THE FIRE-RAND MASK RE-ATTRIBUTED
+
+**Correction to Addendum 1's "monster-fight class" guess AND the
+player's "I killed the castle" recollection — the tick-exact trace
+settles the mechanism:** castle A holds 20000 life through t=1807,
+drops to EXACTLY 0 by t=1810 (one hit ≥ 20000, clamped — the
+TWO-TICK castle death law's first tick), parks at 0 for ~20 ticks
+while balloons keep banking (280 → 1260), and dies to a second
+100-damage bite at t=1830 (−100 stamp, f26 → 0, bank scattered).
+That is the SNOWBALLING single-target melee protocol delivering an
+accumulated ~20k residue as bite 1, and a plain 100 as bite 2 — a
+creature kill, NOT a demolition. Retail's Shift+L (:55838,
+`if (wizext->var_50) pool[var_50].actLife = -1`) is an INSTANT −1
+and never produces this shape. ⇒ the free replay's castle-A
+survival is snowball-residue drift sensitivity (the residue history
+rides the whole worm fight), not a demolish defect; converges with
+the drift lanes. Demolition remains exonerated.
+
+**Landed:** the MC1 demolish arm now resolves the BOUND castle
+(wizext+50, established stand-in f26 > 0) like retail — the same
+discriminator the cast split got in Addendum 1; the port had
+any-owned-castle. Corpus-NEUTRAL (recorded demolish t=2310 targets
+the established castle B under both rules — take byte-identical,
+10/10 suites, tests green). An unestablished flag can no longer be
+demolished natively.
+
+**The `mc1hw-fire-churn-rand` mask is RE-ATTRIBUTED (player
+challenge, measured):** its "a DIFFERENT fire occupies the slot"
+story fits ZERO of the 148 currently-masked mc1l0 pairs — none has
+x/y rows; 130 ride with an mc1l0-terrain-z sibling, 18 stand alone.
+Measured at t=1768 slot 555 (seed-stepped): SAME fire, SAME
+position, retail draws 2 per-entity LCG steps on the latch tick,
+the port 1 — the SCORCH GATE (:28095-98, `z − ground ≤ 128` term)
+flips on the terrain closure's divergent ground sample. Draw parity
+is per-entity (no global cascade), but the flipped scorch also
+skips/adds a dig_scorch TERRAIN write — the flip feeds the terrain
+closure forward in free run. Rule note rewritten; stays OPEN with
+the terrain-phase dig as parent (the port's fire draw structure
+matches :28085-28118 line-for-line).
+
+**BANKED (player ask, next session): add the castle-parameter lanes
+to the verify CSV.** The wizard channel already diffs the raw
+wizext+50 against the port's established stand-in (`wizard0.castle`
+/ `player.castle` — a live cross-check of today's discriminator),
+but **entity +26 (f26) is NOT in the per-entity diff set**: a castle
+LEVEL / establishment-timing divergence only surfaces indirectly
+through mana_max (the CASTLE_CAP ladder), and f26 also carries the
+token charge, the fire's spread gate and the class-2 slot stamp —
+cheap to add (export + one cmp_field), high signal for the whole
+castle pipeline. The wizext +326 charge byte (the upgrade ball's
++26 stamp source) is not decoded at all — add it to the wizard
+decode + diff while there. Expect a new row family on first run
+(f26 was never compared); triage before trusting.

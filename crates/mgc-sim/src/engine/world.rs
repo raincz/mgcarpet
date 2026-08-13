@@ -2069,9 +2069,13 @@ impl World {
             ((self.player.mana_max / 2000) as i32).max(100)
         };
         if alive && cmd.demolish {
-            // dw_0 == 48 exactly (:55837-39): own castle to −1, both
-            // cast calls skipped.
-            if let Some(c) = self.player_castle() {
+            // dw_0 == 48 exactly (:55837-39): the BOUND castle to −1
+            // (`if (wizext->var_50) pool[var_50].actLife = -1` — the
+            // wizext+50 resolve, NOT any owned (3,2); the same
+            // discriminator as the cast's create-vs-upgrade split).
+            // An unestablished flag cannot be demolished. Both cast
+            // calls skipped.
+            if let Some(c) = self.player_castle().filter(|&c| self.g.ent[c].f26 > 0) {
                 self.g.ent[c].act_life = -1;
             }
         } else if alive {
@@ -5406,7 +5410,18 @@ impl World {
     pub(crate) fn cast_castle(&mut self, p: PlayerPose, right: bool) {
         use crate::mc1::combat::PLAYER_HH;
         let z = p.z.wrapping_add(PLAYER_HH as i16);
-        let castle = self.player_castle();
+        // The create-vs-upgrade split reads wizext+50 — the BOUND
+        // castle (:65893-94) — not "any owned (3,2)": +50 is written
+        // only by the level-up commit (:56484) and cleared by the
+        // removal path (:56534), so a fresh level-0 flag is UNBOUND
+        // and a recast over it re-SITES (create ball to the aim
+        // point) instead of upgrading. Stand-in = the owner's
+        // established (3,2), f26 > 0 — the same +50 stand-in the
+        // upgrade token's delivery resolves (mc1l0 ground truth:
+        // castle A dies t=1830, the t=1880 recast CREATES castle B
+        // 16 tiles away; the record's castles never level past 1
+        // here, an upgrade would have rebuilt in place).
+        let castle = self.player_castle().filter(|&c| self.g.ent[c].f26 > 0);
         let mc2 = matches!(self.game, GameId::Mc2);
         let (bx, by) = if mc2 || (self.patches.castle_latch_bug && !self.strict_retail) {
             (p.x, p.y)
@@ -11616,6 +11631,7 @@ mod tests {
             ground,
             780,
             0,
+            0,
         );
 
         w.g.proj_tick(b, &ctx);
@@ -12305,7 +12321,7 @@ mod tests {
         let mut w = flat_world();
         let (bx, by, bz) = (100 * 256, 100 * 256, (100i16 / 8 + 4) * 256);
         let b = w.g.spawn_slow_bolt(bx, by, bz).unwrap();
-        w.g.arm_projectile(b, 1, 3, 0xFF, 0, bx + 4096, by, bz, 780, 0);
+        w.g.arm_projectile(b, 1, 3, 0xFF, 0, bx + 4096, by, bz, 780, 0, 0);
         assert_eq!(w.g.ent[b].tick70, 15, "fixture must be state 15");
         w.g.sounds.clear();
         let ids = fly(&mut w);
@@ -12322,7 +12338,7 @@ mod tests {
         // retail asset reuse, not a bug to "fix".
         let mut w = flat_world();
         let a = w.g.spawn_bolt(bx, by, bz).unwrap();
-        w.g.arm_projectile(a, 1, 3, 0xFF, 0, bx + 4096, by, bz, 250, 0);
+        w.g.arm_projectile(a, 1, 3, 0xFF, 0, bx + 4096, by, bz, 250, 0, 0);
         assert_eq!(w.g.ent[a].tick70, 13, "fixture must be state 13");
         w.g.sounds.clear();
         let ids = fly(&mut w);
@@ -12378,7 +12394,7 @@ mod tests {
         let before = w.player.mana;
         // Fire from 3 tiles west, aimed at the player.
         let seeker = w.g.spawn_seeker(px - 3 * 256, py, pz).expect("seeker slot");
-        w.g.arm_projectile(seeker, 9, 3, 0xFF, PLAYER_TARGET, px, py, pz, 3000, 25);
+        w.g.arm_projectile(seeker, 9, 3, 0xFF, PLAYER_TARGET, px, py, pz, 3000, 25, 0);
         let mut min_mana = before;
         for _ in 0..12 {
             w.tick(pose, PlayerCommand::default());
@@ -14455,7 +14471,7 @@ mod tests {
             w.tick(firing_line(), PlayerCommand::default()); // burn spawn grace
         }
         let b = w.g.spawn_slow_bolt(bx, by, bz).unwrap();
-        w.g.arm_projectile(b, 1, 3, 0xFF, PLAYER_TARGET, ax, ay, az, 780, 0);
+        w.g.arm_projectile(b, 1, 3, 0xFF, PLAYER_TARGET, ax, ay, az, 780, 0, 0);
         w.g.ent[b].row156 = 6; // the throw site's row bind (:22122)
         let mut trailed = false;
         for _ in 0..300 {
@@ -14480,7 +14496,7 @@ mod tests {
             w.tick(firing_line(), PlayerCommand::default());
         }
         let b = w.g.spawn_slow_bolt(bx, by, bz).unwrap();
-        w.g.arm_projectile(b, 1, 3, 0xFF, 0, ax, ay, az, 780, 0);
+        w.g.arm_projectile(b, 1, 3, 0xFF, 0, ax, ay, az, 780, 0, 0);
         w.g.ent[b].row156 = 6;
         for _ in 0..200 {
             w.tick(firing_line(), PlayerCommand::default());
@@ -14549,18 +14565,24 @@ mod tests {
         // this test is about is that killing the HEAD corpses the whole
         // chain — not that a static pose can hit a moving target.
         let aim = |w: &World| {
+            use crate::engine::features::Gen;
             let mut p = firing_line();
             if let Some(h) =
                 w.g.ent
                     .iter()
                     .position(|e| e.class64 == 5 && e.model65 == 0)
             {
-                p.heading = crate::engine::features::Gen::angle_between(
-                    p.x,
-                    p.y,
-                    w.g.ent[h].x,
-                    w.g.ent[h].y,
-                );
+                let (hx, hy, hz) = (w.g.ent[h].x, w.g.ent[h].y, w.g.ent[h].z);
+                p.heading = Gen::angle_between(p.x, p.y, hx, hy);
+                // Pitch at the head too: the worm orbits well above
+                // the firing line, so a level-only aim leaves every
+                // kill to the dive phase — and the deterministic
+                // chase can settle into an orbit that never presents
+                // one (the muzzle-aim fix shifted the phase enough
+                // to show it, exactly like the class-10 fire fix
+                // before it).
+                let dh = Gen::isqrt(Gen::dist2_sq(p.x, p.y, hx, hy) as u32) as i32;
+                p.pitch = Gen::pitch_toward(p.z, hz, dh);
             }
             p
         };
@@ -20760,6 +20782,7 @@ mod tests {
                 ground + 512,
                 100,
                 0,
+                0,
             );
             (b, ground)
         };
@@ -20851,7 +20874,7 @@ mod tests {
         // FAR: 8 tiles ahead, dead center — d 2048, Δyaw 0.
         let far = creature(&mut w, 100 << 8, 92 << 8);
         let b = w.g.spawn_fireball(bx, by, bz).expect("bolt");
-        w.g.arm_projectile(b, PLAYER_TARGET, 0xFF, 0xFF, 0, bx, 92 << 8, bz, 100, 0);
+        w.g.arm_projectile(b, PLAYER_TARGET, 0xFF, 0xFF, 0, bx, 92 << 8, bz, 100, 0, 0);
         w.g.proj_tick(b, &ctx);
         assert_eq!(
             w.g.ent[b].f146, near as u16,
@@ -20859,6 +20882,96 @@ mod tests {
              (retail ~1.5M vs FAR's ~8.4M)"
         );
         let _ = far;
+    }
+
+    /// **THE MUZZLE-ACQUIRE 34-STEP IS STORED RAW.** On a HIT the
+    /// fireball turns at most 34 toward the pick and retail stores
+    /// the sum unmasked (:62824) — a step across 0 parks an
+    /// out-of-range u16 in +30 for a tick (mc1l0 t=2739: 65512 =
+    /// −24; the masked 2024 is the same angle, and every consumer
+    /// masks on read). Non-vacuous: the port used to mask at the
+    /// store.
+    #[test]
+    fn the_muzzle_acquire_34_step_stores_the_heading_raw() {
+        use crate::mc1::mobs::{MobCtx, PLAYER_TARGET};
+        let ctx = MobCtx {
+            px: 0,
+            py: 0,
+            pz: 0,
+            pyaw: 0,
+            pmana: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        let mut w = flat_world();
+        let (bx, by) = (100u16 << 8, 100u16 << 8);
+        let ground = w.g.ground_z(bx, by) as i16;
+        let bz = ground + 512;
+        // Candidate ~4 tiles out at bearing ~2000 (−48): inside the
+        // yaw cone from heading 10, but a >34 turn away.
+        let v =
+            w.g.spawn_creature(16, bx - 151, by - 1013, ground)
+                .expect("creature");
+        {
+            let e = &mut w.g.ent[v];
+            e.id24 = 0;
+            e.f58 = 100;
+            e.f78 = 0;
+            e.z = bz;
+        }
+        let b = w.g.spawn_fireball(bx, by, bz).expect("bolt");
+        w.g.arm_projectile(b, PLAYER_TARGET, 0xFF, 0xFF, 0, bx, 92 << 8, bz, 100, 0, 0);
+        w.g.ent[b].f30 = 10;
+        w.g.proj_tick(b, &ctx);
+        assert_eq!(w.g.ent[b].f146, v as u16, "the scan latches the pick");
+        assert_eq!(
+            w.g.ent[b].f30, 65512,
+            "10 − 34 is stored as the raw u16 −24, not masked to 2024"
+        );
+    }
+
+    /// **A THUNK BOLT AIMS FROM THE UNLIFTED MUZZLE AND IS BORN WITH
+    /// ZERO TARGET YAW.** Every creature thunk computes both bearings
+    /// from the SHOOTER's +72 struct and only then lifts the bolt's
+    /// +76 (`+76 += +84`, :21893 et al.), and none writes +34/+36 —
+    /// NewEvent zeroes them and the first homing/arm tick fills them
+    /// (mc1l0 t=3051/3081/4194: a bolt born behind the walk cursor
+    /// surfaces with target_yaw 0). Non-vacuous: the port used to aim
+    /// from the lifted z and mirror f34/f36 = f30/f32 at the arm.
+    #[test]
+    fn a_thunk_bolt_aims_from_the_unlifted_muzzle_and_is_born_with_zero_target_yaw() {
+        use crate::mc1::mobs::PLAYER_TARGET;
+        let mut w = flat_world();
+        let (bx, by) = (100u16 << 8, 100u16 << 8);
+        let ground = w.g.ground_z(bx, by) as i16;
+        let bz = ground + 512;
+        let b = w.g.spawn_fireball(bx, by, bz).expect("bolt");
+        // Target level with the muzzle, 8 tiles east; lift 400.
+        w.g.arm_projectile(
+            b,
+            PLAYER_TARGET,
+            0xFF,
+            0xFF,
+            0,
+            bx + 2048,
+            by,
+            bz,
+            100,
+            0,
+            400,
+        );
+        let e = &w.g.ent[b];
+        assert_eq!(e.f30, 512, "yaw dead east");
+        assert_eq!(
+            e.f32, 0,
+            "pitch is the level bearing from the UNLIFTED muzzle (the \
+             lifted aim would pitch down)"
+        );
+        assert_eq!(e.z, bz + 400, "the lift still lands on +76");
+        assert_eq!(e.f34, 0, "target yaw is born 0 (no ctor mirror)");
+        assert_eq!(e.f36, 0, "target pitch is born 0 (no ctor mirror)");
     }
 
     /// **BUCKET[0] HAS NO MODEL FILTER, AND THE OWNER ROW'S v_28
@@ -20901,7 +21014,7 @@ mod tests {
             e.z = bz;
         }
         let b = w.g.spawn_fireball(bx, by, bz).expect("bolt");
-        w.g.arm_projectile(b, PLAYER_TARGET, 0xFF, 0xFF, 0, bx, 92 << 8, bz, 100, 0);
+        w.g.arm_projectile(b, PLAYER_TARGET, 0xFF, 0xFF, 0, bx, 92 << 8, bz, 100, 0, 0);
         w.g.proj_tick(b, &ctx);
         assert_eq!(
             w.g.ent[b].f146, balloon as u16,
@@ -20929,7 +21042,7 @@ mod tests {
                 e.z = bz;
             }
             let b = w.g.spawn_fireball(bx, by, bz).expect("bolt");
-            w.g.arm_projectile(b, owner as u16, 0xFF, 0xFF, 0, bx, 90 << 8, bz, 100, 0);
+            w.g.arm_projectile(b, owner as u16, 0xFF, 0xFF, 0, bx, 90 << 8, bz, 100, 0, 0);
             w.g.proj_tick(b, &ctx);
             assert_eq!(
                 w.g.ent[b].f146 == balloon as u16,
@@ -20985,6 +21098,7 @@ mod tests {
             ground + 512,
             100,
             0,
+            0,
         );
         w.g.proj_tick(b, &ctx);
         assert_eq!(w.g.ent[b].f146, v as u16, "acquired at the muzzle");
@@ -21022,6 +21136,7 @@ mod tests {
             92 << 8,
             ground + 512,
             100,
+            0,
             0,
         );
         w.g.ent[miss].f146 = 0;

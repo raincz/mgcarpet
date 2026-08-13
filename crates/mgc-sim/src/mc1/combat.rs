@@ -675,6 +675,18 @@ impl Gen {
     /// Aim a fresh projectile from an attacker at a target point
     /// (sub_42150/42180 pair) and stamp the combat fields the thunks
     /// share: owner, filter, homing target, damage, explosion.
+    ///
+    /// Every retail thunk computes BOTH bearings from the SHOOTER's
+    /// +72 position struct — the muzzle lift lands on the
+    /// projectile's +76 separately (`+76 += +84`, :21893/:21922/
+    /// :21949/:22120/:22153/:23257/:25855, ×4 at :26171, and the
+    /// seeker's pre-bearing +76 write at :24693 still aims off the
+    /// shooter) — so the launch pitch is aimed from the UNLIFTED z.
+    /// The caller spawns at the shooter's z and passes the lift here.
+    /// +34/+36 are NOT written: NewEvent zeroes them and only the
+    /// first homing/arm tick fills them (corpus t=3051/3081/4194 —
+    /// a creature bolt born behind the walk cursor surfaces with
+    /// target_yaw 0).
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn arm_projectile(
         &mut self,
@@ -688,6 +700,7 @@ impl Gen {
         tz: i16,
         f44: u16,
         expl_model: u8,
+        lift: i16,
     ) {
         let (px, py, pz) = (self.ent[p].x, self.ent[p].y, self.ent[p].z);
         let yaw = Self::angle_between(px, py, tx, ty);
@@ -699,9 +712,8 @@ impl Gen {
         e.f67 = f67;
         e.f146 = target;
         e.f30 = yaw;
-        e.f34 = yaw;
         e.f32 = pitch;
-        e.f36 = pitch;
+        e.z = e.z.wrapping_add(lift);
         e.f44 = f44;
         e.f68 = 10;
         e.f69 = expl_model;
@@ -1089,38 +1101,34 @@ impl Gen {
             let e = &self.ent[i];
             (e.x, e.y, e.id24, e.f66, e.f67)
         };
-        let r = ((self.ent[i].f80 as i32 + 255) >> 8).max(1);
-        for dy in -r..=r {
-            for dx in -r..=r {
-                let tx = ((wx >> 8) as i32 + dx) as u8;
-                let ty = ((wy >> 8) as i32 + dy) as u8;
-                let mut j = self.map_entity[tile(tx, ty)] as usize;
-                while j != 0 {
-                    let c = &self.ent[j];
-                    // Class-14 map objects (MC2 XP scrolls, mouth/
-                    // checkpoint markers) are OBSERVABLE pass-through:
-                    // retail's probe admits them mechanically (the
-                    // (14,5) ctor keeps byte[0]&8, EF:37315/37365,
-                    // and a player bolt's xtype is the −1 wildcard)
-                    // but its ≈0-box, own-cell, endpoint-only probe
-                    // never reaches the scroll's 768/1280 PICKUP box
-                    // in practice (EF:63127-28 + Events.cpp:132 ring
-                    // 0). Our anti-tunneling ring + chord-march
-                    // (below/mc2 proj) WOULD reach it — the player's
-                    // "fireballs detonate on scrolls / scrolls steal
-                    // autoaim" report — so the guard restores the
-                    // retail observable (2026-07-16 scroll trace;
-                    // MC1 has no class-14, goldens untouched).
-                    if c.id24 != id
-                        && c.flags & 8 != 0
-                        && c.class64 != 14
-                        && Self::filter_admits(f66, f67, c.class64, c.model65)
-                        && self.ent_overlap(i, j)
-                    {
-                        return Some(MailTarget::Pool(j));
-                    }
-                    j = c.next20 as usize;
+        let r = (self.ent[i].f80 as i32 + 255) >> 8;
+        for t in self.probe_window(wx, wy, r) {
+            let mut j = self.map_entity[t] as usize;
+            while j != 0 {
+                let c = &self.ent[j];
+                // Class-14 map objects (MC2 XP scrolls, mouth/
+                // checkpoint markers) are OBSERVABLE pass-through:
+                // retail's probe admits them mechanically (the
+                // (14,5) ctor keeps byte[0]&8, EF:37315/37365,
+                // and a player bolt's xtype is the −1 wildcard)
+                // but its ≈0-box, own-cell, endpoint-only probe
+                // never reaches the scroll's 768/1280 PICKUP box
+                // in practice (EF:63127-28 + Events.cpp:132 ring
+                // 0). Our anti-tunneling ring + chord-march
+                // (below/mc2 proj) WOULD reach it — the player's
+                // "fireballs detonate on scrolls / scrolls steal
+                // autoaim" report — so the guard restores the
+                // retail observable (2026-07-16 scroll trace;
+                // MC1 has no class-14, goldens untouched).
+                if c.id24 != id
+                    && c.flags & 8 != 0
+                    && c.class64 != 14
+                    && Self::filter_admits(f66, f67, c.class64, c.model65)
+                    && self.ent_overlap(i, j)
+                {
+                    return Some(MailTarget::Pool(j));
                 }
+                j = c.next20 as usize;
             }
         }
         if id != PLAYER_TARGET && Self::filter_admits(f66, f67, 3, 0) && self.player_overlap(i, ctx)
@@ -1205,22 +1213,64 @@ impl Gen {
             let e = &self.ent[i];
             (e.x, e.y, e.id24)
         };
-        let r = ((self.ent[i].f80 as i32 + 255) >> 8).max(1);
-        for dy in -r..=r {
-            for dx in -r..=r {
-                let tx = ((wx >> 8) as i32 + dx) as u8;
-                let ty = ((wy >> 8) as i32 + dy) as u8;
-                let mut j = self.map_entity[tile(tx, ty)] as usize;
-                while j != 0 {
-                    let next = self.ent[j].next20 as usize;
-                    if self.claim_admits(j, id) && self.ent_overlap(i, j) {
-                        return Some(MailTarget::Pool(j));
-                    }
-                    j = next;
+        let r = (self.ent[i].f80 as i32 + 255) >> 8;
+        for t in self.probe_window(wx, wy, r) {
+            let mut j = self.map_entity[t] as usize;
+            while j != 0 {
+                let next = self.ent[j].next20 as usize;
+                if self.claim_admits(j, id) && self.ent_overlap(i, j) {
+                    return Some(MailTarget::Pool(j));
                 }
+                j = next;
             }
         }
         None
+    }
+
+    /// The projectile probe's cell window — the ONE seam where the
+    /// two games part (§THE HELD-BACK AREA FIXES, landed for MC1):
+    ///
+    /// - **MC1/HW: retail's geometry exactly.** `victim_scan`
+    ///   (sub_11980 :16999-17001) and its possession sibling walk
+    ///   `sub_11410(0, (+80 + 255) >> 8)` — the SEARCH.DAT ring
+    ///   iterator, forward-biased 2x2-anchored shells with the
+    ///   last-cell drop — over the centre rounded to the NEAREST
+    ///   tile (`(+72 + 128) >> 8`). No radius floor: a zero-extent
+    ///   bolt probes ring 0's own 2x2 block alone. Retail gets away
+    ///   with the narrow window because the MC1 mover probes ONCE,
+    ///   at the end of the move — which the port's MC1 movers also
+    ///   do (endpoint-only `victim_scan_at`).
+    ///
+    /// - **MC2: the port's inflated square window stays.** The MC2
+    ///   mover ray-marches the chord in ≤128-unit sub-steps (the
+    ///   documented anti-tunnel deviation for zero-width sprite
+    ///   boxes), and that march and the truncated-centre square with
+    ///   its `.max(1)` floor are ONE compensating family — measured
+    ///   2026-08-12: giving MC2 the retail ring cost five pinned
+    ///   fixtures (fools-trap muzzle, meteor homing lock, arrow
+    ///   collateral, two muzzle-admission guards) and mc2l4 t=621.
+    ///   They come out together or not at all (the +1/+2 mc2l4/
+    ///   mc2l30 ring pairs are forfeited with it, documented there).
+    fn probe_window(&self, wx: u16, wy: u16, r: i32) -> Vec<usize> {
+        if matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2) {
+            let r = r.max(1);
+            let mut out = Vec::with_capacity(((2 * r + 1) * (2 * r + 1)) as usize);
+            for dy in -r..=r {
+                for dx in -r..=r {
+                    let tx = ((wx >> 8) as i32 + dx) as u8;
+                    let ty = ((wy >> 8) as i32 + dy) as u8;
+                    out.push(tile(tx, ty));
+                }
+            }
+            out
+        } else {
+            let cx = ((wx as i32 + 128) >> 8) as u8;
+            let cy = ((wy as i32 + 128) >> 8) as u8;
+            self.ring_cells(0, r)
+                .into_iter()
+                .map(|(dx, dy)| tile(cx.wrapping_add(dx), cy.wrapping_add(dy)))
+                .collect()
+        }
     }
 
     /// [`Self::claim_victim_scan`] at a temporary probe position (the
@@ -1396,7 +1446,12 @@ impl Gen {
                 self.aim_assist(i, ctx);
                 if self.ent[i].f146 != 0 {
                     let t = Self::turn_step(self.ent[i].f30, self.ent[i].f34, 34);
-                    self.ent[i].f30 = (self.ent[i].f30 as i32 + t as i32) as u16 & 0x7FF;
+                    // The 34-step is stored RAW (:62824 — no mask): a
+                    // step past 0/2048 parks an out-of-range u16 in
+                    // +30 (corpus t=2739: 65512 = −24). Every consumer
+                    // masks on read; the next homing write
+                    // canonicalizes.
+                    self.ent[i].f30 = (self.ent[i].f30 as i32 + t as i32) as u16;
                     self.ent[i].f32 = self.ent[i].f36;
                 } else {
                     self.ent[i].f34 = self.ent[i].f30;
@@ -1694,9 +1749,11 @@ impl Gen {
     }
 
     /// sub_39F40 (:46166): the castle ball (c9 m10) — sprite 18,
-    /// speed 384, life 0x2000/384 = 21.
+    /// speed 384, life 0x2000/384 = 21, row [1] (:46185 — the same
+    /// 22/22-capped row the payload lobs ride; the recorded upgrade
+    /// ball's model_ptr resolves to it).
     pub(crate) fn spawn_castle_ball(&mut self, x: u16, y: u16, z: i16) -> Option<usize> {
-        self.spawn_projectile(10, 10, x, y, z, 384, 21, 0, 18)
+        self.spawn_projectile(10, 10, x, y, z, 384, 21, 1, 18)
     }
 
     /// sub_3A040 (:46226): the storm carrier (c9 m12) — sprite 216,
@@ -1797,6 +1854,18 @@ impl Gen {
     fn proj_castle_ball_tick(&mut self, i: usize, ctx: &MobCtx) -> bool {
         let mc1 = !matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2);
         let patched = ctx.patches.castle_latch_bug && !ctx.strict;
+        // sub_53980's dispatch is on the TARGET, not the model: a
+        // ball with a homing slot in +146 (the upgrade cast stamps
+        // the bound castle, :65906-08) runs the HOMING arm —
+        // sub_52610 every tick, speed ease, arrival on plain
+        // overlap, morph into (+68, +69) — and NEVER touches the
+        // launch latch (mc1l0 t=2174-77: flags hold 4 through the
+        // flight; the port's old latch write was the flags+2 row
+        // family). +146 = 0 falls through to the sub_53B50
+        // create-castle arm below.
+        if mc1 && self.ent[i].f146 != 0 {
+            return self.castle_ball_homing_tick(i);
+        }
         // The UPGRADE variant (+69 = 43, :65904-08) skips the
         // placement scans — it flies at the OWN castle and morphs
         // into the (10,43) token there (sub_53980 has no launch
@@ -1923,6 +1992,114 @@ impl Gen {
                 self.ent[c].f144 = own;
             }
             self.ent[i].flags |= 0x400;
+        }
+        false
+    }
+
+    /// sub_53980's +146 arm (:63459-63518): the HOMING castle ball.
+    /// sub_52610 homing every tick (the twin WITHOUT the aim-lift
+    /// wrap — the bearing runs to the target's RAW z; masked), the
+    /// ±2 speed ease, one polar step, then: plain OVERLAP with
+    /// whatever +146 holds (blind — no class or dead guard,
+    /// :63484-88) teleports the ball onto the target and delivers;
+    /// otherwise a terrain touch delivers in place, and only an
+    /// AIRBORNE tick pays life (:63494-96 short-circuits the
+    /// decrement behind the ground test). Delivery morphs the ball
+    /// into (+68, +69) at its current position, owner-stamped
+    /// (:63506-11) — refused outright for a class-3 morph when the
+    /// owner already holds a BOUND castle (:63500-04, wizext+50;
+    /// stand-in = the owner's established (3,2) like the upgrade
+    /// token's) — and a FULL POOL releases the owner's m16
+    /// manifestation charge pin instead of killing the ball
+    /// (:63513-15, sub_46D20(pool[+24], 0): the ball lives and
+    /// retries next tick).
+    fn castle_ball_homing_tick(&mut self, i: usize) -> bool {
+        let tgt = self.ent[i].f146 as usize;
+        if tgt < self.ent.len() {
+            let (tx, ty, tz) = {
+                let c = &self.ent[tgt];
+                (c.x, c.y, c.z)
+            };
+            let e = &self.ent[i];
+            let yaw = Self::angle_between(e.x, e.y, tx, ty);
+            let dh = Self::isqrt(Self::dist2_sq(e.x, e.y, tx, ty) as u32) as i32;
+            let pitch = Self::pitch_toward(e.z, tz, dh);
+            let row = &BEHAVIOR[e.row156 as usize];
+            let (v2, v6) = (row.v_2, row.v_6);
+            self.ent[i].f34 = yaw;
+            self.ent[i].f36 = pitch;
+            let ty_ = Self::turn_step(self.ent[i].f30, yaw, v2);
+            self.ent[i].f30 = (self.ent[i].f30 as i32 + ty_ as i32) as u16 & 0x7FF;
+            let tp = Self::turn_step(self.ent[i].f32, pitch, v6);
+            self.ent[i].f32 = (self.ent[i].f32 as i32 + tp as i32) as u16 & 0x7FF;
+        }
+        {
+            let e = &mut self.ent[i];
+            e.f126 += (e.f128 - e.f126).clamp(-2, 2);
+        }
+        let mut tmp = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
+        let (yaw, pitch, speed) = {
+            let e = &self.ent[i];
+            (e.f30, e.f32, e.f126)
+        };
+        Self::polar_step(&mut tmp, yaw, pitch, speed);
+        self.move_relink(i, tmp.0, tmp.1, tmp.2);
+        let done = if tgt != 0 && tgt < self.ent.len() && self.ent_overlap(i, tgt) {
+            let (cx, cy, cz) = {
+                let c = &self.ent[tgt];
+                (c.x, c.y, c.z)
+            };
+            self.move_relink(i, cx, cy, cz);
+            true
+        } else {
+            let ground = self.ground_z(self.ent[i].x, self.ent[i].y) as i16;
+            if ground > self.ent[i].z {
+                true
+            } else {
+                self.ent[i].act_life -= 1;
+                self.ent[i].act_life < 0
+            }
+        };
+        if done {
+            let own = self.ent[i].id24;
+            let (f68, f69) = (self.ent[i].f68, self.ent[i].f69);
+            let (x, y, z) = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
+            let bound = |s: &Self| {
+                (1..s.ent.len()).any(|c| {
+                    let e = &s.ent[c];
+                    e.class64 == 3
+                        && e.model65 == 2
+                        && e.id24 == own
+                        && e.f26 > 0
+                        && e.flags & 0x400 == 0
+                })
+            };
+            if f68 == 3 && bound(self) {
+                self.ent[i].flags |= 0x400;
+            } else {
+                let spawned = if f68 == 3 {
+                    let c = self.spawn_castle(x, y);
+                    if let Some(c) = c {
+                        self.ent[c].id24 = own;
+                        self.ent[c].f144 = own;
+                    }
+                    c
+                } else {
+                    let t = self.spawn_creator(f69 as u16, x, y, z);
+                    if let Some(t) = t {
+                        self.ent[t].id24 = own;
+                    }
+                    t
+                };
+                if spawned.is_some() {
+                    self.ent[i].flags |= 0x400;
+                } else if let Some(m) = (1..self.ent.len()).find(|&m| {
+                    let e = &self.ent[m];
+                    e.class64 == 12 && e.model65 == 16 && e.f144 == own && e.flags & 0x400 == 0
+                }) {
+                    self.ent[m].f26 = 0;
+                }
+            }
         }
         false
     }

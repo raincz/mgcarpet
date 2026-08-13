@@ -568,8 +568,23 @@ fn level_005_golden_state_hashes() {
         // grounds on a shore tile here, so the hash moves on the
         // hashed ledger marks alone. The behavioral halves are
         // corpus-pinned (the chase -> 0 family, mc1l0 t=1818-30).
-        0xba13f3992e830a01, // D: 64 ticks of two-hand fireball combat
-        0x7250743b95c7d1df, // E: 100 aftermath ticks
+        // D/E re-pinned for THE PROJECTILE PROBE RING + THE CASTLE
+        // BALL'S TWO ARMS + THE THUNK MUZZLE LAWS (one session, three
+        // MC1-only laws): (1) `victim_scan`/`claim_victim_scan` walk
+        // retail's SEARCH.DAT ring iterator over the rounded centre
+        // with no radius floor (sub_11980 :16999-17001) — MC2 keeps
+        // the inflated square as the anti-tunnel march's compensating
+        // window; (2) sub_53980's +146 arm — a castle ball with a
+        // homing slot homes via sub_52610 and never touches the
+        // launch latch, and the ctor binds row [1] (:46185);
+        // (3) creature thunks aim from the UNLIFTED muzzle and are
+        // born with +34/+36 = 0, and the muzzle-acquire 34-step is
+        // stored raw (:62824). Corpus: mc1l0 5,983 -> 6,007
+        // conforming pairs, unexplained field rows 322 -> 136,
+        // (9,10)+(10,43) dead, (5,3) 119 -> 52; mc1l5 -28.9k rows,
+        // 10/10 suites 0 regressions.
+        0xb434bbf03c8792a2, // D: 64 ticks of two-hand fireball combat
+        0x730d68a20eff2d8d, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,
@@ -690,8 +705,16 @@ fn level_005_golden_state_hashes() {
         // now commit at the muzzle, so trajectories, impacts and the
         // populations that survive the D window genuinely differ.
         // Post-init..C hold — nothing is fired before D.
-        0x6f684bbed7b924e2, // D
-        0x6f7b523b8d2b5685, // E
+        // D/E re-pinned with THE PROJECTILE PROBE RING + THE THUNK
+        // MUZZLE LAWS (see the GOLDEN note). OBSERVABLE moving is
+        // the CORRECT signal — REAL behavior by design: which victim
+        // a D-window fireball strikes mid-flight is exactly what the
+        // probe window decides (retail's narrow forward-biased ring
+        // vs the old inflated square), and the ambush bees' return
+        // bolts now launch at the unlifted-muzzle pitch. Post-init..C
+        // hold — nothing is fired before D.
+        0x07426e3492cf1d9e, // D
+        0x32ed49f3d4451bd3, // E
     ];
     assert_eq!(
         obs, OBSERVABLE,

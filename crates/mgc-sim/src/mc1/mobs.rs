@@ -1129,8 +1129,8 @@ impl Gen {
                 let e = &self.ent[i];
                 (e.x, e.y, e.z, e.id24, e.f84)
             };
-            if let Some(p) = self.spawn_zigzag(x, y, z.wrapping_add(f84 as i16)) {
-                self.arm_projectile(p, owner, tf66, tf67, tgt, tx, ty, tz, 800, 23);
+            if let Some(p) = self.spawn_zigzag(x, y, z) {
+                self.arm_projectile(p, owner, tf66, tf67, tgt, tx, ty, tz, 800, 23, f84 as i16);
                 self.ent[p].row156 = 6;
             }
         }
@@ -1342,10 +1342,10 @@ impl Gen {
                 let e = &self.ent[i];
                 (e.x, e.y, e.z, e.id24, e.f84, e.f66, e.f67)
             };
-            if let Some(p) = self.spawn_fireball(x, y, z.wrapping_add(4 * f84 as i16)) {
+            if let Some(p) = self.spawn_fireball(x, y, z) {
                 self.ent[p].row156 = 2; // unk_98F38[2], turn 0x71
                 self.ent[p].f140 = 60000;
-                self.arm_projectile(p, owner, f66, f67, tgt, tx, ty, tz, 3000, 0);
+                self.arm_projectile(p, owner, f66, f67, tgt, tx, ty, tz, 3000, 0, 4 * f84 as i16);
             }
         }
         let row = &BEHAVIOR[self.ent[i].row156 as usize];
@@ -2336,7 +2336,10 @@ impl Gen {
             let e = &self.ent[i];
             (e.x, e.y, e.z, e.id24, e.f44, e.f84)
         };
-        let launch_z = z.wrapping_add(f84 as i16);
+        // Every thunk spawns at the shooter's own z and lifts the
+        // projectile's +76 AFTER the bearings are computed (see
+        // arm_projectile) — never aim from the lifted muzzle.
+        let lift = f84 as i16;
         // The SHOOTER's own filter pair rides every thunk in the
         // engine except m8's, which takes the TARGET's (sub_1AEE0
         // :22155-60): sub_1A8E0 :21895-98, sub_1A990 :21952-55,
@@ -2359,9 +2362,9 @@ impl Gen {
         match model {
             // sub_1A8E0 (:21874): the 500-damage straight fireball.
             0 | 3 => {
-                if let Some(p) = self.spawn_fireball(x, y, launch_z) {
+                if let Some(p) = self.spawn_fireball(x, y, z) {
                     self.ent[p].row156 = 6; // turn 0: no homing
-                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 500, 0);
+                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 500, 0, lift);
                     self.snd(8, i); // :22182/:22406
                     return true;
                 }
@@ -2397,8 +2400,8 @@ impl Gen {
             }
             // sub_1A990 (:21907): the 250-damage straight bolt.
             4 | 10 => {
-                if let Some(p) = self.spawn_bolt(x, y, launch_z) {
-                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 250, 0);
+                if let Some(p) = self.spawn_bolt(x, y, z) {
+                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 250, 0, lift);
                     return true;
                 }
                 false
@@ -2420,25 +2423,31 @@ impl Gen {
                 match v4 {
                     0 => {
                         for k in 0..n {
-                            if let Some(p) = self.spawn_fireball(x, y, launch_z) {
+                            if let Some(p) = self.spawn_fireball(x, y, z) {
                                 self.ent[p].row156 = (6 - k).max(0) as u8;
-                                self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 400, 0);
+                                self.arm_projectile(
+                                    p, owner, sf66, sf67, tgt, tx, ty, tz, 400, 0, lift,
+                                );
                                 fired = true;
                             }
                         }
                     }
                     1 | 2 => {
                         for _ in 0..(n - 1).max(0) {
-                            if let Some(p) = self.spawn_zigzag(x, y, launch_z) {
-                                self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 800, 23);
+                            if let Some(p) = self.spawn_zigzag(x, y, z) {
+                                self.arm_projectile(
+                                    p, owner, sf66, sf67, tgt, tx, ty, tz, 800, 23, lift,
+                                );
                                 fired = true;
                             }
                         }
                     }
                     _ => {
-                        if let Some(p) = self.spawn_trail_bolt(x, y, launch_z) {
+                        if let Some(p) = self.spawn_trail_bolt(x, y, z) {
                             self.ent[p].row156 = 3;
-                            self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 8000, 17);
+                            self.arm_projectile(
+                                p, owner, sf66, sf67, tgt, tx, ty, tz, 8000, 17, lift,
+                            );
                             fired = true;
                         }
                     }
@@ -2453,8 +2462,8 @@ impl Gen {
             // thrower's +66/+67 filter pair; we pass the shared
             // (3, 0xFF).
             7 => {
-                if let Some(p) = self.spawn_slow_bolt(x, y, launch_z) {
-                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 780, 0);
+                if let Some(p) = self.spawn_slow_bolt(x, y, z) {
+                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, 780, 0, lift);
                     self.ent[p].row156 = 6;
                     return true;
                 }
@@ -2465,8 +2474,8 @@ impl Gen {
             // A landed attack refreshes the victim's wanted timer
             // (+528 = 200, sub_1CE30 :23557-60).
             8 => {
-                if let Some(p) = self.spawn_zigzag(x, y, launch_z) {
-                    self.arm_projectile(p, owner, tf66, tf67, tgt, tx, ty, tz, 4000, 23);
+                if let Some(p) = self.spawn_zigzag(x, y, z) {
+                    self.arm_projectile(p, owner, tf66, tf67, tgt, tx, ty, tz, 4000, 23, lift);
                     self.ent[p].row156 = 6;
                     self.snd(38, i); // :23555
                     self.flag_village_wanted(tgt);
@@ -2481,8 +2490,8 @@ impl Gen {
             // never reads a return; the value here is unobserved.)
             9 => {
                 let dmg = if self.ent[i].f144 != 0 { 600 } else { 400 };
-                if let Some(p) = self.spawn_bolt(x, y, launch_z) {
-                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, dmg, 0);
+                if let Some(p) = self.spawn_bolt(x, y, z) {
+                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, dmg, 0, lift);
                     // m9 alone re-skins its bolt (:21957): row 203 =
                     // sprite family base 215 where 195 is base 193 —
                     // same 45x60 size, same 5-view fold, so this is
@@ -2499,9 +2508,9 @@ impl Gen {
             // keeps its ctor pair, so the shared (3, 0xFF) stays here
             // rather than the genie's own +66/+67.
             11 => {
-                if let Some(p) = self.spawn_seeker(x, y, launch_z) {
+                if let Some(p) = self.spawn_seeker(x, y, z) {
                     self.ent[p].f26 = 20;
-                    self.arm_projectile(p, owner, 3, 0xFF, tgt, tx, ty, tz, 3000, 25);
+                    self.arm_projectile(p, owner, 3, 0xFF, tgt, tx, ty, tz, 3000, 25, lift);
                     self.snd(9, i); // :24700
                     return true;
                 }
@@ -2510,9 +2519,9 @@ impl Gen {
             // m15 (:25846-59): a bare bolt — no +44 override, so the
             // NewEvent default 100 rides.
             15 => {
-                if let Some(p) = self.spawn_bolt(x, y, launch_z) {
+                if let Some(p) = self.spawn_bolt(x, y, z) {
                     let dflt = self.ent[p].f44;
-                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, dflt, 0);
+                    self.arm_projectile(p, owner, sf66, sf67, tgt, tx, ty, tz, dflt, 0, lift);
                     return true;
                 }
                 false
