@@ -976,22 +976,23 @@ impl Gen {
         }
         // Then the creature buckets (:63990-64007) with the SAME
         // running best — a creature must strictly BEAT the class-3
-        // pick. The 20 bucket lists are keyed by MODEL (:52267
-        // rebuild: class 5, live, not a body segment) and walked
-        // model-major in ascending pool order; the per-node gates are
-        // awake (+58) and not the shooter's own (:63995-96) — NO
-        // cloak, NO distance beyond the scorer's own 5120.
+        // pick. The 20 chains are keyed by MODEL and walked
+        // model-major; MEMBERSHIP is the TICK-TOP snapshot
+        // ([`MobChains`]) — a segment the castle crush promoted to a
+        // corpse state mid-tick stays invisible to this sweep until
+        // the next rebuild (mc1l1 t=4130: the fireball flies straight,
+        // f146 = 0). Per-node gates read LIVE: awake (+58) and not
+        // the shooter's own (:63995-96) — NO cloak, NO act/state
+        // re-test, NO distance beyond the scorer's own 5120.
         if let Some(creature_pitch) = creature_pitch {
-            for m in 0..20u8 {
-                for j in 1..self.ent.len() {
-                    let c = &self.ent[j];
-                    if c.class64 != 5 || c.model65 != m || c.tick70 == 120 || c.act_life < 0 {
-                        continue;
-                    }
+            for m in 0..20usize {
+                let chain: Vec<u16> = self.mob_chains.visible(m).to_vec();
+                for j in chain {
+                    let c = &self.ent[j as usize];
                     if c.f58 == 0 || c.id24 == own {
                         continue;
                     }
-                    consider(c.x, c.y, c.aim_z(), j as u16, creature_pitch, &mut best);
+                    consider(c.x, c.y, c.aim_z(), j, creature_pitch, &mut best);
                 }
             }
         }
@@ -3183,7 +3184,14 @@ impl Gen {
     /// catch-all (the terrain-feature dispatch) and every imported puff
     /// self-killed one tick after import: (10,13) was the single
     /// largest unexplained family in the mc1hw corpus.
-    fn smoke_puff_tick(&mut self, i: usize) -> bool {
+    ///
+    /// `m14` = state 14 (sub_258A0, the mana-scatter puff): the same
+    /// body with one tail change — the last-6-ticks sprite walk-down
+    /// is UNCONDITIONAL (no base-row-67 floor). Unserviced, the
+    /// authored (10,14) puffs of mc1l1's trigger scatters froze and
+    /// drifted on every graded pair (~1650 rows, the biggest family
+    /// of the take).
+    fn smoke_puff_tick(&mut self, i: usize, m14: bool) -> bool {
         let life = self.ent[i].act_life;
         self.ent[i].act_life = life - 1;
         if life < 0 {
@@ -3210,8 +3218,8 @@ impl Gen {
                 self.ent[i].type86 = self.ent[i].type86.wrapping_add(1);
             }
         }
-        if self.ent[i].act_life < 6 && self.ent[i].type86 > 67 {
-            self.ent[i].type86 -= 1;
+        if self.ent[i].act_life < 6 && (m14 || self.ent[i].type86 > 67) {
+            self.ent[i].type86 = self.ent[i].type86.wrapping_sub(1);
         }
         self.move_relink(i, p.0, p.1, p.2);
         false
@@ -3634,8 +3642,11 @@ impl Gen {
             // rise speed rand%53+51 (the state-13 tick decays it 4 a
             // tick toward the 64 floor), sprite 67, the (10,13) filter
             // pair, +18 bit1. Its class-10 twin model 14 (sub_3AB40,
-            // sprite 9, life rand%33+28) has NO MC1 creator — it is the
-            // MC2 column's particle, serviced there.
+            // arm below) IS authored in MC1: level THING records fired
+            // by trigger dispositions mint it (mc1l1's t=344 mana
+            // scatter — the earlier "NO MC1 creator" note only meant
+            // no code-side caller, which is true of the whole creator
+            // table).
             13 => {
                 let e = &mut self.ent[s];
                 e.tick70 = 13;
@@ -3649,6 +3660,23 @@ impl Gen {
                 // Retail's ctor order: link, sprite, THEN refill.
                 self.link(s, x, y, z);
                 self.set_sprite(s, 67);
+                self.refill_life(s);
+            }
+            // sub_3AB40 (:46860): the mana-scatter puff twin — the
+            // same two-draw ctor with its own numbers: life rand%33
+            // +28, filter pair (10,14), sprite 9.
+            14 => {
+                let e = &mut self.ent[s];
+                e.tick70 = 14;
+                let d1 = lcg32(&mut e.rand);
+                e.max_life = d1 % 0x21 + 28;
+                e.flags = (e.flags & !(8 | 0x20000)) | 0x20000;
+                let d2 = lcg32(&mut e.rand);
+                e.f66 = 10;
+                e.f67 = 14;
+                e.f126 = (d2 % 0x35 + 51) as i16;
+                self.link(s, x, y, z);
+                self.set_sprite(s, 9);
                 self.refill_life(s);
             }
             // The standing fire / ground wave (state 6, sub_3A730 ctor
@@ -3962,7 +3990,9 @@ impl Gen {
                 false
             }
             6 => self.standing_fire_tick(i, ctx),
-            13 => self.smoke_puff_tick(i),
+            13 => self.smoke_puff_tick(i, false),
+            // sub_258A0 (:28489), the mana-scatter puff twin.
+            14 => self.smoke_puff_tick(i, true),
             5 => {
                 // :28285-87 — PRE-decrement life test (class-10
                 // family): the splash animates 9 ticks, not 8.

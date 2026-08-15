@@ -2601,7 +2601,17 @@ impl Gen {
             }
         }
         // Separation (:21796): first same-model neighbor within a tile
-        // square points us away from it.
+        // square points us away from it. ⚠ The box is MOVSX-SIGNED
+        // PER COORDINATE (the binary at obj1 0x1d5eb: `movsx` each
+        // 16-bit x/y, then a 32-BIT subtract — never a 16-bit wrapped
+        // difference): a pair straddling the signed midline 0x8000
+        // reads ~65k apart and NEVER separates. mc1l1 pinned it with
+        // five straddle skips (t=1924/1933/4003/4004/4433, all with
+        // own/member on opposite sides of y=0x8000, |wrapped dy| <
+        // 256 every time) against 436 same-side fires — the same
+        // movsx-signed law as the ch0 area window. The id24 self-skip
+        // and the full-chain first-hit walk are byte-verified against
+        // the binary.
         let e = &self.ent[i];
         let (ex, ey, id, model) = (e.x, e.y, e.id24, e.model65);
         for j in 1..self.ent.len() {
@@ -2612,8 +2622,8 @@ impl Gen {
             if c.id24 == id {
                 continue;
             }
-            let dx = (ex.wrapping_sub(c.x) as i16 as i32).abs();
-            let dy = (ey.wrapping_sub(c.y) as i16 as i32).abs();
+            let dx = ((ex as i16 as i32) - (c.x as i16 as i32)).abs();
+            let dy = ((ey as i16 as i32) - (c.y as i16 as i32)).abs();
             if dx < 256 && dy < 256 {
                 self.ent[i].f34 = Self::angle_between(c.x, c.y, ex, ey);
                 break;
@@ -3066,7 +3076,10 @@ impl Gen {
                 _ => tmp.0 = (tmp.0 & !255) + 128,
             }
         }
-        // Same-model repulsion (:25984).
+        // Same-model repulsion (:25984) — the exact lifted twin of
+        // mob_pack's :21796 walk, movsx-signed box included (see the
+        // pack walk: each coordinate sign-extends BEFORE the 32-bit
+        // subtract, so midline-0x8000 straddlers never repel).
         let (ex, ey, id, model) = (e.x, e.y, e.id24, e.model65);
         for j in 1..self.ent.len() {
             let c = &self.ent[j];
@@ -3076,8 +3089,8 @@ impl Gen {
             if c.id24 == id {
                 continue;
             }
-            let dx = (ex.wrapping_sub(c.x) as i16 as i32).abs();
-            let dy = (ey.wrapping_sub(c.y) as i16 as i32).abs();
+            let dx = ((ex as i16 as i32) - (c.x as i16 as i32)).abs();
+            let dy = ((ey as i16 as i32) - (c.y as i16 as i32)).abs();
             if dx < 256 && dy < 256 {
                 self.ent[i].f34 = Self::angle_between(c.x, c.y, ex, ey);
                 break;
@@ -3347,6 +3360,15 @@ impl Gen {
                 if role == 2 {
                     self.chase_exit_trailer(i, model);
                 }
+                // The m0 wrappers (sub_1B070/1B090/1B0E0) run the
+                // z-bob sub_1B120 as an UNCONDITIONAL tail — the
+                // death-transition tick still rises (mc1l1 t=3810:
+                // the killed worm head bobs +130 while the prologue
+                // demotes state 2 → 4; the hold starts one tick
+                // later, in the death state itself).
+                if model == 0 && matches!(role, 1..=3) {
+                    self.flyer_bob(i);
+                }
                 return;
             }
             Inbox::Hit(src) => {
@@ -3432,6 +3454,22 @@ impl Gen {
                         _ => {}
                     }
                 }
+                // The shared prologues freeze EVERY hit tick, not just
+                // the villager families': idle (:21365-80), chase
+                // (:21673-77) and pack (:21745-52) all return out of
+                // the `if (v4)` arm with the move/aim/wander body
+                // never reached — a non-wizard hit (fire, crush) holds
+                // the walker in place while the damage lands (mc1l1
+                // t=5450: vulture 200 takes a 400 fire hit mid-pack
+                // and retail's boundary shows position, heading and
+                // aim all frozen; the old wizard-only scoping let the
+                // port walk on). The wizard-attacker arms above are
+                // freezes too — every path returns without a move. The
+                // m0 wrappers still run their unconditional bob tail.
+                if model == 0 && matches!(role, 1..=3) {
+                    self.flyer_bob(i);
+                }
+                return;
             }
             Inbox::Quiet => {}
         }

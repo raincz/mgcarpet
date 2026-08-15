@@ -99,12 +99,23 @@ fn mc1_thrust_model_keeps_accelerate_through_forward_hold() {
     sim.step(&hold);
     assert_eq!(boost(&sim), Some(3.0), "re-cast re-arms the full boost");
 
-    // The resisting input is the one cancel (manual: the down cursor).
+    // The resisting input is the one cancel (manual: the down cursor)
+    // — and it is TWO-PHASE like retail's: the brake press moves the
+    // boosted target and arms the mover's v_14 latch (:55766-80)
+    // while the boost still runs this tick; the token reads the latch
+    // on its next pass and ends the burst (counter = 1 → 0,
+    // :65146-50).
     sim.step(&FlightInput {
         thrust: -1.0,
         ..Default::default()
     });
-    assert_eq!(boost(&sim), None, "braking thrust cancels");
+    assert_eq!(
+        boost(&sim),
+        Some(2.0),
+        "the brake tick itself still boosts — v_14 only arms"
+    );
+    sim.step(&FlightInput::default());
+    assert_eq!(boost(&sim), None, "the token ends the burst one pass later");
 
     // And the refire gate clears: a fresh cast works next tick.
     sim.step(&hold);

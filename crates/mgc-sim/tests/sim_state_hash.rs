@@ -248,10 +248,10 @@ fn flight_tier_golden_state_hashes() {
     // holds (its track sees no drop). Bookkeeping toward retail's
     // byte image — the mc1l0 pair-564 (10,39) family at 0.
     const FAITHFUL: [u64; 4] = [
-        0x4403f4de7cb7d9bc, // post-init
-        0x54edc7d9dbdb0ccd, // A: 40 ticks of forward thrust
-        0x5d39f34d39ed7ded, // B: 30 ticks of banked turn + strafe
-        0x77d8fbfe1beb6b93, // C: 40 ticks of coast
+        0xec7d01a088efbfd6, // post-init
+        0x527fc5b01dafcb4a, // A: 40 ticks of forward thrust
+        0xe150da884cc798a0, // B: 30 ticks of banked turn + strafe
+        0xf60723e5b7cd3a8a, // C: 40 ticks of coast
     ];
     // Re-pinned for the enhanced-bank strafe fix (2026-07-27): the
     // proportional camera bank no longer gates off while strafing — it
@@ -267,10 +267,10 @@ fn flight_tier_golden_state_hashes() {
     // ENHANCED re-pinned with the same ball-ctor stamps — the
     // background balls carry them under either mover.
     const ENHANCED: [u64; 4] = [
-        0xc65df7802e319e51, // post-init
-        0xa90885428f750630, // A
-        0xba715c67f1a1cb8e, // B: strafe+turn now banks on forward speed
-        0x8a6dd7ff3b629b82, // C
+        0x001d08d79cd996b3, // post-init
+        0xe55e22c2b2e172c9, // A
+        0x75fe362e30f6b44b, // B: strafe+turn now banks on forward speed
+        0xa546b7eddb3fd5cd, // C
     ];
     assert_eq!(
         (faithful, enhanced),

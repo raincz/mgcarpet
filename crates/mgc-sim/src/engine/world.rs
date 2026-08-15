@@ -729,6 +729,20 @@ pub struct World {
     /// `pending_teleport` (the expiry fires it alone). `pub(crate)`
     /// for the MC2 expiry arm (`mc2_cast_expire`, mc2/cast.rs).
     pub(crate) pending_speed_zero: bool,
+    /// The speed-spell burst END restored the caster's flight target
+    /// AND actual speed to the SIGNED base this tick — +80 from the
+    /// forward burst (sub_56380 :65194-95), −80 from the backwards
+    /// twin (sub_57F00 :66226-27) — fired on natural expiry and on
+    /// the v_14 kill alike. Consumed by the carpet dispatch at its
+    /// walk slot, before the command integration — retail's
+    /// token-below-carpet write order.
+    pending_speed_base: Option<i16>,
+    /// Retail's Type_160 v_14: a speed press MOVED the flight target
+    /// last carpet dispatch (:55762-80). The speed-spell tokens read
+    /// it one walk pass later and end their burst on it (:65146-50);
+    /// during a boost only the RESISTING press can arm it (the
+    /// boosted target sits outside the ±80 bounds test).
+    mc1_v14: bool,
     /// The human player's spell/mana state (spells cast through the
     /// per-hand dispatcher, sub_46B00_46E40 :55851).
     pub(crate) player: Player,
@@ -1436,6 +1450,8 @@ impl World {
             entities_dirty: false,
             pending_teleport: None,
             pending_speed_zero: false,
+            pending_speed_base: None,
+            mc1_v14: false,
             player: Player::default(),
             win_pct: 0,
             win_streak: 0,
@@ -1551,12 +1567,17 @@ impl World {
             // Owned-spell manifestations occupy their (former jar)
             // slot but are not world drawables. Strict-retail worlds
             // (a conformance import — in-app replay included) carry
-            // RETAIL's class-12 encoding instead: tick70 = spell*3 +
-            // phase, phase 0 = a wizard's owned-spell TOKEN (the
-            // granted jar converts in place) — retail never draws
-            // those either, phases 1/2 are the visible world jars.
+            // RETAIL's class-12 encoding instead: the byte[0] hide
+            // bit. The wizard init claims one class-12 entity per
+            // carried spell — minted at the wizard OR an existing
+            // authored jar of that spell — and hides it with
+            // byte[0] |= 1 (:54907); the pickup conversion re-sets
+            // it (:64851). The bit subsumes the old phase-0
+            // (tick70 % 3) heuristic AND covers the claimed authored
+            // jar the heuristic drew (mc1l1 t=0: owned rows flags 5,
+            // the collectable Accelerate jar flags 4).
             if e.class64 == 12
-                && (e.tick70 >= MANIFEST_BASE || (self.strict_retail && e.tick70 % 3 == 0))
+                && (e.tick70 >= MANIFEST_BASE || (self.strict_retail && e.flags & 1 != 0))
             {
                 continue;
             }
@@ -1619,10 +1640,10 @@ impl World {
                 continue;
             }
             // Owned manifestation, not a drawable — strict-retail
-            // worlds hide the phase-0 owned TOKEN the same way (the
-            // granted jar converts in place; see `live_things`).
+            // worlds hide by RETAIL's byte[0] bit instead, which also
+            // covers a wizard-claimed authored jar (see `live_things`).
             if e.class64 == 12
-                && (e.tick70 >= MANIFEST_BASE || (self.strict_retail && e.tick70 % 3 == 0))
+                && (e.tick70 >= MANIFEST_BASE || (self.strict_retail && e.flags & 1 != 0))
             {
                 continue;
             }
@@ -2283,7 +2304,7 @@ impl World {
         }
         // Hold/channel/toggle spells: the certified command-site
         // machine, unchanged.
-        self.cast_spell(spell, right, edge, player, ctx);
+        self.cast_spell(spell, right, edge, pre_mana, player, ctx);
     }
 
     /// The token-fire precondition, sub_55DD0_56300 (:64910-32):
@@ -2472,6 +2493,33 @@ impl World {
     }
 
     fn step_player_flight(&mut self, d: &mut FlightDrive<'_>) -> PlayerPose {
+        // The speed-token writes land at the TOKEN's walk slot, below
+        // the carpet — re-read them here, the carpet's own dispatch
+        // moment, not the driver's tick-head sample: the burst-end
+        // base restore (:65192-95, target AND actual to +80 max
+        // forward) applies before the command integration, and a
+        // same-tick kill (v_14 → counter = 1 → 0) already dropped the
+        // override.
+        if let Some(base) = self.pending_speed_base.take() {
+            d.s.tgt_speed = base;
+            d.s.act_speed = base;
+        }
+        // A portal warp stamped by a LOWER walk slot lands before
+        // this dispatch's move — retail's sub_41C70 writes the wizard
+        // axis at the portal's own tick (:29214), and the carpet then
+        // flies on from the destination (mc1l1 t=9899: boundary =
+        // dest + one move step, z riding the dest-side ground floor).
+        // Spell teleports stamp at THIS slot's wizard pass, below —
+        // the driver's post-tick consume gets those (boundary = dest
+        // exactly, retail's :65554 shape).
+        if let Some((tx, ty, alt)) = self.pending_teleport.take() {
+            d.s.x = (tx.rem_euclid(256.0) * 256.0) as u16;
+            d.s.y = (ty.rem_euclid(256.0) * 256.0) as u16;
+            if let Some(a) = alt {
+                d.s.z = (a * 256.0) as i16;
+            }
+        }
+        d.over = self.accel_override();
         // The knock is sampled AT the move (:55204-18 sits inside
         // sub_455D0), not at drive build: the mailbox block just ran
         // in this same dispatch, so a same-tick hit shoves this move.
@@ -2487,6 +2535,11 @@ impl World {
                 &|cur, prop| w.player_wall_gate_fixed(cur, prop),
             )
         };
+        // Publish retail's v_14 (:55780) for the token passes — the
+        // walk order gives the read its retail phase for free (a
+        // token below the carpet reads LAST dispatch's latch, one
+        // above reads this one's).
+        self.mc1_v14 = moved.speed_touched;
         if moved.flutter {
             self.push_player_sound(46);
         }
@@ -2621,10 +2674,23 @@ impl World {
         let mut any_transient = false;
         let mut ball_chain = std::mem::take(&mut self.g.ball_chain.list);
         ball_chain.clear();
+        // The per-model class-5 roster chains ([`MobChains`]) rebuild
+        // in the same sweep — ascending, retail's tick-top membership.
+        let mc1_family = matches!(self.game, GameId::Mc1 | GameId::Mc1Hw);
+        self.g.mob_chains.reset(if mc1_family { 20 } else { 0 });
+        let mut mob_chains = std::mem::take(&mut self.g.mob_chains);
         for (s, e) in self.g.ent.iter().enumerate() {
             if e.class64 == 5 && e.act_life >= 0 && !excluded.contains(&e.tick70) {
                 buckets[(e.model65 as usize).min(nb - 1)] += 1;
                 any_creature = true;
+            }
+            if mc1_family
+                && e.class64 == 5
+                && e.act_life >= 0
+                && e.tick70 != 120
+                && (e.model65 as usize) < 20
+            {
+                mob_chains.list[e.model65 as usize].push(s as u16);
             }
             if e.class64 == 9
                 || (e.class64 == 10 && matches!(e.tick70, 0 | 1 | 5 | 17 | 18 | 21 | 23 | 25 | 41))
@@ -2639,6 +2705,7 @@ impl World {
         }
         self.g.ball_chain.list = ball_chain;
         self.g.ball_chain.cut = usize::MAX;
+        self.g.mob_chains = mob_chains;
 
         let mut ctx = MobCtx {
             px: player.x,
@@ -3262,11 +3329,14 @@ impl World {
                         | 3
                         | 5
                         | 6
-                        // 13 = the rising smoke puff (sub_257B0). MC2's
-                        // own (10,13)/(10,14) particles are claimed by
-                        // the game-gated arm above, so this only ever
-                        // sees the MC1 column's fire/plume exhaust.
+                        // 13 = the rising smoke puff (sub_257B0), 14 =
+                        // its mana-scatter twin (sub_258A0; authored in
+                        // mc1l1's trigger scatters). MC2's own
+                        // (10,13)/(10,14) particles are claimed by the
+                        // game-gated arm above, so these only ever see
+                        // the MC1 column's puffs.
                         | 13
+                        | 14
                         | 12
                         | 16
                         | 17
@@ -3314,7 +3384,29 @@ impl World {
                 // like the spawn column; the MC1 trigger family below
                 // keeps its handlers.
                 11 if matches!(self.game, GameId::Mc2) => self.mc2_switch_tick(i),
-                11 => self.trigger_tick(i, player, &buckets),
+                11 => {
+                    // The probe reads the PRE-move carpet (mc1l1
+                    // t=3082 worm wave, fired one 8-tick probe window
+                    // early off the post-move pose): retail's carpet
+                    // is a pooled entity ABOVE every authored volume
+                    // (slot 280 in the l1 lane, dis-0 records first),
+                    // so a slot-ordered walk always probes it before
+                    // it moves — the same pre-pass law as the awake
+                    // gate's `human_pose_prev` echo, first-tick
+                    // fallback included (prev is (0,0,0) before the
+                    // first stamp).
+                    let prev = if self.human_pose_prev == (0, 0, 0) {
+                        player
+                    } else {
+                        PlayerPose {
+                            x: self.human_pose_prev.0,
+                            y: self.human_pose_prev.1,
+                            z: self.human_pose_prev.2,
+                            ..player
+                        }
+                    };
+                    self.trigger_tick(i, prev, &buckets)
+                }
                 // Wizard castles and balloons — owner-generic (id24).
                 // MC2 runs its native column (mc2::castle): the
                 // three-actionIndex castle (tick70 4/5/6) and the
@@ -4566,6 +4658,11 @@ impl World {
             entities_dirty: _,
             pending_teleport: _,
             pending_speed_zero: _,
+            // One-tick flight-seam echoes (token↔carpet mail), fully
+            // re-derived by the next carpet dispatch — hash-quiet
+            // like pending_speed_zero above; both ARE snapshotted.
+            pending_speed_base: _,
+            mc1_v14: _,
             player,
             rivals,
             mc2_rivals,
@@ -4848,7 +4945,15 @@ impl World {
     /// - Everything else (incl. 0 Fireball, and the 1/4/5/12/14
     ///   channels): EDGE-triggered — one cast per press, release +
     ///   re-press to renew, still paced by the burst counter.
-    fn cast_spell(&mut self, spell: SpellId, right: bool, edge: bool, p: PlayerPose, ctx: &MobCtx) {
+    fn cast_spell(
+        &mut self,
+        spell: SpellId,
+        right: bool,
+        edge: bool,
+        pre_mana: u32,
+        p: PlayerPose,
+        ctx: &MobCtx,
+    ) {
         let id = spell.0 as usize;
         if id >= SPELL_COUNT {
             return;
@@ -4901,12 +5006,20 @@ impl World {
             // cost/count and is never spent). remc1 ships that debit
             // commented out behind a `//fix` marker, but remc2's
             // independent tree runs it live (`sub_68DE0`,
-            // EventsFunctions.cpp:55569), so the gap is the remc1
-            // maintainer's, not retail's. So the gate and the debit
-            // belong on EVERY re-arm, not just the first: a one-shot
-            // buys a 251-tick 2x glide for one cost, the hold pays
-            // that cost per tick for 3x.
-            if !self.spell_gate(id, def) {
+            // EventsFunctions.cpp:55569) and the mc1l1 held ladder
+            // measures it (three −1000 landings, t=8746-48), so the
+            // gap is the remc1 maintainer's, not retail's. The debit
+            // itself is TOKEN-side — the manifestation tick stamps it
+            // on every FULL tick (retail's own site) — so the command
+            // here only gates and re-pins: a one-shot buys a 251-tick
+            // 2x glide for one cost, the hold pays that cost per tick
+            // for 3x.
+            // The silent gate (:55890) reads the PRE-step pool —
+            // retail consumes the commands before its mana step
+            // (the mc1l32 t=671 law), so the re-arm survives the
+            // very tick the token's debit empties the pool. No
+            // castle-store requirement is authored for 2/21.
+            if !self.dev_spells && pre_mana < def.possess_mana {
                 // The sustained refusal is SILENT (:55873/:55890 just
                 // return); only a fresh cast buzzes here. Retail does
                 // sound one buzz on the tick a hold runs dry, from the
@@ -4917,7 +5030,6 @@ impl World {
                 }
                 return;
             }
-            self.mana_debit(def.possess_mana);
             self.g.ent[m].f26 = def.count as i16;
             // Held = the 3.0 factor. Cleared every tick
             // (`speed_boost`), so a refused re-arm above drops the
@@ -6062,64 +6174,51 @@ impl World {
                 return;
             }
             if phase == 0 {
-                // THE HUMAN'S LAUNCHER TOKENS RUN LIVE — the same
-                // burst machine the native encoding uses (fire at
-                // full, delta debit, mid-burst suppression, decrement
-                // — manifestation_tick). The wizard pass at the
-                // recorded carpet slot applies the delta after these
-                // slots, retail's own ordering. Rival tokens and the
-                // hold/channel set stay inert (their lanes below).
+                // THE HUMAN'S LAUNCHER AND SPEED TOKENS RUN LIVE —
+                // the same burst machine the native encoding uses
+                // (fire at full, delta debit, mid-burst suppression,
+                // decrement — manifestation_tick; the 2/21 speed
+                // tokens additionally run the sub_56380/sub_57F00
+                // jar-side arm: the 0x80 spell-ACTIVE bit, the v_14
+                // kill, the contrail and the burst-end base-speed
+                // mail). The wizard pass at the recorded carpet slot
+                // applies the delta after these slots, retail's own
+                // ordering. Rival tokens and the hold/channel set
+                // stay inert (their lanes below).
                 if self.player.owned[spell] == i as u16
                     && matches!(
                         spell,
-                        0 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 16 | 17 | 18 | 19 | 20 | 22
+                        0 | 2 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 16 | 17 | 18 | 19 | 20 | 21 | 22
                     )
                 {
                     self.manifestation_tick(i, spell, ctx);
                     return;
                 }
-                // sub_56380_568B0 (remc1 :65131-99 / remc1hw
-                // :61353-422) and its reverse twin sub_57F00_58410
-                // (:62390-451, spell 21 — braking, v_12 negative,
-                // same body otherwise): the ACTIVE speed tokens. Only
-                // the conformance-visible leg runs here — the (10,2)
-                // contrail puff every 4th token f63 tick (:61401-08;
-                // f63 still holds the imported value, the loop clocks
-                // it after this handler, same as retail :52406). The
-                // owner's Type_160 v_12 speed writes ride the pinned
-                // pose, and sub_55E80's regen suppression is the
-                // importer's mana_delta seed clamp — re-modeling
-                // either would double-apply. The owner resolves via
-                // f144 (the importer stamps retail +42 there on
-                // class-12; hw:0 corpus = 100% RIVAL contrail).
+                // A RIVAL's speed token (sub_56380_568B0 remc1
+                // :65131-99 / remc1hw :61353-422 and the reverse twin
+                // sub_57F00_58410): only the conformance-visible leg
+                // runs — the (10,2) contrail puff every 4th token f63
+                // tick (:61401-08; f63 still holds the imported
+                // value, the loop clocks it after this handler, same
+                // as retail :52406). The owner's Type_160 v_12 speed
+                // writes ride that rival's own recorded pose. The
+                // owner resolves via f144 (the importer stamps retail
+                // +42 there on class-12; hw:0 corpus = 100% RIVAL
+                // contrail).
                 if matches!(spell, 2 | 21)
                     // The importer homes the token's burst countdown
                     // +48 into f26 (conformance.rs) — same lane the
                     // native encoding uses.
                     && self.g.ent[i].f26 > 0
                     && self.g.ent[i].f63 & 3 == 0
-                    // sub_55DD0_56300 admission (remc1hw :61132-55):
-                    // both direction ctors (sub_3C0C0 :48040 /
-                    // :48148) author no castle-store requirement
-                    // (+132 = 0), so the only live gate is
-                    // first-burst-tick wizard mana >= +136 (= 1000);
-                    // mid-burst re-admits freely. (A rival's purse
-                    // isn't gated here — the arm only sees rivals
-                    // mid-burst in practice.)
-                    && (self.g.ent[i].f26 as i32 != self.g.ent[i].f50 as i32
-                        || self.player.owned[spell] != i as u16
-                        || self.player.mana >= 1000)
                 {
-                    let puff = if self.player.owned[spell] == i as u16 {
-                        Some((self.human_pose, PLAYER_TARGET))
-                    } else {
-                        let o = self.g.ent[i].f144 as usize;
-                        self.g
-                            .ent
-                            .get(o)
-                            .filter(|c| c.class64 == 3 && c.flags & 0x400 == 0)
-                            .map(|c| ((c.x, c.y, c.z), c.id24))
-                    };
+                    let o = self.g.ent[i].f144 as usize;
+                    let puff = self
+                        .g
+                        .ent
+                        .get(o)
+                        .filter(|c| c.class64 == 3 && c.flags & 0x400 == 0)
+                        .map(|c| ((c.x, c.y, c.z), c.id24));
                     if let Some(((cx, cy, cz), own)) = puff {
                         if let Some(p) = self.g.spawn_effect(2, cx, cy, cz) {
                             // :61406-07 — id24 = the caster, act_life
@@ -6131,6 +6230,27 @@ impl World {
                     }
                 }
                 return; // owned tokens otherwise idle
+            }
+            // The jar's own z-servo runs EVERY tick, before the poll
+            // gate (sub_55A40 :64765-70, sub_42090(pos, ground, 0, 0,
+            // -128)): fall up to 128/tick toward the ground, clamp UP
+            // instantly with rising ground. Frozen-z only matched the
+            // corpora while no terrain moved under a jar — mc1l1's
+            // scorch/worm episodes move the ground under the placed
+            // Accelerate jar and retail tracks it exactly (t=3143..
+            // 3247 z rows). Distinct from the reshape walk (:51729,
+            // which skips class 12): this is the jar ticking itself.
+            {
+                let (x, y) = (self.g.ent[i].x, self.g.ent[i].y);
+                let alt = self.g.ground_z(x, y) as i16;
+                let z = self.g.ent[i].z;
+                if z > alt {
+                    self.g.ent[i].z = z.wrapping_sub(128).max(alt);
+                    self.entities_dirty = true;
+                } else if z < alt {
+                    self.g.ent[i].z = alt;
+                    self.entities_dirty = true;
+                }
             }
             if self.g.ent[i].f63 & 3 != 0 {
                 return;
@@ -6335,10 +6455,58 @@ impl World {
                 gate_failed = true;
             }
         }
+        // sub_56380 (:65131) / the backwards twin sub_57F00 (:66172)
+        // — the speed tokens' jar-side arm, ahead of the shared
+        // decrement. The v_14 kill (the resisting press moved the
+        // flight target at the last carpet dispatch) forces ONE final
+        // decrement (:65146-50, :66188-89); otherwise the arm admits
+        // on the 55DD0 gate — no castle-store requirement is
+        // authored, so the only live check is FULL-tick wizard mana
+        // >= the one-shot cost (mid-burst re-admits freely; a refused
+        // full tick runs nothing but still decrements, :65190).
+        let speed_token = matches!(spell, 2 | 21);
+        let mut speed_sustained = false;
+        if was_live && speed_token {
+            let count = self.spells()[spell].count as i16;
+            if self.mc1_v14 {
+                self.g.ent[i].f26 = 1;
+            } else if self.g.ent[i].f26 != count || self.mc1_token_gate(spell) {
+                speed_sustained = true;
+                let full = {
+                    let e = &mut self.g.ent[i];
+                    let full = e.f26 == count;
+                    if full && e.flags & 0x80 == 0 {
+                        e.flags |= 0x80; // :65154-57 — the spell-ACTIVE bit
+                    }
+                    if e.f26 == count - 2 {
+                        e.flags &= !0x80; // :65160-65
+                    }
+                    full
+                };
+                if full {
+                    // sub_55E80's full arm (:64942-52) from the
+                    // TOKEN: the arm tick, every held re-arm and the
+                    // first release tick each stamp the full one-shot
+                    // cost on the regen delta; the wizard pass
+                    // applies it later this same frame (retail's
+                    // token-below-carpet order). Live in retail — the
+                    // remc1 `//fix` comment-out is the maintainer's
+                    // (the remc2 twin runs it, EventsFunctions.cpp
+                    // :55569), and the mc1l1 held ladder (three
+                    // −1000 landings, t=8746-48) measures it.
+                    self.mana_debit(self.spell_cast_cost(spell));
+                }
+            }
+        }
         if self.g.ent[i].f26 > 0 {
             self.g.ent[i].f26 -= 1; // :65260 — post-fire
         }
-        if was_live && !fired && !gate_failed {
+        // The mid-burst regen pin (sub_55E80's else arm). For the
+        // speed tokens it belongs to the SUSTAIN arm only: a v_14
+        // kill or a refused full tick skips sub_55E80 entirely
+        // (:65146-50), and on a sustained full tick the debit above
+        // already made the delta negative, so the >0 pin no-ops.
+        if was_live && !fired && !gate_failed && (!speed_token || speed_sustained) {
             self.suppress_regen();
         }
         let active = self.g.ent[i].f26 > 0;
@@ -6357,24 +6525,40 @@ impl World {
                     }
                 }
             }
-            2 => {
-                if !active && self.player.accel == 1 {
+            2 | 21 => {
+                let dir: i8 = if spell == 2 { 1 } else { -1 };
+                if !active && self.player.accel == dir {
                     self.player.accel = 0;
                 }
-                // sub_56380 (:65180-89): the burst's (10,2) contrail
-                // puff at the carpet every 4th token tick — id24 =
-                // the caster, act_life ×4 (ctor 8 → 32 ticks).
-                if active && self.g.ent[i].f63 & 3 == 0 && self.player.state == LifeState::Alive {
+                if was_live && !active {
+                    // The burst END (natural expiry or the v_14
+                    // kill): the spell-ACTIVE bit clears and BOTH
+                    // flight speed columns snap to the SIGNED base —
+                    // +80 forward (:65192-96), −80 backwards
+                    // (:66224-29) — mailed to the carpet dispatch,
+                    // which re-reads the (now dead) override at its
+                    // own walk moment.
+                    self.g.ent[i].flags &= !0x80;
+                    self.player.accel = 0;
+                    self.player.speed_boost = 0.0;
+                    self.pending_speed_base = Some(80 * dir as i16);
+                }
+                // sub_56380 (:65180-89) / the twin (:66211-18): the
+                // burst's (10,2) contrail puff at the carpet every
+                // 4th token tick — id24 = the caster, act_life ×4
+                // (ctor 8 → 32 ticks). Retail spawns it inside the
+                // sustain arm, PRE-decrement: the counter==1 expiry
+                // tick still puffs; a v_14 kill or refused full tick
+                // does not.
+                if speed_sustained
+                    && self.g.ent[i].f63 & 3 == 0
+                    && self.player.state == LifeState::Alive
+                {
                     let (cx, cy, cz) = self.human_pose;
                     if let Some(p) = self.g.spawn_effect(2, cx, cy, cz) {
                         self.g.ent[p].id24 = PLAYER_TARGET;
                         self.g.ent[p].act_life *= 4;
                     }
-                }
-            }
-            21 => {
-                if !active && self.player.accel == -1 {
-                    self.player.accel = 0;
                 }
             }
             4 => self.player.shield = active,
@@ -6615,8 +6799,10 @@ impl World {
     /// raw thrust input BEFORE the world turn (manual: "press the
     /// down cursor to cancel"; symmetric for Accelerate Backwards —
     /// the resisting input is the ONE control that works): negative
-    /// thrust cancels/vetoes type 2, positive thrust type 21. The
-    /// veto also blocks re-triggering for the rest of the tick.
+    /// thrust vetoes type 2, positive thrust type 21 (the veto blocks
+    /// re-triggering for the rest of the tick). MC2 kills its window
+    /// immediately here; the MC1 kill rides the v_14 latch instead
+    /// (see the arm below).
     pub fn thrust_cancel(&mut self, thrust: f32) {
         // MC2 Speed: a braking input INTERRUPTS the armed window early
         // (it must be interruptible — otherwise it flies way further
@@ -6651,17 +6837,32 @@ impl World {
             }
             return;
         }
+        // MC1: no immediate kill here — the cancel is retail's v_14
+        // two-phase: the resisting press MOVES the boosted target at
+        // the carpet dispatch (arming `mc1_v14`, flight.rs :55762-80)
+        // and the token ends the burst on its NEXT pass (counter = 1,
+        // :65146-50). This tick only arms the re-trigger vetoes.
         if thrust < 0.0 {
             self.accel_veto.0 = true;
-            if self.player.accel == 1 {
-                self.stop_accel(2);
-            }
         }
         if thrust > 0.0 {
             self.accel_veto.1 = true;
-            if self.player.accel == -1 {
-                self.stop_accel(21);
-            }
+        }
+    }
+
+    /// The pre-v_14 immediate brake-cancel, kept for the ALTERNATE
+    /// movers (enhanced thrust model) that never run the faithful
+    /// carpet dispatch and so never arm the v_14 latch. Same
+    /// resisting-direction law, applied the same tick.
+    pub fn accel_brake_immediate(&mut self, thrust: f32) {
+        if self.player.accel_mc2_factor != 0 {
+            return; // the MC2 arm of thrust_cancel already handled it
+        }
+        if thrust < 0.0 && self.player.accel == 1 {
+            self.stop_accel(2);
+        }
+        if thrust > 0.0 && self.player.accel == -1 {
+            self.stop_accel(21);
         }
     }
 
@@ -7844,6 +8045,26 @@ impl World {
         // sub_4A1E0 (EF:32967): firing a disposition arms every kind-7
         // StageVar keyed to it (a no-op when no StageVars are loaded).
         self.mc2_stagevar_arm_disposition(dis);
+        // sub_37220 (:43825) / sub_49F90 (Level.cpp:1271) — called at
+        // the top of BOTH fire routines (sub_37440 :43960, sub_4A1E0
+        // EF:32966): every disposition fire re-ranks the allocator
+        // stacks by the descending 999→1 pool scan, so the fire's
+        // payloads allocate ASCENDING from the LOWEST free slot no
+        // matter what order earlier play freed them in (mc1l1 t=344:
+        // retail parks the chained (11,1) on slot 41; the incremental
+        // stack handed that slot to a puff).
+        let pinned = if self.game == GameId::Mc2 {
+            self.mc2_carpet_slot
+        } else {
+            self.mc1_carpet_slot
+        };
+        self.g.mc2_rebuild_free(pinned);
+        let victim_mask = if self.game == GameId::Mc2 {
+            0x2_0000
+        } else {
+            0x20400
+        };
+        self.g.rebuild_recycle(victim_mask);
         for i in 1..self.table.len() {
             if self.table[i].class != 0 && self.table[i].dis_id == dis {
                 self.spawn_from_thing(i);
@@ -7852,6 +8073,10 @@ impl World {
                 }
             }
         }
+        // var_u32_4593 = -1 (:43984) / dword_0x11e6 = -1 (EF:32995):
+        // the victim stack disarms when the fire ends — a sacrifice is
+        // legal only WITHIN a fire (the one-fire eviction window).
+        self.g.mc2_recycle.stack.clear();
         // sub_4A1E0 tail (EF:32994): re-arm the watch-by-model gates.
         self.mc2_stagevar_rearm_watchers();
     }
@@ -9613,10 +9838,12 @@ impl World {
         }
         if self.overlap(i, player) {
             let e = &self.g.ent[i];
-            let bearing = Gen::angle_of(
-                Gen::wrap_delta(e.x as i16, player.x as i16) as i16,
-                Gen::wrap_delta(e.y as i16, player.y as i16) as i16,
-            );
+            // The facing cone (:29208-09): sub_42150(wizard, portal)
+            // — the bearing FROM the wizard TO the portal on the full
+            // 16-bit wrapping axes (mc1l1 t=9899: bearing 1273 vs
+            // heading 1163 → 110 < 0xAA, warped; the old tile-byte
+            // wrap_delta form read a mangled 932 and never fired).
+            let bearing = Gen::angle_between(player.x, player.y, e.x, e.y);
             let d = player.heading.wrapping_sub(bearing) & 0x7FF;
             if d.min(2048 - d) < 0xAA {
                 let (dx, dy) = (self.g.ent[i].dest_x, self.g.ent[i].dest_y);
@@ -9682,10 +9909,11 @@ impl World {
         }
         if self.overlap(i, player) {
             let e = &self.g.ent[i];
-            let bearing = Gen::angle_of(
-                Gen::wrap_delta(e.x as i16, player.x as i16) as i16,
-                Gen::wrap_delta(e.y as i16, player.y as i16) as i16,
-            );
+            // The same wizard→portal bearing as the MC1 vortex (the
+            // EF twin cites the identical cone; the old tile-byte
+            // wrap_delta form mangled engine-unit deltas — see
+            // portal_tick).
+            let bearing = Gen::angle_between(player.x, player.y, e.x, e.y);
             let d = player.heading.wrapping_sub(bearing) & 0x7FF;
             if d.min(2048 - d) < 0xAA {
                 let (dx, dy) = (self.g.ent[i].dest_x, self.g.ent[i].dest_y);
@@ -10942,6 +11170,8 @@ impl World {
             entities_dirty,
             pending_teleport,
             pending_speed_zero,
+            pending_speed_base,
+            mc1_v14,
             player,
             rivals,
             mc2_rivals,
@@ -11014,6 +11244,8 @@ impl World {
         w.put(entities_dirty);
         w.put(pending_teleport);
         w.put(pending_speed_zero);
+        w.put(pending_speed_base);
+        w.put(mc1_v14);
         w.put(player);
         w.put(rivals);
         w.put(mc2_rivals);
@@ -11068,6 +11300,8 @@ impl World {
         self.entities_dirty = r.get()?;
         self.pending_teleport = r.get()?;
         self.pending_speed_zero = r.get()?;
+        self.pending_speed_base = r.get()?;
+        self.mc1_v14 = r.get()?;
         self.player = r.get()?;
         self.rivals = r.get()?;
         self.mc2_rivals = r.get()?;
@@ -12065,6 +12299,7 @@ mod tests {
                 .expect("griffon");
         w.g.ent[m].id24 = 0; // wild
         w.g.ent[m].f58 = 16; // awake — the bucket-scan gate
+        w.g.rebuild_mob_chains();
 
         // The bolt as the cloud lays it: cloud altitude, yaw due north,
         // the storm's fixed pitch 56, a third of the ctor life.
@@ -13073,6 +13308,7 @@ mod tests {
                 c.y = cy;
                 c.z = bz;
             }
+            w.g.rebuild_mob_chains();
             // Aim so the creature sits exactly 0xA0 off the bolt's yaw.
             let a = Gen::angle_between(bx, by, cx, cy);
             w.g.ent[bolt].f30 = (a + 0xA0) & 0x7FF;
@@ -17073,13 +17309,32 @@ mod tests {
         assert_eq!(w.accel_override(), Some(-3.0), "negative held backward");
         let m2 = w.player.owned[2] as usize;
         assert_eq!(w.g.ent[m2].f26, 0, "forward's charge force-cleared");
-        // The resisting thrust input cancels instantly (manual: the
-        // down cursor; forward thrust for the backward spell).
+        // The resisting thrust input is a TWO-PHASE kill: the veto
+        // arms at the tick head, and the press that moves the flight
+        // target arms the mover's v_14 latch (:55766-80) — the token
+        // reads the latch on its NEXT pass and ends the burst
+        // (counter = 1 → 0, :66188-89). Pinned lanes have no mover,
+        // so the test publishes the latch by hand.
         w.thrust_cancel(1.0);
-        assert_eq!(w.accel_override(), None, "brake input kills the channel");
-        // The veto also blocks re-triggering within the same tick.
+        assert_eq!(
+            w.accel_override(),
+            Some(-3.0),
+            "the veto alone does not kill the channel"
+        );
+        w.mc1_v14 = true;
         w.tick(away(), back);
-        assert_eq!(w.accel_override(), None, "vetoed re-trigger");
+        assert_eq!(
+            w.accel_override(),
+            None,
+            "v_14 ends the burst at the token; the veto blocked the re-arm"
+        );
+        assert_eq!(
+            w.pending_speed_base,
+            Some(-80),
+            "the backwards burst restores the NEGATIVE base (:66226-27)"
+        );
+        w.mc1_v14 = false;
+        w.pending_speed_base = None;
         // Next tick (no veto) it channels again, then drains after
         // release (count 251) back to no override.
         w.tick(away(), back);
@@ -17122,17 +17377,30 @@ mod tests {
         };
         w.tick(away(), fwd);
         assert_eq!(w.accel_override(), Some(3.0), "the cast tick channels");
-        assert_eq!(
-            w.player.mana_delta,
-            -(cost as i32),
-            "the cast stamps the debit onto the regen delta"
+        assert!(
+            w.player.mana_delta > 0,
+            "the cast command itself no longer debits — the TOKEN's \
+             full-tick arm stamps it (retail's :64942-52 site)"
         );
 
-        // The debit lands on the next wizard tick and empties the
-        // pool, so this re-arm is refused: the burst keeps propelling
-        // at 2.0 rather than cancelling, and the hold is over.
+        // The token's full-tick arm stamps the debit and the wizard
+        // pass applies it the same frame, emptying the pool. The held
+        // re-arm this tick still passes — retail's :55890 gate reads
+        // the PRE-step pool (the mc1l32 t=671 law) — so the hold
+        // survives the emptying tick at 3.0.
         w.tick(away(), fwd);
         assert_eq!(w.player.mana, 0, "the held tick actually spent the pool");
+        assert_eq!(
+            w.accel_override(),
+            Some(3.0),
+            "the re-arm gate reads the pre-step pool — 3.0 survives one tick"
+        );
+
+        // Now BOTH gates read the dry pool: the token refuses its
+        // full tick (no debit, no sustain) and the re-arm is silently
+        // refused — the burst keeps propelling at 2.0 rather than
+        // cancelling, and the hold is over.
+        w.tick(away(), fwd);
         assert_eq!(
             w.accel_override(),
             Some(2.0),
@@ -17141,7 +17409,8 @@ mod tests {
         assert_ne!(w.player.accel, 0, "exhaustion does not cancel the channel");
 
         // And it stays refused while the pool is short of the FULL
-        // cost — no partial-price 3.0.
+        // cost — no partial-price 3.0. (Mid-burst suppression pins
+        // the pool: regen cannot refund an arm while the burst lives.)
         for _ in 0..4 {
             w.tick(away(), fwd);
             assert_eq!(w.accel_override(), Some(2.0), "still unaffordable");
@@ -21704,6 +21973,9 @@ mod tests {
             let e = &mut w.g.ent[v];
             e.id24 = 0;
             e.f58 = 100; // awake — the acquire's creature gate
+            // Tick-top chain snapshot (the live tick builds it in its
+            // top sweep; these tests drive proj_tick directly).
+            w.g.rebuild_mob_chains();
             v
         };
         // Fire due north from (100,100) with the victim eight tiles up
@@ -21808,6 +22080,7 @@ mod tests {
             e.f58 = 100;
             e.f78 = 0;
             e.z = bz;
+            w.g.rebuild_mob_chains();
             v
         };
         // NEAR: 4.5 tiles ahead, 0.75 east — d ~1167, Δyaw ~54.
@@ -21929,6 +22202,7 @@ mod tests {
             e.f78 = 0;
             e.z = bz;
         }
+        w.g.rebuild_mob_chains();
         let b = w.g.spawn_fireball(bx, by, bz).expect("bolt");
         w.g.arm_projectile(b, PLAYER_TARGET, 0xFF, 0xFF, 0, bx, 92 << 8, bz, 100, 0, 0);
         w.g.ent[b].f30 = 10;
@@ -22094,6 +22368,7 @@ mod tests {
             w.g.spawn_creature(16, 100 << 8, 108 << 8, ground)
                 .expect("victim");
         w.g.ent[v].f58 = 100;
+        w.g.rebuild_mob_chains();
         let b = w.g.spawn_fireball(bx, by, ground + 512).expect("bolt");
         w.g.arm_projectile(
             b,

@@ -643,10 +643,24 @@ pub(crate) struct Gen {
     pub(crate) free: Vec<u16>,
     /// Tick-start mana-ball roster (see [`TickChain`]).
     pub(crate) ball_chain: TickChain,
+    /// Tick-start per-model class-5 roster chains (see [`MobChains`]).
+    pub(crate) mob_chains: MobChains,
     /// MC2's recycle-victim stack — the allocator's FALLBACK once
     /// `free` is dry (see [`Mc2Recycle`]). Empty on MC1, whose
     /// allocator has the opposite priority.
     pub(crate) mc2_recycle: Mc2Recycle,
+    /// The castle-guard REGISTER (retail wizext+84, per OWNER): 34
+    /// positional guard-slot entries the fleet dispatch walks
+    /// (`sub_47400` :56412-47). The register lives on the WIZARD and
+    /// SURVIVES castle death — a stale entry (freed/reused slot, or a
+    /// state-95 guard corpse) re-arms the castle's +46 cooldown
+    /// WITHOUT spawning, which is why a rebuilt castle's first guard
+    /// arrives 16 dispatch passes late (mc1l1 t=2571: guard 313 died
+    /// ~t=2000, the stale entry re-arms at the state-4 entry, the
+    /// fresh guard lands t≈2605 — the port's live census spawned at
+    /// t=2572). Position matters: a stale entry BEFORE the first
+    /// empty slot blocks that same pass's spawn.
+    pub(crate) mc1_guard_reg: Mc1GuardReg,
     /// Global LCG (`rand_4`), = the level seed at scan time.
     pub(crate) rand: u32,
     /// Terrain-retile LCG (`pseudoRand`), u16 stream.
@@ -1040,6 +1054,27 @@ impl<const TAG: u8> std::hash::Hash for Mc2Quiet<TAG> {
 #[derive(Default)]
 pub(crate) struct Mc2SlotMap<const TAG: u8>(pub std::collections::BTreeMap<u16, u16>);
 
+/// The per-owner castle-guard register (see [`Gen::mc1_guard_reg`]).
+/// Hash-transparent while no register holds a nonzero entry, so every
+/// pre-guard-era golden stands.
+#[derive(Default, Clone, Debug, PartialEq)]
+pub(crate) struct Mc1GuardReg(pub std::collections::BTreeMap<u16, Vec<u16>>);
+
+impl std::hash::Hash for Mc1GuardReg {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        for (owner, reg) in &self.0 {
+            if reg.iter().all(|&s| s == 0) {
+                continue;
+            }
+            state.write_u8(0x84);
+            state.write_u16(*owner);
+            for &s in reg {
+                state.write_u16(s);
+            }
+        }
+    }
+}
+
 impl<const TAG: u8> std::hash::Hash for Mc2SlotMap<TAG> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         if !self.0.is_empty() {
@@ -1134,6 +1169,68 @@ impl std::hash::Hash for TickChain {
     fn hash<H: std::hash::Hasher>(&self, _: &mut H) {}
 }
 
+/// The per-model CLASS-5 roster chains (heads at wizext-file 36382 +
+/// 4·model), rebuilt by the tick-top sweep in ascending slot order
+/// with retail's membership sample — `act ≥ 0 ∧ state ≠ 120` at TICK
+/// TOP (CARPET.EXE, the rebuild after the reap; heads verified at
+/// 36382 against the binary — the lift's 36462 head-write was a
+/// transcription bug). A creature promoted or killed MID-tick keeps
+/// its tick-top membership until the next rebuild: mc1l1 t=4130's
+/// fireball muzzle acquire cannot see the segment the castle crush
+/// just promoted to a corpse state, because the chain was built while
+/// it was still state 120. Chain walks read LIVE fields off the
+/// members; only MEMBERSHIP (and order) is the snapshot. Derived per
+/// tick — hash-silent like [`TickChain`], never saved.
+#[derive(Default)]
+pub(crate) struct MobChains {
+    pub list: Vec<Vec<u16>>,
+    /// Per-model severed-chain cut, the [`TickChain::cut`] law: a
+    /// NewEvent REUSE of a chained slot wipes its +0 link and every
+    /// later walk stops there. `usize::MAX` = intact.
+    pub cut: Vec<usize>,
+}
+
+impl MobChains {
+    pub fn reset(&mut self, models: usize) {
+        self.list.resize(models, Vec::new());
+        self.cut.resize(models, usize::MAX);
+        for v in &mut self.list {
+            v.clear();
+        }
+        for c in &mut self.cut {
+            *c = usize::MAX;
+        }
+    }
+    /// The member prefix a retail walk of model `m`'s chain reaches.
+    pub fn visible(&self, m: usize) -> &[u16] {
+        match self.list.get(m) {
+            Some(v) => &v[..v.len().min(self.cut[m])],
+            None => &[],
+        }
+    }
+}
+
+impl std::hash::Hash for MobChains {
+    fn hash<H: std::hash::Hasher>(&self, _: &mut H) {}
+}
+
+impl Gen {
+    /// The tick-top [`MobChains`] rebuild, callable standalone for
+    /// tests that drive an acquire/chain consumer without running a
+    /// full `World::tick` (the live tick builds the chains inside its
+    /// top sweep — world.rs:2680, its only non-test twin).
+    #[cfg(test)]
+    pub(crate) fn rebuild_mob_chains(&mut self) {
+        self.mob_chains.reset(20);
+        for s in 1..self.ent.len() {
+            let e = &self.ent[s];
+            if e.class64 == 5 && e.act_life >= 0 && e.tick70 != 120 && (e.model65 as usize) < 20 {
+                self.mob_chains.list[e.model65 as usize].push(s as u16);
+            }
+        }
+    }
+}
+
 /// One sound request: engine sound id (the SNDS bank-0 index), the
 /// emitter's position on the u16 torus, and its slot as the instance
 /// tag (the original's entity+24). `player` marks requests the
@@ -1196,7 +1293,9 @@ impl Gen {
             slot_gen: SlotGens(vec![0; chassis.pool_slots]),
             free: (1..chassis.pool_slots as u16).rev().collect(),
             ball_chain: TickChain::default(),
+            mob_chains: MobChains::default(),
             mc2_recycle: Mc2Recycle::default(),
+            mc1_guard_reg: Mc1GuardReg::default(),
             rand: seed,
             pseudo,
             spawn_count: [0; 20],
@@ -1374,6 +1473,15 @@ impl Gen {
         if let Ok(pos) = self.ball_chain.list.binary_search(&(idx as u16)) {
             self.ball_chain.cut = self.ball_chain.cut.min(pos + 1);
         }
+        // The same severed-chain law for the per-model class-5 roster
+        // chains ([`MobChains`]): the memset below wipes +0, so any
+        // chain this slot was a tick-top member of stops here for the
+        // rest of the tick.
+        for m in 0..self.mob_chains.list.len() {
+            if let Ok(pos) = self.mob_chains.list[m].binary_search(&(idx as u16)) {
+                self.mob_chains.cut[m] = self.mob_chains.cut[m].min(pos + 1);
+            }
+        }
         // A reallocated slot must leave any tile chain BEFORE its
         // record resets — a stale linked record (an imported ghost,
         // or any future free path that forgets) would otherwise leave
@@ -1445,7 +1553,7 @@ impl Gen {
                 return None;
             }
             refilled = true;
-            self.mc2_rebuild_recycle();
+            self.rebuild_recycle(0x2_0000);
         }
     }
 
@@ -1455,11 +1563,15 @@ impl Gen {
     ///
     /// The port maintains its free stack incrementally, which is right
     /// for ordinary play; this exists for retail's own explicit
-    /// rebuild call sites. The MC2 death payout (EF:60101) and the
-    /// respawn (EF:43635) are both such sites, and the rebuild is
-    /// OBSERVABLE there: mc2l3's graves land on slots 3 and 1, and the
-    /// respawn's 26 re-minted spell tokens take 99, 100, 102… in spell
-    /// order — the lowest free slots, not the recorded stack's order.
+    /// rebuild call sites. The MC2 death payout (EF:60101), the
+    /// respawn (EF:43635) and EVERY disposition fire in both engines
+    /// (`World::fire_disposition` — sub_37440 :43960 / sub_4A1E0
+    /// EF:32966, MC1's scan twin is sub_37220 :43825) are such sites,
+    /// and the rebuild is OBSERVABLE there: mc2l3's graves land on
+    /// slots 3 and 1, the respawn's 26 re-minted spell tokens take 99,
+    /// 100, 102… in spell order, and mc1l1's t=344 trigger fire parks
+    /// its chained (11,1) on slot 41 — the lowest free slots, not the
+    /// incremental stack's order.
     ///
     /// Retail's reap half (`byte[1] & 4` → `sub_57F20`) is deliberately
     /// NOT mirrored: strict MC2 keeps disabled records through the
@@ -1478,20 +1590,22 @@ impl Gen {
     }
 
     /// `sub_49F90`'s victim half (Level.cpp:1284-1301): a DESCENDING
-    /// 999→1 pool scan pushing every live record flagged sacrificable
-    /// (`byte[2] & 2` = our `flags & 0x2_0000`), so the stack top — the
-    /// next sacrifice — is the LOWEST-numbered victim.
+    /// 999→1 pool scan pushing every live record whose flags meet
+    /// `mask`, so the stack top — the next sacrifice — is the
+    /// LOWEST-numbered victim. MC2 admits the sacrificable bit alone
+    /// (`byte[2] & 2` = `0x2_0000`); MC1's twin `sub_37220` (:43841)
+    /// admits the disable bit too (`0x20400`).
     ///
     /// The free half of that rebuild is deliberately not mirrored: our
     /// free stack is maintained incrementally and never leaks a
     /// class-0 slot, and this runs only with the pool FULL, where
     /// retail's own scan finds no free record either.
-    pub(crate) fn mc2_rebuild_recycle(&mut self) {
+    pub(crate) fn rebuild_recycle(&mut self, mask: u32) {
         self.mc2_recycle.stack = (1..self.ent.len() as u16)
             .rev()
             .filter(|&s| {
                 let e = &self.ent[s as usize];
-                e.class64 != 0 && e.flags & 0x2_0000 != 0
+                e.class64 != 0 && e.flags & mask != 0
             })
             .collect();
     }
@@ -2148,7 +2262,11 @@ impl Gen {
         // fire-trap records behind dispositions (they erupt as the
         // 10-tick blast ring when fired).
         match model {
-            0 | 1 | 5 | 17 | 23 | 25 => return self.spawn_effect(model as u8, x, y, z),
+            // 14: the mana-scatter puff (sub_3AB40) — authored THING
+            // records behind trigger dispositions mint it (mc1l1's
+            // t=344 scatter); the generic arm below skipped its two
+            // ctor rand draws and left it stateless.
+            0 | 1 | 5 | 14 | 17 | 23 | 25 => return self.spawn_effect(model as u8, x, y, z),
             39 => return self.spawn_mana_ball(x, y, z),
             _ => {}
         }
@@ -3851,7 +3969,6 @@ impl Gen {
         let own = self.ent[i].id24;
         let (bq, gq) = FLEET[self.ent[i].f26.clamp(0, 7) as usize];
         let mut balloons: Vec<usize> = Vec::new();
-        let mut guards = 0usize;
         let mut house_tally = 0i64;
         for j in 1..self.ent.len() {
             let e = &self.ent[j];
@@ -3860,7 +3977,6 @@ impl Gen {
             }
             match (e.class64, e.model65) {
                 (3, 3) if e.id24 == own => balloons.push(j),
-                (5, 15) if e.id24 == own => guards += 1,
                 (10, 45) if e.f144 == own => house_tally += e.f140.max(0) as i64,
                 _ => {}
             }
@@ -3908,32 +4024,84 @@ impl Gen {
             self.corpse_drop(b);
             self.ent[b].flags |= 0x400;
         }
-        // Guard respawn (:56412-47): throttled by the castle's +46
-        // cooldown (ours f46) — at most ONE guard per dispatch pass,
-        // 16 passes between spawns — placed at (x+128, y+640) on the
-        // GROUND (the courtyard, off the tower slopes), facing 512.
+        // Guard respawn (:56412-47) — driven by the wizext+84 GUARD
+        // REGISTER ([`Gen::mc1_guard_reg`]), not a live census. Per
+        // pass, after the +46 cooldown decrement, the walk visits the
+        // first `gq` register slots in order: a STALE entry (not a
+        // live (5,15), or the state-95 corpse) clears and RE-ARMS the
+        // cooldown without spawning (the CARPET.EXE walk, disassembled
+        // at obj1 :56448-51 — the delayed-first-guard law of mc1l1
+        // t=2571); an EMPTY slot with the cooldown at 0 spawns ONE
+        // guard at the castle's own position and relinks it to the
+        // courtyard (x+128, y+640, ground), facing 512.
         if self.ent[i].f46 > 0 {
             self.ent[i].f46 -= 1;
         }
-        if guards < gq && self.ent[i].f46 == 0 {
-            let gx = cx.wrapping_add(128);
-            let gy = cy.wrapping_add(640);
-            let gz = self.ground_z(gx, gy) as i16;
-            // Both games park a (5,15) archer in the courtyard; the
-            // guard itself is per-column (MC2: mc2_spawn_m15, retail
-            // EF:61488 — spawning the MC1 creature under the MC2
-            // dispatch was the class-5-model-15 misfit despawn).
-            let guard = match self.verbs.movement {
-                crate::verbs::MovementVerb::Mc2 => self.mc2_spawn_m15(gx, gy, gz),
-                _ => self.spawn_creature(15, gx, gy, gz),
-            };
-            if let Some(g) = guard {
-                self.ent[g].id24 = own;
-                self.ent[g].f144 = own;
-                self.ent[g].f30 = 512;
-                self.ent[g].f34 = 512;
-                self.ent[i].f46 = 16;
+        // MC2 keeps the live-census stand-in: its dispatcher twin
+        // (sub_60400 EF:61405) has not been register-verified against
+        // the binary, its corpora measure identical under both forms,
+        // and the cave goldens pin the census timing.
+        if matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2) {
+            if gq > 0 && self.ent[i].f46 == 0 {
+                let guards = (1..self.ent.len())
+                    .filter(|&j| {
+                        let e = &self.ent[j];
+                        e.class64 == 5 && e.model65 == 15 && e.flags & 0x400 == 0 && e.id24 == own
+                    })
+                    .count();
+                if guards < gq {
+                    let gx = cx.wrapping_add(128);
+                    let gy = cy.wrapping_add(640);
+                    let gz = self.ground_z(gx, gy) as i16;
+                    if let Some(g) = self.mc2_spawn_m15(gx, gy, gz) {
+                        self.ent[g].id24 = own;
+                        self.ent[g].f144 = own;
+                        self.ent[g].f30 = 512;
+                        self.ent[g].f34 = 512;
+                        self.ent[i].f46 = 16;
+                    }
+                }
             }
+        } else if gq > 0 {
+            let mut reg = self
+                .mc1_guard_reg
+                .0
+                .get(&own)
+                .cloned()
+                .unwrap_or_else(|| vec![0u16; 34]);
+            for k in 0..gq.min(reg.len()) {
+                let s = reg[k] as usize;
+                if s != 0 {
+                    let g = &self.ent[s];
+                    if g.class64 != 5 || g.model65 != 15 || g.tick70 == 95 {
+                        reg[k] = 0;
+                        self.ent[i].f46 = 16;
+                    }
+                } else if self.ent[i].f46 == 0 {
+                    // Both games park a (5,15) archer in the
+                    // courtyard; the guard itself is per-column (MC2:
+                    // mc2_spawn_m15, retail EF:61488 — spawning the
+                    // MC1 creature under the MC2 dispatch was the
+                    // class-5-model-15 misfit despawn).
+                    let guard = match self.verbs.movement {
+                        crate::verbs::MovementVerb::Mc2 => self.mc2_spawn_m15(cx, cy, cz),
+                        _ => self.spawn_creature(15, cx, cy, cz),
+                    };
+                    if let Some(g) = guard {
+                        self.ent[i].f46 = 16;
+                        self.ent[g].id24 = own;
+                        self.ent[g].f144 = own;
+                        self.ent[g].f30 = 512;
+                        self.ent[g].f34 = 512;
+                        reg[k] = g as u16;
+                        let gx = cx.wrapping_add(128);
+                        let gy = cy.wrapping_add(640);
+                        let gz = self.ground_z(gx, gy) as i16;
+                        self.move_relink(g, gx, gy, gz);
+                    }
+                }
+            }
+            self.mc1_guard_reg.0.insert(own, reg);
         }
         let full = house_tally + self.ent[i].f140.max(0) as i64 >= self.ent[i].f136.max(0) as i64;
         // THE STAGGER (:56338): the ball re-pick runs only on passes
@@ -5735,8 +5903,10 @@ impl Gen {
             // A restored world simply has no ranked victims until the
             // list next refreshes.
             mc2_recycle: _,
+            mc1_guard_reg,
             // Rebuilt at every tick top — never saved.
             ball_chain: _,
+            mob_chains: _,
         } = self;
         w.put(t);
         w.put(map_entity);
@@ -5788,6 +5958,7 @@ impl Gen {
         w.put(mc2_rebound_precise);
         w.put(mc2_allied);
         w.put(mc2_castle_research);
+        w.put(&mc1_guard_reg.0);
     }
 
     pub(crate) fn snap_apply(&mut self, r: &mut Reader) -> Result<(), SnapshotError> {
@@ -5837,6 +6008,7 @@ impl Gen {
         self.mc2_rebound_precise = r.get()?;
         self.mc2_allied = r.get()?;
         self.mc2_castle_research = r.get()?;
+        self.mc1_guard_reg.0 = r.get()?;
         // Presentation feed — never saved, never inherited across a
         // load.
         self.bolt_fx.0.clear();

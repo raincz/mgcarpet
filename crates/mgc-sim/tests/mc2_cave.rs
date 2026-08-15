@@ -475,6 +475,14 @@ fn mc2_cave_behaviors_and_goldens() {
     // MC2 spheres (nothing in TransformArcherToMana reads them), so
     // this is bookkeeping toward retail's byte image; see the
     // OBSERVABLE verdict below.
+    // Re-pinned (all checkpoints) for the DISPOSITION-FIRE stack
+    // rebuild: every fire re-ranks the allocator stacks by the
+    // descending pool scan and disarms the victim stack after
+    // (sub_49F90 at sub_4A1E0's top, EF:32966 + dword_0x11e6=-1 —
+    // MC1 twin sub_37220/sub_37440, CARPET.EXE-verified; the mc1l1
+    // t=344 slot-allocation wall). Cave dis-fires now allocate
+    // ascending-from-lowest. Attribution: the only MC2-visible
+    // change of the batch (register + chains are MC1-gated).
     // Re-pinned (LAST checkpoint only; 1-3 hold) for the SCORCH DISC —
     // `dig_scorch` is the ring-0 DISC of sub_40D30 / MC2 sub_572C0
     // (the SEARCH.DAT 2x2 zero block minus the walker's dropped last
@@ -487,10 +495,10 @@ fn mc2_cave_behaviors_and_goldens() {
     assert_eq!(
         got,
         vec![
-            0xd73f49abfb15d3c6u64,
-            0xfe5ebe96a6f529d1,
-            0xc1c0fa09ce5b635e,
-            0x33e0d3264fc2327a,
+            0xa484eb77bf33e16fu64,
+            0x55090d8941e36ae0,
+            0xc59acdae04fdde29,
+            0xdd42049b850f6384,
         ],
         "cave goldens moved — re-pin ONLY for an intended fidelity change"
     );
@@ -562,10 +570,10 @@ fn mc2_cave_behaviors_and_goldens() {
     // terrain, its ceiling counter-shifts and everything
     // ground-following them genuinely move. First three hold.
     const OBSERVABLE: [u64; 4] = [
-        0xfb1faf378bf44770,
-        0x339f43e8e59380d8,
-        0x62f2504ead5e10e0,
-        0xbcee5e2f8cbe60fc,
+        0xca0e5c449cf57b10,
+        0x65bac868017c2757,
+        0xdbbeee1a0bf108ce,
+        0x73367e42e9d447a8,
     ];
     assert_eq!(
         obs, OBSERVABLE,

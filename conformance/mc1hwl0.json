@@ -348,9 +348,8 @@
     {
       "t": 2059,
       "status": "capture",
-      "sig": "484c115249ce56da",
+      "sig": "87bad0cd2e229562",
       "atoms": [
-        "field:12,23:z",
         "field:12,2:f26"
       ],
       "note": "auto-triage vs known-deviations: roster: mc1hwl0-terrain-z"

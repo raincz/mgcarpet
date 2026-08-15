@@ -146,14 +146,13 @@ fn step_mc1(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand
         0.0
     };
     world.thrust_cancel(thrust);
-    // Accelerate expiry/cancel edge: MC1 restores +80 MAX FORWARD,
-    // even out of backwards flight (:65191-97).
+    // The Accelerate override, kill and burst-end ±80 base restore
+    // all resolve INSIDE the walk now (retail's token-below-carpet
+    // order): the carpet dispatch re-reads the override and consumes
+    // the base-restore mail at its own slot, and the mover's v_14
+    // latch drives the kill one token pass later. The tick-head
+    // sample below is just the drive's initial value.
     let over = world.accel_override();
-    if ch.accel_was_active && over.is_none() {
-        ch.s.tgt_speed = 80;
-        ch.s.act_speed = 80;
-    }
-    ch.accel_was_active = over.is_some();
     let mut drive = FlightDrive {
         s: &mut ch.s,
         inp,

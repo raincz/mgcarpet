@@ -185,10 +185,9 @@
     {
       "t": 677,
       "status": "open",
-      "sig": "054468d05bab533e",
+      "sig": "77ea4ccde3e801f3",
       "atoms": [
-        "field:12,3:f26",
-        "field:3,1:mana"
+        "field:12,3:f26"
       ],
       "note": "auto-triage vs known-deviations: 1 row(s) unexplained"
     },

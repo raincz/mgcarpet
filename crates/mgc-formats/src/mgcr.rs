@@ -945,10 +945,14 @@ pub struct RetailEntMc1 {
     pub frames89: u8,  // +89
     /// Damage mailboxes +90..126: six {u32 amount, u16 source}.
     pub mail: [(u32, u16); 6],
-    pub f126: i16,   // +126 (actual speed)
-    pub f128: i16,   // +128 (target speed)
-    pub f130: i16,   // +130 (acceleration)
-    pub f132: u16,   // +132
+    pub f126: i16, // +126 (actual speed)
+    pub f128: i16, // +128 (target speed)
+    pub f130: i16, // +130 (acceleration)
+    /// +132 — SIGNED 32-bit pending mana delta on wizard carpets
+    /// (cast debits are negative and exceed 16 bits: mc1l1 records a
+    /// −40000 castle-cast debit and deltas past ±65536; the old u16
+    /// read truncated both).
+    pub f132: i32,
     pub f136: i32,   // +136 (mana cap)
     pub f140: i32,   // +140 (mana)
     pub f144: u16,   // +144 (ball owner)
@@ -1139,7 +1143,7 @@ pub fn decode_retail_ent_mc1(d: &[u8], slot: u16) -> RetailEntMc1 {
         f126: i16_(d, o + 126),
         f128: i16_(d, o + 128),
         f130: i16_(d, o + 130),
-        f132: u16_(d, o + 132),
+        f132: i32_(d, o + 132),
         f136: i32_(d, o + 136),
         f140: i32_(d, o + 140),
         f144: u16_(d, o + 144),

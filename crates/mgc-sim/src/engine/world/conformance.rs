@@ -423,6 +423,31 @@ impl World {
         self.g.erupting = 0;
         self.g.plume = 0;
 
+        // The wizext+84 GUARD REGISTER is not in the recording:
+        // rebuild its LIVE half from the owner-stamped (5,15) roster
+        // (ascending slot order into the low register slots — the
+        // fill order retail's own spawns produce). STALE entries —
+        // the retail-only memory of dead guards that re-arms the +46
+        // cooldown — are unknowable from a snapshot, so a pair whose
+        // tick trips the stale→re-arm law diverges at that one
+        // boundary (mc1l1 t=2571).
+        self.g.mc1_guard_reg.0.clear();
+        for slot in 1..n {
+            let e = &self.g.ent[slot];
+            if e.class64 == 5 && e.model65 == 15 && e.tick70 != 95 && e.f144 != 0 {
+                let owner = e.f144;
+                let reg = self
+                    .g
+                    .mc1_guard_reg
+                    .0
+                    .entry(owner)
+                    .or_insert_with(|| vec![0u16; 34]);
+                if let Some(k) = reg.iter().position(|&v| v == 0) {
+                    reg[k] = slot as u16;
+                }
+            }
+        }
+
         // The human column: pool-entity state routes to Player, the
         // Type_160 tail to the Gen mirrors.
         self.g.player_mail = carpet.mail.map(|(a, s)| (a, tr(s)));
@@ -466,7 +491,11 @@ impl World {
             let e = &st.ents[w.play_index as usize];
             r.mana = e.f140.max(0) as u32;
             r.mana_max = e.f136.max(0) as u32;
-            r.mana_delta = e.f132 as i32;
+            // +132 is a SIGNED 32-bit delta (cast debits are negative;
+            // castle casts exceed 16 bits) — the old u16 decode turned
+            // a −50 debit into +65486 and the apply clamped to the
+            // ceiling.
+            r.mana_delta = e.f132;
             r.vdes = w.cmd_speed;
             r.jink = w.strafe;
             r.grace = w.grace;
@@ -511,11 +540,15 @@ impl World {
             // closure always reads the refreshed floor — but every
             // live MID-burst spell event zeroes it again before the
             // next apply (sub_55E80 :64956; the first burst tick,
-            // +48 == +50, does not). The LAUNCHER tokens now run that
-            // machine live (manifestation_tick under strict, with the
-            // wizard pass applying after them), so their pairs seed
-            // the recorded delta raw; only the still-inert
-            // hold/channel/toggle tokens keep the seed clamp.
+            // +48 == +50, does not). The LAUNCHER and SPEED (2/21)
+            // tokens now run that machine live (manifestation_tick
+            // under strict, with the wizard pass applying after
+            // them), so their pairs seed the recorded delta raw — a
+            // mid-glide pair keeps an ABOVE-carpet token's pending
+            // debit (mc1l1 t=8889-8910: six fireball −200 stamps
+            // rode f132 through the accel glide). Only the
+            // still-inert hold/channel/toggle tokens keep the seed
+            // clamp.
             mana_delta: if st.ents.iter().any(|e| {
                 e.class64 == 12
                     && e.f144 == 0
@@ -524,12 +557,22 @@ impl World {
                     && !(e.f70 % 3 == 0
                         && matches!(
                             e.f70 / 3,
-                            0 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 16 | 17 | 18 | 19 | 20 | 22
+                            0 | 2 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 16 | 17 | 18 | 19 | 20
+                                | 21
+                                | 22
                         ))
             }) {
                 0
             } else {
-                carpet.f132 as i32
+                // SIGNED 32-bit seed (see the rival arm above): +132
+                // carries the cast debit as a negative value, and
+                // castle-cast debits exceed 16 bits (mc1l1 t=3807:
+                // −40000). Zero-extending the old u16 raw pinned the
+                // player at the mana ceiling on every recorded cast
+                // tick — the mc1l1 player.mana + carpet-mirror family
+                // (2238 rows), and the idle 950-vs-1000 breathing
+                // pairs before it.
+                carpet.f132
             },
             life: carpet.act_life,
             // The player's life state rides the carpet's TICK-HANDLER

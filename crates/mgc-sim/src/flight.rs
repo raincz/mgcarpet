@@ -42,10 +42,14 @@
 //! - Strafe is its own ±80 speed at yaw+512: ±16/tick held, −4/tick
 //!   decay on release with a snap to 0 on sign flip.
 //! - The Accelerate spell writes BOTH the target and actual speed
-//!   (3×80 held / 2×80 released, :65171-78), bypassing the chase; on
-//!   expiry it resets the target to +80 max forward (:65191-97) — an
-//!   authentic quirk. Any Up/Down press cancels it (:55144-51 in the
-//!   handler via the v_14 speed-touched flag).
+//!   (3×80 held / 2×80 released, :65171-78) from its token's walk
+//!   slot, BEFORE the command integration — a resisting press then
+//!   steps the boosted target back into the ±80 band (one tick of
+//!   act-speed chase from ±160) and arms the v_14 speed-touched
+//!   latch (:55780); the token reads the latch on its NEXT pass and
+//!   ends the burst (counter = 1, :65146-50), restoring target AND
+//!   actual to +80 max forward — even out of backwards flight
+//!   (:65191-97), an authentic quirk.
 //! - One RNG draw exists in the move: every 64th tick a private-LCG
 //!   roll (`9377·r + 9439`, :55294-99) fires the wind-gust FLUTTER
 //!   (sound 46) on `r % 11 == 0` — sound-only, but the draw mutates
@@ -161,6 +165,11 @@ pub struct Mc1Input {
 pub struct Mc1Moved {
     /// The wind-gust flutter roll fired (sound 46).
     pub flutter: bool,
+    /// A speed press MOVED the target this tick — retail's Type_160
+    /// v_14 latch (:55762-80, armed only when the press steps v_12
+    /// inside its bounds test). The speed-spell tokens read it the
+    /// NEXT walk pass and end their burst on it (sub_56380 :65146-50).
+    pub speed_touched: bool,
 }
 
 /// The faithful human move: sub_46840's command integration followed
@@ -180,8 +189,24 @@ pub fn mc1_move(
     ground: &dyn Fn(u16, u16) -> i16,
     gate: &dyn Fn((u16, u16, i16), (u16, u16, i16)) -> Option<(u16, u16, i16)>,
 ) -> Mc1Moved {
+    // The Accelerate override writes BOTH the target and the actual
+    // speed (:65171-78) — and it lands BEFORE the command integration:
+    // retail's write happens at the spell TOKEN's walk slot, below the
+    // carpet dispatch, so the brake press below steps a boosted
+    // ±160/±240 target (and clamps it back into the ±80 band) while
+    // the actual speed starts its chase from the boosted value.
+    if let Some(k) = accel_over {
+        let v = (k * 80.0) as i16; // 3×80 held / 2×80 released, signed
+        st.tgt_speed = v;
+        st.act_speed = v;
+    }
+
     // ---- sub_46840 (:55760-:55821): command integration, pre-move ----
     // Up/Down step the target ±16/tick held, clamp ±80 (:55766-80).
+    // A press that MOVES the target arms the v_14 latch (:55780) —
+    // during a boost only the RESISTING press passes the bounds test
+    // (the boosted target sits outside the ±80 band), and the latch is
+    // what ends the burst at the token's next pass (:65146-50).
     let mut dir: i16 = 0;
     if inp.speed_up && st.tgt_speed < 80 {
         dir = 1;
@@ -212,14 +237,6 @@ pub fn mc1_move(
         if st.strafe.signum() != s {
             st.strafe = 0;
         }
-    }
-
-    // The Accelerate override writes BOTH the target and the actual
-    // speed (:65171-78) — the chase below then steps by zero.
-    if let Some(k) = accel_over {
-        let v = (k * 80.0) as i16; // 3×80 held / 2×80 released, signed
-        st.tgt_speed = v;
-        st.act_speed = v;
     }
 
     // ---- sub_455D0 (:55110), statement order ----
@@ -300,7 +317,10 @@ pub fn mc1_move(
         flutter = st.rand % 0xB == 0;
     }
     st.tick_ctr = st.tick_ctr.wrapping_add(1);
-    Mc1Moved { flutter }
+    Mc1Moved {
+        flutter,
+        speed_touched: dir != 0,
+    }
 }
 
 /// The MC2 carpet's `str_D7BD6` tuning row — `AddPlayer_4A920`

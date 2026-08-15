@@ -12094,3 +12094,315 @@ tool that found both terrain plants.
   wizard campaigns, or MC2's free run (mc2l0 horizon 65).
 - The known-deviations roster could absorb the 3 pose-pin rows as a
   classed artifact if the player wants the count at 0 — ask first.
+
+## THE mc1l1 INTAKE (2026-08-15e): four laws, 4374 → 387
+
+The player-chosen lane after mc1l0's closure. The take: 10709
+fixture-grade pairs, no rivals (the campaign memory's "first rival
+lane" claim was wrong — corrected), a possession-driven dwelling
+grind, two authored trigger events, and an endgame castle era.
+Intake classification collapsed 4374 unexplained rows into five
+families; four laws closed 91% of them in one session.
+
+1. **The f132 SIGN/WIDTH decode** (the whole mana lane, 2238 rows):
+   carpet +132 is retail's SIGNED 32-BIT pending mana delta — the
+   one-word mailbox the token slots overwrite (cast debits negative,
+   castle casts past 16 bits; mc1l1 records a −40000). The decoder
+   read it as u16, so every pair seeded with a recorded debit
+   applied +65486 instead of −50 and clamped the player onto the
+   census ceiling — the "wrong mana per dwelling" the player
+   reported, and the idle 950-vs-1000 breathing before it. There is
+   NO collection metering in retail (decompile agent, both
+   binaries): every collector lumps the whole cargo; +136 is the
+   per-tick census total (1000 + Σ claimed cargo — houses re-derive
+   theirs as population×256 every 40 ticks), and +140 chases it at
+   the +132 rate (max(+136/2000, 100); castle/dolmen
+   max(+136/200, 1000)). The measured "+150/5-tick metering" was
+   the chase riding the recast cadence: −50, 0, 0, +100, +100.
+   Residue: 9 pairs (t=8745+, the castle-pump/mid-burst regen
+   suppression for the castle era) — open.
+
+2. **The TRIGGER PRE-MOVE POSE law** (the t=3082 worm ambush, 85
+   missing rows): the class-11 fire probe (sub_5A090 :67632, every
+   8th f63 tick, human carpets only) reads the carpet's
+   PREVIOUS-frame pose — retail's pooled carpet (slot 280) sits
+   above every authored volume in the slot-ordered walk. The port
+   probed the post-move pose and fired the (11,0) token at
+   (198.5,224.5) one whole probe window early, consuming the
+   disposition before retail's fire tick: 85 extra rows at t=3074,
+   85 missing at t=3082 (dis 3 = five authored (5,3) records × 17 —
+   the m3 worm ctor sub_384B0 mints 1 head + 16 segments, no pool
+   guard). Same law family as the awake pre-pass. Level-5 golden
+   re-pinned B..E for it (B "crater trigger" is exactly a scripted
+   trigger trip; OBSERVABLE holds at B — pure timing).
+
+3. **The (10,14) MANA-SCATTER PUFF column** (~1650 rows, the take's
+   biggest family): the port's "NO MC1 creator" note was half-true —
+   no code-side caller, but level 001 AUTHORS (10,14) THING records
+   behind trigger dispositions (dis 1 = 8 puffs + 15 mana balls +
+   the chained (11,1)). Ported: the ctor (sub_3AB40 :46860 — life
+   rand%33+28, filter pair (10,14), sprite 9, rise rand%53+51) via
+   spawn_creator→spawn_effect, and the tick (sub_258A0 :28489 — the
+   state-13 riser with an UNCONDITIONAL last-6-ticks sprite
+   walk-down) + the world.rs effect_tick admission. Player-corrected
+   mid-session: t=343 is "puffs of smoke where mana appears" — both
+   readings were right, the trigger mints both.
+
+4. **The JAR z-SERVO + THE HIDE BIT** (the (12,2) z family + the
+   player's spell-jar report): (a) retail's placed-jar tick falls
+   −128/tick toward ground and clamps up instantly (sub_55A40
+   :64765-70) — frozen-z only matched corpora while no terrain
+   moved under a jar; mc1l1's scorch/worm episodes move it and
+   retail tracks. Ported into the strict arm. (b) The start-point
+   "fireball jar": retail's wizard init claims one class-12 entity
+   per carried spell as the live manifestation AT the wizard and
+   hides it with byte[0] |= 1 (:54907) — the l1 start pile
+   (Fireball/Possess/Create Castle, flags 5) IS the player's
+   spellbook; the authored pity jar nearby is claimed+hidden the
+   same way. The strict projections now key the class-12 skip on
+   the BIT (replacing the phase-0 heuristic, which drew the claimed
+   authored jar); prune_owned_jars stays the free-run stand-in
+   (DEVIATIONS.md entry corrected: retail HIDES, the port REMOVES —
+   the slot economy is the residual deviation).
+
+### What remains in mc1l1 (387 rows)
+
+- (12,2) f26 ×165: a 251→0 countdown on the placed Accelerate jar
+  from t=8747, port one tick behind — the +26 writer is unidentified
+  (blue-jar recharge? post-grant timer?). NEXT.
+- (5,0) m0-worm pose dribble ×137, (9,0) fireball sub-tile ×~20.
+- player.mana ×9 pairs (castle-era mid-burst suppression).
+- FREE RUN: bit-exact 0..344, wall = DISPOSITION SLOT ALLOCATION —
+  retail rebuilds its free stacks lowest-slot-first on EVERY
+  disposition fire (sub_37220 :43825, + a one-fire eviction window,
+  + var_4593=-1 after) so payload slots allocate ascending; the
+  port's allocator orders differently and slot 41 gets a puff where
+  retail parks the chained (11,1). THE law for the l1 free run.
+- Secondary retail laws banked from the trigger agent: the REARM
+  probe (sub_5A120 :67654) walks the whole wizard roster (rivals
+  included — matters from l2 on); class 7/8/9 THING creators are
+  allocate-and-abandon (spawn_inert materializes them — a real
+  deviation, no l1 records); spell_cast_cost reads the live
+  manifestation +136 only for spell 16 where retail reads it for
+  every spell (:64948).
+
+### Verification
+
+mc1l0 free run BIT-EXACT 0..7097 (zero divergence) after all four
+laws; l0 pair lane 3 unexplained (the standing pose-pin rows).
+mc1l1 pair lane 4374 → 387 unexplained; first divergent pair t=47 →
+t=343. Fixture suites 10/10, 0 regressions (5 drifts = rows VANISHING
+under the f132 fix; promoted). known-deviations.json predates the
+`recording` field and errors standalone — untouched. Level-5 golden
+re-pinned B..E (state) / C..E (observable) for the trigger law,
+annotated. Full workspace tests green, fmt clean.
+
+## THE mc1l1 FREE-RUN SPRINT (2026-08-15f): five laws, wall 344 → 8746
+
+The player-corrected frontier ("first divergence = the castle at
+t=630 that should have killed a worm") decoded as five stacked laws;
+mc1l0 stays BIT-EXACT 0..7097 (zero divergence) under all of them.
+The two lured vulture packs and the castle-kill endgame supplied
+every corpus ruling. CARPET.EXE itself (extracted from the GOG ISO,
+LE-parsed, disassembled at need) settled two of them — the lift lied
+three separate ways in this region.
+
+1. **DISPOSITION-FIRE STACK REBUILD** (the t=344 wall): EVERY
+   disposition fire re-ranks both allocator stacks by the descending
+   999→1 pool scan (sub_37220 at sub_37440's top :43960; MC2 twin
+   sub_49F90 at sub_4A1E0's top EF:32966), so fire payloads allocate
+   ASCENDING from the lowest free slot; the victim stack disarms
+   after the fire (var_4593=-1 / dword_0x11e6=-1 — the one-fire
+   eviction window). `World::fire_disposition` now does all three
+   (MC1 victim mask 0x20400, MC2 0x2_0000). Effect: 344 → 1925, and
+   the RNG lane went 8726 divergent boundaries → ZERO for the whole
+   run (the puffs had been landing in wrong slots, scrambling every
+   per-entity LCG). MC2 goldens re-pinned for it (cave ×2, slice
+   checkpoints 4-6, flight-tier, l5 state+obs — annotated in the
+   tests; all 5 MC2 fixture suites 0 regressions).
+
+2. **THE MOVSX-SIGNED SEPARATION BOX** (t=1925/1933 + three fired
+   twins): the pack separation (:21796) and grid-walk repulsion
+   (:25984) box tests sign-extend EACH coordinate before a 32-BIT
+   subtract (binary at obj1 0x1d5eb: movsx+sub, never a wrapped i16
+   difference) — a pair straddling the signed midline 0x8000 reads
+   ~65k apart and never separates. Five straddle skips vs 436
+   same-side fires pinned it. The id24 self-skip, full-chain walk,
+   first-hit break and angle(member→own) are all byte-verified; the
+   catch-up tail reads speed+accel BOTH from the leader (confirms
+   the earlier mis-fix ruling). Killed en route, by corpus: the
+   leaderless-only skip, the entry-pack skip, a Euclidean-256 disc,
+   and a stop-at-leader walk bound — each fit a subset, only the
+   movsx box fits all eight rulings. 1925 → 2572.
+
+3. **THE wizext+84 GUARD REGISTER** (t=2571): the castle-guard lane
+   is a per-OWNER positional register on the wizard extension, not a
+   live census (sub_47400 :56412-47). Stale entry (freed slot or
+   state-95 corpse) → clear + RE-ARM f46=16 with NO spawn; empty
+   entry + f46==0 → spawn ONE at the castle pos, relink to the
+   courtyard (+128,+640), facing 512. The register SURVIVES castle
+   death — guard 313 died ~t=2000, its stale entry re-armed at the
+   next state-4 dispatch (2571), the fresh guard landed 16 passes
+   late (t≈2605, slot 348) where the census spawned instantly. Also
+   corpus-proven here: the fleet dispatch runs from the STATE-4 arm
+   (the castle's long-lived working state), not state 5 — 30 settled
+   level-3 ticks with gq=4 and f46 untouched. New Gen field
+   `mc1_guard_reg` (hash-transparent all-zero, SNAPSHOT_VERSION 10);
+   conformance import rebuilds the live half from owner-stamped
+   guards (stale entries are unknowable from a snapshot — one
+   boundary of pair residue per stale event). MC2 keeps the census
+   stand-in (twin unverified; corpora identical under both).
+   2572 → 3810.
+
+4. **THE m0 DEATH-TICK BOB** (t=3810): the m0 wrappers
+   (sub_1B070/1B090/1B0E0) run the z-bob sub_1B120 as an
+   UNCONDITIONAL tail — the tick the damage prologue demotes the
+   worm to the death state still rises (recorded +130 while state
+   2→4). The port's Inbox::Dead early-return now bobs m0 first.
+   3810 → 4130.
+
+5. **TICK-TOP CHAIN MEMBERSHIP for the acquire** (t=4130) + **THE
+   UNIVERSAL HIT FREEZE** (t=5450): (a) the projectile acquire's
+   creature sweep walks the per-model chains whose MEMBERSHIP is the
+   tick-top rebuild (heads at wizext-file 36382+4·model —
+   binary-verified; the lift wrote them to 36462, a transcription
+   bug) — a segment the castle crush promoted mid-tick stays
+   invisible to the muzzle acquire (fireball 427 flies straight,
+   f146=0). New derived `Gen::mob_chains` snapshot (hash-silent,
+   never saved, severed-chain cut) consumed by aim_assist; the
+   pack/grid/recruit scans keep their live-scan stand-ins until a
+   row demands otherwise. (b) The shared prologues freeze EVERY
+   creature's hit tick (idle/chase/pack all return out of the v4
+   arm) — not just the villager families: vulture 200 takes a
+   400 fire hit mid-pack and holds position, heading and aim. The
+   wizard-attacker retaliate arms were already freezes; l0 never
+   discriminated because its creatures only took wizard fire.
+   4130 → 8746 in one pair of laws.
+
+### State at close
+
+- mc1l1 FREE RUN: bit-exact 0..8746 (from 0..344 at intake close);
+  RNG lane clean across all 10709 ticks; post-wall traffic is a few
+  thousand rows (was ~900k).
+- mc1l1 pair lane: 387 → 191 unexplained (189 field + 2 extra);
+  first divergent pair 343 → 507 (slot 15 target_yaw ±2, likely
+  pose-adjacent).
+- mc1l0 free run BIT-EXACT 0..7097 under all five laws. Fixture
+  suites 10/10, 0 regressions (4 Open drifts all SHED rows — l32's
+  t=3284 loses its spurious (9,0) acquisition — promoted).
+- ⭐ NEXT (the t=8746 wall): the player casts Accelerate; retail
+  sets flags|=0x80 on the HIDDEN spellbook jar (slot 26, class 12,
+  flags 5→133) — the spell-ACTIVE bit — and the placed jar's f26
+  251→0 countdown follows from t=8747 (the known ×165 pair family,
+  port one tick behind, +26 writer unidentified). Find the 0x80
+  writer in the cast path (sub_55E80 family) and the countdown law.
+- Tooling: CARPET.EXE lives in the GOG ISO (`game.gog` LBA 30, LE at
+  0x5998, obj1 vbase 0x10000, datapages 0x24600; globals appear
+  flat-0x90000; a second LE at 0xf5998 is a −0x200-shifted sibling).
+  `MGC_PACK_TRACE=1` also makes verify-deltas announce every pair on
+  stderr.
+
+## 🏆🏆 mc1l1 CLOSED (2026-08-16): BIT-EXACT 0..10709, two laws
+
+The t=8746 wall and everything behind it fell to two laws; the free
+run is now bit-exact for the ENTIRE 10709-tick recording — zero
+divergence on every channel (pose, fields, entity sets, RNG). mc1l0
+stays bit-exact 0..7097, the mc1l32 head (0..60, its teleporter
+included) grades bit-exact, all 10 fixture suites 0 regressions /
+0 drifted (no goldens moved), workspace tests green.
+
+1. **THE SPEED-TOKEN JAR-SIDE LAW** (sub_56380 :65131 / backwards
+   twin sub_57F00 :66172, the t=8746 wall): the Accelerate tokens run
+   a full jar-side machine the port had left inert under strict:
+   - flags |= 0x80 (the spell-ACTIVE bit) on the full tick
+     (+48 == +50, :65154-57), cleared at total−2 (:65160-65) and at
+     burst end. Recorded 5→133→5 exactly (t=8746..8750).
+   - The +48 countdown pins at full on every held re-arm (the cast
+     dispatcher's :55893 reload) and drains 1/tick after release.
+   - **sub_55E80's full-arm debit is TOKEN-side and LIVE in retail**
+     (the remc1 `//fix` comment-out is the maintainer's): the arm
+     tick, each held re-arm, and the first release tick each stamp
+     the full one-shot cost — mc1l1's held ladder measures three
+     −1000 landings (t=8746-48). The command-site debit moved to the
+     token's full arm; the silent re-arm gate reads the PRE-step pool
+     (:55890, the mc1l32 t=671 law — `pre_mana` threaded into
+     cast_spell).
+   - Mid-burst suppression runs from the token every sustain tick —
+     the pool is FROZEN for the whole 251-tick glide (recorded 87818
+     for 165 ticks).
+   - **THE v_14 TWO-PHASE KILL** (:55766-80 + :65146-50): a speed
+     press that MOVES v_12 arms the carpet dispatch's v_14 latch —
+     during a boost only the RESISTING press can (the boosted ±160/
+     ±240 target sits outside the ±80 bounds test; the press also
+     clamps it back into the band while act-speed chases one 16-step)
+     — and the token reads the latch on its NEXT pass: counter = 1,
+     one final decrement, burst over. Port: `Mc1Moved::speed_touched`
+     → `World::mc1_v14`; the old instant thrust_cancel kill retired
+     to `accel_brake_immediate` (enhanced-mover alternates only).
+   - **THE BURST-END BASE SNAP is SIGNED**: target AND actual speed
+     restore to +80 from the forward burst (:65194-95) but **−80
+     from the backwards twin** (:66226-27) — the port's "+80 max
+     forward even out of backwards flight" note was over-generalized
+     from the forward twin. Mailed to the carpet
+     (`pending_speed_base`), consumed at its walk slot BEFORE the
+     command integration (retail's token-below-carpet order); the
+     override write moved ABOVE the input integration in `mc1_move`
+     for the same reason. The mover re-reads the override at its own
+     walk moment (a same-tick kill already dropped it).
+   - The contrail puff is PRE-decrement inside the sustain arm (the
+     counter==1 expiry tick still puffs; a v_14 kill tick does not),
+     and the backwards twin puffs too (:66211-18).
+   - Corpus effect: free-run wall 8746 → 9899 in one stroke (flags +
+     mana + kill-seam pose cascade all one family); the pair lane's
+     ×165 "f26 countdown" family collapsed to the ONE structurally
+     unknowable v_14-kill pair (t=8911 — v_14 is not recoverable from
+     a snapshot import). SNAPSHOT_VERSION 10 → 11
+     (`pending_speed_base`, `mc1_v14`; both hash-quiet one-tick
+     mail).
+
+2. **THE PORTAL FACING CONE WAS COMPUTED ON MANGLED DELTAS** (the
+   t=9899 wall, sub_26A60 :29208-09): the (10,34) vortex warps a
+   player who overlaps (sub_11950 summed extents) AND faces it —
+   bearing = sub_42150(wizard → portal) on the full 16-bit wrapping
+   axes, diff vs heading < 0xAA. The port computed the bearing with
+   `Gen::wrap_delta` — a TILE-BYTE (±128-wrap) helper — on
+   engine-unit deltas, and in the reversed direction: t=9899's true
+   bearing 1273 (heading 1163, diff 110 → warp) read as a mangled
+   932 → never fired. Fixed in portal_tick AND the mc2_portal_tick
+   twin (same defect; EF cone cited identical — MC2 corpus
+   unverified). Also: the warp mail from a BELOW-carpet portal now
+   lands BEFORE the carpet's move (`pending_teleport` consumed at
+   the walk slot too — retail sub_41C70 writes the wizard axis at
+   the portal's own tick, so the recorded boundary is dest + one
+   move step; spell teleports still consume post-tick, their stamp
+   site is the carpet's own pass). This closed the level: 9899 →
+   10709 BIT-EXACT.
+
+### Pair lane at close
+
+mc1l1 verify-deltas: 191 → **5 unexplained field rows + 2 extras**
+(from 4374 at intake). The fireball-debit six-pack (t=8889-8910,
+−200 pairs during the glide) fell to an importer fix: the
+`mana_delta` seed clamp no longer wipes a pending ABOVE-carpet debit
+riding f132 while a SPEED token is mid-burst (2/21 joined the
+launcher raw-seed set — they run the live machine under strict now).
+Remaining: (9,0) t=639 x / t=3231 y+heading, (10,39) t=3278 z ±1,
+the t=8911 v_14 pair, and the two (5,15) guard-register stale-entry
+extras (t=2571/3453 — the documented law-3 import limitation). POSE
+CHANNEL: 10541/10541 stepped pairs bit-exact (100%), 167
+accel-domain + 1 warp gated.
+
+### Notes
+
+- The `held_accelerate_drains_mana_every_tick` /
+  `accelerate_directions_are_mutually_exclusive` /
+  `accelerate_hold.rs` tests re-pinned to the two-phase law (the
+  brake tick still boosts; the dry hold survives the emptying tick
+  at 3.0 because the re-arm gate reads pre-step).
+- Un-modeled residual (corpus-unseen): a REFUSED full tick (dry pool
+  mid-hold) leaves retail's v_12 at its stale boosted value for one
+  tick; the port's recompute model reads 2.0 there.
+- `Gen::rebuild_mob_chains` scoped `#[cfg(test)]` (its only caller;
+  the live tick builds chains in its top sweep) — the dead-code
+  warning is gone.
+- mc1l32 beyond t=60 deliberately unexplored (player scope ruling).

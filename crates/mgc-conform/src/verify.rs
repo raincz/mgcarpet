@@ -159,7 +159,7 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 // Before the triage window — keep the pairing chain
                 // and the input ring warm, execute nothing.
             } else if tick.t == pt + 1 {
-                if args.start.is_some() {
+                if args.start.is_some() || std::env::var_os("MGC_PACK_TRACE").is_some() {
                     eprintln!("pair {pt}");
                 }
                 stats.pairs += 1;

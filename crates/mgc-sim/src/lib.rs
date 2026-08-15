@@ -699,7 +699,11 @@ impl Simulation {
         // aligned press is inert and only the RESISTING press bites
         // (manual: "press the down cursor to cancel"). Both thrust
         // models share the directional law: v_14 is the resisting-press
-        // edge, NOT any-press (hold + re-cast must survive).
+        // edge, NOT any-press (hold + re-cast must survive). Under the
+        // faithful MC1 mover the kill itself rides the mover's v_14
+        // latch (one token pass later, retail's phase); the enhanced
+        // mover never runs that integration, so it keeps the
+        // immediate resisting-press kill.
         if let Some(w) = &mut self.world {
             // Replay byte drive: the cancel's directional sense comes
             // off the byte (speed-up wins — the replay driver's law).
@@ -710,6 +714,9 @@ impl Simulation {
                 None => input.thrust,
             };
             w.thrust_cancel(thrust);
+            if self.thrust_model == ThrustModel::Enhanced {
+                w.accel_brake_immediate(thrust);
+            }
         }
 
         // The Backspace full stop, applied before the move like
@@ -872,14 +879,11 @@ impl Simulation {
         // flyer derives after.
         let mut walked_prev: Option<flight::Mc1State> = None;
         if faithful_walk && let Some(w) = &mut self.world {
-            // Accelerate expiry/cancel edge: MC1 restores +80 MAX
-            // FORWARD, even out of backwards flight (:65191-97).
+            // The Accelerate override, kill and burst-end ±80 base
+            // restore all resolve INSIDE the walk (retail's
+            // token-below-carpet order — World::step_player_flight);
+            // this tick-head sample is just the drive's initial value.
             let over = w.accel_override();
-            if self.accel_was_active && over.is_none() {
-                self.carpet.tgt_speed = 80;
-                self.carpet.act_speed = 80;
-            }
-            self.accel_was_active = over.is_some();
             let prev = self.carpet;
             let mut drive = world::FlightDrive {
                 s: &mut self.carpet,

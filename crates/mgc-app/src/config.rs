@@ -1011,14 +1011,17 @@ pub struct GameplayEnhancement {
     /// `mc1+mc2` coerce (with a console note) rather than invent one.
     pub spell_selector: SpellSelector,
     /// Remove any spell jar whose spell the local player already owns —
-    /// and therefore can never pick up. Retail (BOTH MC1 and MC2)
-    /// leaves such jars in the world forever (placed jars never decay),
-    /// so they become permanent, unidentifiable clutter. An INTENTIONAL
-    /// deviation from retail (deliberate; P-class): sweeps at level load
-    /// AND the instant the player gains a spell. Single-player entity
-    /// removal. Defaults ON — disable with `--no-prune-owned-jars` for a
-    /// purist run. Covers MC1's class-12 jars and MC2's class-15 spell
-    /// tokens. See docs/FIDELITY.md.
+    /// and therefore can never pick up. Retail MC1 HIDES owned-spell
+    /// jars rather than showing them (the wizard-init manifestation
+    /// claim sets the byte[0] hide bit, :54907 — the pool entity stays,
+    /// invisible); the free-running port models owned spells outside
+    /// the pool, so this option stands in with a REMOVAL (the
+    /// slot-economy difference is the residual deviation — see
+    /// DEVIATIONS.md). Sweeps at level load AND the instant the player
+    /// gains a spell. Single-player entity removal. Defaults ON —
+    /// disable with `--no-prune-owned-jars` for a purist run. Covers
+    /// MC1's class-12 jars and MC2's class-15 spell tokens. See
+    /// docs/FIDELITY.md.
     pub prune_owned_jars: bool,
     /// Mouse-wheel spell cycling (the remc2/MC2HD idiom, no retail
     /// analogue): the wheel walks the LEFT button's cycle ring,

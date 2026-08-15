@@ -487,10 +487,10 @@ fn level_005_golden_state_hashes() {
     // possess claim or castle teardown fires here). See the
     // OBSERVABLE verdict below.
     const GOLDEN: [u64; 6] = [
-        0xfd3092a200982040, // post-init (feature pass + disposition 0)
-        0x23f78bd0c449e3c7, // A: 32 idle ticks far afield
-        0x2e45a4b7dae76bd3, // B: crater trigger fired + 120 dig ticks
-        0x95ce584071f07226, // C: ambush disposition fired
+        0xe415937b43757b61, // post-init (feature pass + disposition 0)
+        0x5ee6fbf5895fd53d, // A: 32 idle ticks far afield
+        0x4114e13587164c1c, // B: crater trigger fired + 120 dig ticks
+        0xa58b5fcad6582193, // C: ambush disposition fired
         // D/E previously re-pinned for THE CAST-PHASE LAW (the MC1
         // arm→token-fire restructure): every hand cast now arms its
         // spell token at the wizard pass and the token's own tick
@@ -636,8 +636,20 @@ fn level_005_golden_state_hashes() {
         // at post-init..C (the moved words are draw-stream and
         // bookkeeping state under pose quantization) and moves at D/E
         // with the combat-window laws — the CORRECT signal.
-        0x9496dd75d8267539, // D: 64 ticks of two-hand fireball combat
-        0xc0cd7f5baf157662, // E: 100 aftermath ticks
+        // B..E re-pinned for THE TRIGGER PRE-MOVE POSE LAW (mc1l1
+        // t=3082 worm wave, one 8-tick probe window early): the
+        // class-11 probe reads the carpet's PREVIOUS-frame pose (the
+        // pooled carpet sits ABOVE every authored volume in retail's
+        // slot-ordered walk), so the B crater trigger and the C
+        // ambush disposition fire one tick later, and every ctor
+        // draw downstream shifts with them. OBSERVABLE holds at B
+        // (the dig's outcome is identical, only its tick moved) and
+        // moves from C on (the ambush spawns' rand/poses shift) —
+        // the correct signal for a pure timing law. Corpus: mc1l1
+        // missing-(5,3) 85 → 0; mc1l0 free run stays bit-exact
+        // 0..7097; 10/10 suites, 0 regressions.
+        0xed5443e6560371ff, // D: 64 ticks of two-hand fireball combat
+        0x9fdea8453df66de8, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,
@@ -738,10 +750,10 @@ fn level_005_golden_state_hashes() {
     // combat genuinely differ. Post-init..C hold — nothing is aimed
     // at before D.
     const OBSERVABLE: [u64; 6] = [
-        0x3b95f7fa279c099d, // post-init — + unclaimed-dwelling poses
-        0xddd8315df984d068, // A
-        0xfdef97c77cb17fe8, // B — settler phase + feeder leash
-        0x60e4a4184235a4ea, // C
+        0x9c6fa2c7f861e019, // post-init — + unclaimed-dwelling poses
+        0xf2d0e60ad7a88dcc, // A
+        0x99dbb292aeb24b0c, // B — settler phase + feeder leash
+        0x6620d2ab864e42a9, // C — trigger pre-move pose law
         // D/E re-pinned with the state pins above (THE CAST-PHASE
         // LAW + the area-broadcast tile rounding): the D-window
         // fireballs launch at arm+1 with the corpus f140 stamp and
@@ -766,8 +778,14 @@ fn level_005_golden_state_hashes() {
         // vs the old inflated square), and the ambush bees' return
         // bolts now launch at the unlifted-muzzle pitch. Post-init..C
         // hold — nothing is fired before D.
-        0x07426e3492cf1d9e, // D
-        0x32ed49f3d4451bd3, // E
+        // C..E re-pinned with THE TRIGGER PRE-MOVE POSE LAW (see the
+        // GOLDEN note). OBSERVABLE holding at B and moving from C is
+        // the CORRECT signal for a pure timing law: the crater dig's
+        // outcome is unchanged (B byte-identical), while the C
+        // ambush's one-tick-later fire shifts every spawn's ctor
+        // draws, poses and downstream combat.
+        0x55e5e3f9e6b90b9b, // D
+        0xd50818406026704f, // E
     ];
     assert_eq!(
         obs, OBSERVABLE,

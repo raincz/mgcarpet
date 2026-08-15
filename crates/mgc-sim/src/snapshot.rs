@@ -61,7 +61,13 @@ const MAGIC: u32 = 0x5343_474D;
 ///    teleport_return` widened to the full saved axis (x, y, z),
 ///    `World::pending_teleport` gained the arrival altitude,
 ///    `World::pending_speed_zero` joined the stream after it.
-pub const SNAPSHOT_VERSION: u32 = 9;
+/// 10: `Gen::mc1_guard_reg` — the per-owner castle-guard register
+///    (wizext+84) appended to the Gen stream.
+/// 11: the speed-token flight seam — `World::pending_speed_base` (the
+///    burst-end signed-base restore mail, ±80) and `World::mc1_v14`
+///    (retail's Type_160 v_14 speed-touched latch) joined the stream
+///    after `pending_speed_zero`.
+pub const SNAPSHOT_VERSION: u32 = 11;
 
 /// Why a snapshot could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -341,6 +347,28 @@ impl Snap for std::collections::BTreeMap<u16, u16> {
         let n = r.get::<u32>()? as usize;
         // Four bytes per entry, so this bound is generous but still
         // keeps a corrupt length from pre-allocating wildly.
+        if n > r.remaining() {
+            return Err(SnapshotError::Truncated);
+        }
+        let mut m = std::collections::BTreeMap::new();
+        for _ in 0..n {
+            let k = r.get()?;
+            m.insert(k, r.get()?);
+        }
+        Ok(m)
+    }
+}
+
+impl Snap for std::collections::BTreeMap<u16, Vec<u16>> {
+    fn put(&self, w: &mut Writer) {
+        w.put(&(self.len() as u32));
+        for (k, v) in self {
+            w.put(k);
+            w.put(v);
+        }
+    }
+    fn get(r: &mut Reader) -> Result<Self, SnapshotError> {
+        let n = r.get::<u32>()? as usize;
         if n > r.remaining() {
             return Err(SnapshotError::Truncated);
         }
