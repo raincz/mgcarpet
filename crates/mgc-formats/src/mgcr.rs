@@ -953,10 +953,13 @@ pub struct RetailEntMc1 {
     /// −40000 castle-cast debit and deltas past ±65536; the old u16
     /// read truncated both).
     pub f132: i32,
-    pub f136: i32,   // +136 (mana cap)
-    pub f140: i32,   // +140 (mana)
-    pub f144: u16,   // +144 (ball owner)
-    pub f146: u16,   // +146 (chase target slot)
+    pub f136: i32, // +136 (mana cap)
+    pub f140: i32, // +140 (mana)
+    pub f144: u16, // +144 (ball owner)
+    pub f146: u16, // +146 (chase target slot)
+    /// +148 — the AI target SIGNATURE (sub_15420: id24 + model +
+    /// class<<7, stamped at pick time; sub_15440 compares it raw).
+    pub f148: u16,
     pub dest_x: u16, // +150
     pub dest_y: u16, // +152
     pub site_z: i16, // +154
@@ -1148,6 +1151,7 @@ pub fn decode_retail_ent_mc1(d: &[u8], slot: u16) -> RetailEntMc1 {
         f140: i32_(d, o + 140),
         f144: u16_(d, o + 144),
         f146: u16_(d, o + 146),
+        f148: u16_(d, o + 148),
         dest_x: u16_(d, o + 150),
         dest_y: u16_(d, o + 152),
         site_z: i16_(d, o + 154),

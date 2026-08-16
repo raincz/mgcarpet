@@ -459,12 +459,7 @@
     },
     {
       "t": 1181,
-      "status": "open",
-      "sig": "e9f7322d37324a45",
-      "atoms": [
-        "field:5,2:f26",
-        "field:5,2:z"
-      ],
+      "status": "conforming",
       "note": "bee z-law (see t=951); the bee-speed atom closed 2026-08-11 with the chase-exit trailers (death-tick restore)"
     },
     {
@@ -786,7 +781,7 @@
     {
       "t": 3284,
       "status": "open",
-      "sig": "aed29539c9effa39",
+      "sig": "c0b46eeddf25270c",
       "atoms": [
         "field:10,0:z",
         "field:10,39:z",
@@ -794,11 +789,7 @@
         "field:5,3:pitch",
         "field:5,3:x",
         "field:5,3:y",
-        "field:5,3:z",
-        "field:9,13:life",
-        "field:9,13:x",
-        "field:9,13:y",
-        "field:9,13:z"
+        "field:5,3:z"
       ],
       "note": "HIT-ABORT law (cause B): retail skips the handler CORE on ANY hit; port moves anyway. BANKED restructure - full audited spec in ledger bee-session entry (blanket abort ruled WRONG; trailers/pre-work survive)"
     }

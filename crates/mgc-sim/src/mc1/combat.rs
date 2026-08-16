@@ -584,7 +584,13 @@ impl Gen {
             e.f126 = speed;
             e.f128 = speed;
             e.max_life = life;
-            e.f140 = 50;
+            // Every per-model ctor writes +140 = 50 (:45877..:46120,
+            // :46293+) EXCEPT the m13 bolt / m14 slow bolt / m15
+            // boulder (sub_3A0C0/sub_3A1A0/sub_3A210 carry no +140
+            // write — the l2 guard-arrow corpus reads 0 at spawn).
+            if !matches!(model, 13 | 14 | 15) {
+                e.f140 = 50;
+            }
             e.row156 = row;
             e.flags &= !8;
         }
@@ -1141,6 +1147,13 @@ impl Gen {
     /// used to clear +146 on a dead/empty slot — the 133-pair
     /// `chase → 0` family. Only the out-of-range guard stays
     /// (defensive; a retail +146 is always a pool index).
+    /// Test seam for [`Self::home`] (the per-tick homing step is
+    /// otherwise only reachable through a full flight tick).
+    #[cfg(test)]
+    pub(crate) fn home_for_test(&mut self, i: usize, ctx: &MobCtx) -> bool {
+        self.home(i, ctx)
+    }
+
     fn home(&mut self, i: usize, ctx: &MobCtx) -> bool {
         let tgt = self.ent[i].f146;
         let (tx, ty, tz) = if tgt == PLAYER_TARGET {
@@ -1156,7 +1169,20 @@ impl Gen {
         let e = &self.ent[i];
         let yaw = Self::angle_between(e.x, e.y, tx, ty);
         let dh = Self::isqrt(Self::dist2_sq(e.x, e.y, tx, ty) as u32) as i32;
-        let pitch = Self::pitch_toward(e.z, tz, dh);
+        // The aim lift is an IN-PLACE bracket on the MEASURED record
+        // (sub_524C0 :62509 writes +76, sub_52550 reads a1's own +72
+        // between the lift and the un-lift at :62542-56), not the
+        // pure `z + f78` this port models. The two agree for every
+        // distinct (shooter, target) pair and diverge on the ALIAS:
+        // when +146 holds the shooter's OWN slot the lift raises the
+        // shooter too, so dz is exactly 0 over dh 0 and homing at
+        // yourself is a NO-OP. Reading the target lifted against an
+        // unlifted self gave dz = +f78 over dh = 0 = pitch 1536
+        // (straight up), and the lob climbed 113/tick — mc1l2 slot
+        // 317, t=2300..2310, a lob born into a freed ball's slot that
+        // the possess acquire then scored against itself.
+        let fz = if tgt as usize == i { e.aim_z() } else { e.z };
+        let pitch = Self::pitch_toward(fz, tz, dh);
         let row = &BEHAVIOR[e.row156 as usize];
         let (v2, v6) = (row.v_2, row.v_6);
         self.ent[i].f34 = yaw;
@@ -1711,7 +1737,14 @@ impl Gen {
                 return;
             }
             let dist = Self::isqrt(Self::dist2_sq(px, py, tx, ty) as u32) as i32;
-            let ty_pitch = Self::pitch_toward(pz, tz, dist);
+            // sub_54A90 brackets the CANDIDATE in place (:64203-09),
+            // so a self-candidate lifts the scorer's own z too —
+            // bearing (0, 0), distance 0, score 0, an outright win.
+            // The possess walk alone is exposed to the alias: it
+            // gates on +144 (:64045) where the class-3 and creature
+            // sweeps skip the shooter via `c.id24 == own`.
+            let fz = if j == i { c.aim_z() } else { pz };
+            let ty_pitch = Self::pitch_toward(fz, tz, dist);
             let dp = Self::angdist(pitch, ty_pitch) as usize;
             if dp > 0x71 || dist > 5120 {
                 return;
@@ -2704,16 +2737,34 @@ impl Gen {
             (e.f30, e.f32, e.f126)
         };
         Self::polar_step(&mut tmp, yaw, pitch, speed);
-        let ground = self.ground_z(tmp.0, tmp.1) as i16;
-        let hit = self.victim_scan_at(i, tmp, ctx).is_some();
-        let grounded = ground > tmp.2;
-        self.move_relink(i, tmp.0, tmp.1, if grounded { ground } else { tmp.2 });
-        self.ent[i].act_life -= 1;
-        if hit || grounded || self.ent[i].act_life < 0 {
-            let amt = self.ent[i].f44 as u32;
-            self.area_write(i, 0, amt, ctx, false, false);
-            self.ent[i].flags |= 0x400;
+        let hit = self.victim_scan_at(i, tmp, ctx);
+        // End of flight (:63806-26): the airborne survival arm is the
+        // ONLY step onto tmp. A grounding step kills at the PRE-step
+        // pose with the life decrement skipped (the decrement lives
+        // inside the airborne branch, on the pre-decrement test);
+        // expiry kills unmoved too; a hit parks the bolt at the
+        // victim's aim point (the +76/+78 sub_524C0 bracket).
+        if (self.ground_z(tmp.0, tmp.1) as i16) <= tmp.2 {
+            let was = self.ent[i].act_life;
+            self.ent[i].act_life = was - 1;
+            if was != 0 && hit.is_none() {
+                self.move_relink(i, tmp.0, tmp.1, tmp.2);
+                return false;
+            }
         }
+        match hit {
+            Some(MailTarget::Pool(j)) => {
+                let (jx, jy, jz) = (self.ent[j].x, self.ent[j].y, self.ent[j].aim_z());
+                self.move_relink(i, jx, jy, jz);
+            }
+            Some(MailTarget::Player) => {
+                self.move_relink(i, ctx.px, ctx.py, ctx.pz.wrapping_add(PLAYER_HH as i16));
+            }
+            None => {}
+        }
+        let amt = self.ent[i].f44 as u32;
+        self.area_write(i, 0, amt, ctx, false, false);
+        self.ent[i].flags |= 0x400;
         false
     }
 

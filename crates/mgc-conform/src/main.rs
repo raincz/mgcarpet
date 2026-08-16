@@ -322,10 +322,11 @@ fn dump_state(args: &Args) -> i32 {
         None => usage(),
     };
     let all = rest.iter().any(|p| p.to_str() == Some("all"));
+    let wiz = rest.iter().any(|p| p.to_str() == Some("wiz"));
     let mut it = rest.iter().filter_map(|p| p.to_str()?.parse::<u64>().ok());
     let Some(t) = it.next() else { usage() };
     let slots: Vec<u64> = it.collect();
-    if slots.is_empty() && !all {
+    if slots.is_empty() && !all && !wiz {
         usage();
     }
     let mut rec = match Recording::open(path) {
@@ -436,6 +437,45 @@ fn dump_state(args: &Args) -> i32 {
             st.recycle_stack.len(),
             &st.recycle_stack[st.recycle_stack.len().saturating_sub(12)..],
         );
+        if wiz || all {
+            for (i, w) in st.wizards.iter().enumerate() {
+                if w.play_index == 0 {
+                    continue;
+                }
+                let cools: Vec<(usize, u16)> = w
+                    .cooldown
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| **c != 0)
+                    .map(|(s, c)| (s, *c))
+                    .collect();
+                let owned: Vec<usize> = w
+                    .owned_slots
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, m)| **m != 0)
+                    .map(|(s, _)| s)
+                    .collect();
+                println!(
+                    "t={t} wiz {i}: ent={} mv={:#x} hands=({},{}) charge={} \
+                     grace={} stall={} rate={} ai_state={} burst={} pov={} \
+                     castle={} aggro={} owned={owned:?} cool={cools:?}",
+                    w.play_index,
+                    w.move_bits,
+                    w.hand_left,
+                    w.hand_right,
+                    w.charge,
+                    w.grace,
+                    w.regen_stall,
+                    w.life_rate,
+                    w.ai_state,
+                    w.burst,
+                    w.poverty,
+                    w.castle,
+                    w.aggro,
+                );
+            }
+        }
         if all {
             for (s, e) in st.ents.iter().enumerate() {
                 if e.class64 == 0 {

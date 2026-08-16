@@ -5815,6 +5815,21 @@ impl World {
         // The castle overflow ejector reads the house tally
         // (sub_47130 :56185-89 — wizext u32_308).
         self.g.banked_houses = houses.min(i32::MAX as u32) as i32;
+        // Retail's census writes each wizard CARPET's +136 directly
+        // (:56860-907 accumulates on the entity) — the ceiling lives
+        // on the pool record, and every afford gate AND the recorder
+        // read it there. Mirror the rival ceilings back (the human's
+        // carpet is synthesized at projection from player.mana_max).
+        for ri in 0..self.rivals.len() {
+            let ent = self.rivals[ri].ent as usize;
+            if ent != 0
+                && ent < self.g.ent.len()
+                && self.g.ent[ent].class64 == 3
+                && self.g.ent[ent].model65 == 1
+            {
+                self.g.ent[ent].f136 = self.rivals[ri].mana_max.min(i32::MAX as u32) as i32;
+            }
+        }
     }
 
     /// The owned manifestation's LIVE castle requirement — the
@@ -6135,11 +6150,20 @@ impl World {
         if t >= MANIFEST_BASE {
             // The player's channels drive only the player's own
             // tokens (the mint registry, same discriminator as the
-            // strict arm below); rival-owned manifestations are
-            // driven by the rival tick.
+            // strict arm below); a RIVAL's launcher tokens run their
+            // own burst machine at this slot (retail's sub_56090 —
+            // fire at full, debit, freeze, decrement), the buff set
+            // stays with the rival tick's refresh.
             let spell = (t - MANIFEST_BASE) as usize;
-            if spell < SPELL_COUNT && self.player.owned[spell] == i as u16 {
-                self.manifestation_tick(i, spell, ctx);
+            if spell < SPELL_COUNT {
+                if self.player.owned[spell] == i as u16 {
+                    self.manifestation_tick(i, spell, ctx);
+                } else if let Some(ri) = {
+                    let owner = self.g.ent[i].f144;
+                    self.rivals.iter().position(|r| r.ent == owner)
+                } {
+                    self.rival_manifestation_tick(i, ri, spell);
+                }
             }
             return;
         }
@@ -6229,7 +6253,42 @@ impl World {
                         }
                     }
                 }
+                // A RIVAL's launcher token runs the LIVE burst
+                // machine (the importer stamped +42 into f144 and
+                // homed +48 into f26): fire at full, debit, freeze,
+                // decrement — retail's sub_56090 at this very slot.
+                if let Some(ri) = {
+                    let owner = self.g.ent[i].f144;
+                    self.rivals.iter().position(|r| r.ent == owner)
+                } {
+                    self.rival_manifestation_tick(i, ri, spell);
+                }
                 return; // owned tokens otherwise idle
+            }
+            // The jar DECAY rides act_life, at the very top of the
+            // jar tick (sub_55A40 :64755-61): a NONZERO act_life
+            // decrements 1/tick and the jar frees the tick it reaches
+            // zero — death-scattered jars are born with rand%90+200
+            // here; authored/placed jars carry 0 and live forever.
+            {
+                let v3 = self.g.ent[i].act_life;
+                if v3 != 0 {
+                    self.g.ent[i].act_life = v3 - 1;
+                    self.entities_dirty = true;
+                    if v3 == 1 {
+                        // sub_41E80_421C0 (:52508-11) is a SOFT mark —
+                        // `flags |= 0x400` and nothing else. The record
+                        // keeps its class and links for the rest of the
+                        // tick and is reclaimed by the next tick's top
+                        // sweep (:52226-31); the hard free is its
+                        // sibling sub_41E90. Freeing here cost the jar
+                        // a tick of visibility (mc1l2: retail's jar 301
+                        // is still class 12 with flags 0x400 set at
+                        // t=8555 and only goes class 0 at 8556).
+                        self.g.ent[i].flags |= 0x400;
+                        return;
+                    }
+                }
             }
             // The jar's own z-servo runs EVERY tick, before the poll
             // gate (sub_55A40 :64765-70, sub_42090(pos, ground, 0, 0,
@@ -10442,6 +10501,19 @@ impl World {
             .map(|e| (e.tick70, e.f59, e.f50, e.f26, e.act_life, e.flags))
     }
 
+    /// A creature slot's mob-machine fields, read-only — (tick70 state,
+    /// f52 pack leader, f63 phase clock, f34 target yaw, f146 chase
+    /// target, f126 speed, rand). The obs schema carries neither the
+    /// state byte nor the pack link, so a free-run divergence in either
+    /// is invisible to grading — this is the microscope for it.
+    #[doc(hidden)]
+    pub fn debug_mob_machine(&self, i: usize) -> Option<(u8, u16, u8, u16, u16, i16, u32)> {
+        self.g
+            .ent
+            .get(i)
+            .map(|e| (e.tick70, e.f52, e.f63, e.f34, e.f146, e.f126, e.rand))
+    }
+
     /// An m27 body's `(tick70, branches)` where each branch reports
     /// `(f71 sub-state, f63 tick counter)` — the kraken stage-command
     /// oracle.
@@ -11773,14 +11845,14 @@ mod tests {
         );
     }
 
-    /// A rival possession cast must launch UNTARGETED: retail's shared
-    /// emission (sub_56510 :65233-52) never writes the projectile's
-    /// +146 — for the AI exactly as for the human — so the lob's own
-    /// one-shot sub_54520 case-1 acquisition (mana balls AND houses)
-    /// picks the victim. Pre-locking the AI's ball target onto the lob
-    /// bypassed that scan, which made a rival bolt unable to stray
-    /// onto a dwelling (retail's accidental house possession). The
-    /// attack spells keep the live pre-lock (fireball contrast half).
+    /// EVERY rival cast launches UNTARGETED: retail's shared emission
+    /// (sub_56510 :65233-52) never writes the projectile's +146 — for
+    /// the AI exactly as for the human, attack spells included — so
+    /// the bolt's own one-shot sub_54520 acquisition (next tick; its
+    /// pool slot already ran this pass) picks the victim. The mc1l2
+    /// corpus reads +146 = 0 AND +34 = 0 on every rival fireball's
+    /// spawn boundary; the old attack-spell pre-lock faked both and
+    /// bypassed the natural miss/stray behavior.
     #[test]
     fn rival_possess_bolt_spawns_untargeted() {
         use crate::mc1::rivals::{Rival, RivalConfig};
@@ -11820,7 +11892,8 @@ mod tests {
         );
         assert_eq!(w.g.ent[lob].id24, wiz as u16, "lob owner = the rival tag");
 
-        // Contrast: an attack spell keeps the homing pre-lock.
+        // Attack spells spawn untargeted too — the muzzle acquisition
+        // is the bolt's own next-tick scan, never the emission's.
         w.rival_emit(ri, wiz, 0, 0x8000, 0x8000, 3400, 0, 0);
         let fb = (1..w.g.ent.len())
             .find(|&j| {
@@ -11828,8 +11901,12 @@ mod tests {
             })
             .expect("fireball spawned");
         assert_eq!(
-            w.g.ent[fb].f146, ball as u16,
-            "attack spells keep the live homing pre-lock"
+            w.g.ent[fb].f146, 0,
+            "attack bolts spawn untargeted (sub_56510 writes no +146)"
+        );
+        assert_eq!(
+            w.g.ent[fb].f34, 0,
+            "the bolt's desired-yaw stays the ctor 0"
         );
     }
 
@@ -18477,6 +18554,10 @@ mod tests {
         let (hx, hy) = (ex.wrapping_add(5000), ey);
         w.human_pose = (hx, hy, w.g.ent[rid as usize].z);
         w.g.ent[rid as usize].f30 = Gen::angle_between(ex, ey, hx, hy);
+        // The readiness cone is f30-vs-f34 (sub_15A00 :19252-57) — the
+        // state handler stamps +34 before any pick; the direct pick
+        // call here has to stamp it itself.
+        w.g.ent[rid as usize].f34 = w.g.ent[rid as usize].f30;
 
         // (a) Lightning is affordable-by-ceiling AND castle-locked. Pre-fix
         // readiness folded in the castle gate → not-ready → picker parks on
@@ -18488,10 +18569,21 @@ mod tests {
             "castle-locked Lightning must be pickable, not a permanent WAIT"
         );
 
-        // (b) With Lightning on its recast cooldown, the picker must FALL
-        // THROUGH to castle-free Fireball. Pre-fix it returned None (no
-        // cooldown escape in the WAIT branch); post-fix the escape advances.
+        // (b) On the REBOUND-plan path a cooling bolt HOLDS — retail's
+        // roll-success arm ends in 15-or-wait and never reaches the
+        // 7/20/0 ladder (:19517-31: `if (15E90(0xF)) return -1` and
+        // the fall-out also lands on -1).
         w.rivals[0].cooldown[15] = 1;
+        assert_eq!(
+            w.rival_attack_pick(0, true),
+            None,
+            "the lightning plan holds for the cooling bolt"
+        );
+
+        // (c) Without the rebound plan the WAIT branch's cooldown
+        // escape advances the ladder to castle-free Fireball — a
+        // cooling high-priority spell yields instead of freezing.
+        w.player.rebound = false;
         assert_eq!(
             w.rival_attack_pick(0, true),
             Some(0),
@@ -18545,6 +18637,11 @@ mod tests {
         w.g.ent[ball].model65 = 39;
         w.g.ent[ball].id24 = 0;
         w.g.ent[ball].f140 = 9000; // richer + nearer than the creature
+
+        // The pick walks the class-5 MODEL CHAINS (heads 36382), not
+        // the raw pool — build the tick-top snapshot the live tick's
+        // sweep would have (the ball, class 10, never enters).
+        w.g.rebuild_mob_chains();
 
         // (a) The creature is hunted; the nearer/richer ball is invisible.
         assert!(
@@ -22254,6 +22351,54 @@ mod tests {
         assert_eq!(e.z, bz + 400, "the lift still lands on +76");
         assert_eq!(e.f34, 0, "target yaw is born 0 (no ctor mirror)");
         assert_eq!(e.f36, 0, "target pitch is born 0 (no ctor mirror)");
+    }
+
+    /// **A PROJECTILE HOMING AT ITS OWN SLOT IS A NO-OP.** Retail's
+    /// aim lift is an IN-PLACE bracket on the MEASURED record
+    /// (`sub_524C0` :62509 writes +76, `sub_52550` reads a1's own +72
+    /// between the lift and the un-lift, :62542-56), so when +146
+    /// aliases the shooter the lift raises the shooter too: dz is
+    /// exactly 0 over dh 0 and the bearing to self is (0, 0). The
+    /// alias is reachable — a lob born into a just-freed mana-ball
+    /// slot is still on the tick-top chain and the possess acquire,
+    /// which gates on +144 rather than the shooter id, scores itself
+    /// at distance 0 and wins (mc1l2 slot 317, t=2300..2310).
+    /// Non-vacuous: modelling the lift as the pure `z + f78` gave
+    /// dz = +f78 over dh = 0 = pitch 1536 (straight up), and the lob
+    /// climbed at the row's 113/tick cap instead of holding still.
+    #[test]
+    fn a_projectile_homing_at_its_own_slot_holds_its_pose() {
+        use crate::mc1::mobs::MobCtx;
+        let ctx = MobCtx {
+            px: 0,
+            py: 0,
+            pz: 0,
+            pyaw: 0,
+            pmana: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        let mut w = flat_world();
+        let (bx, by) = (100u16 << 8, 100u16 << 8);
+        let bz = w.g.ground_z(bx, by) as i16 + 512;
+        let b = w.g.spawn_spell_lob(1, bx, by, bz).expect("lob");
+        assert!(w.g.ent[b].f78 > 0, "the alias only bites with a lift");
+        w.g.ent[b].f146 = b as u16; // the self-alias
+        let (yaw0, pitch0, z0) = {
+            let e = &w.g.ent[b];
+            (e.f30, e.f32, e.z)
+        };
+        for _ in 0..6 {
+            w.g.home_for_test(b, &ctx);
+        }
+        let e = &w.g.ent[b];
+        assert_eq!(e.f32, pitch0, "self-homing never re-pitches");
+        assert_eq!(e.f34, 0, "bearing to self is yaw 0");
+        assert_eq!(e.f36, 0, "bearing to self is pitch 0");
+        assert_eq!(e.f30, yaw0, "and never re-yaws");
+        assert_eq!(e.z, z0, "the pose is untouched");
     }
 
     /// **BUCKET[0] HAS NO MODEL FILTER, AND THE OWNER ROW'S v_28

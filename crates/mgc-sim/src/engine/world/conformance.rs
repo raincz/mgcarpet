@@ -387,16 +387,32 @@ impl World {
             }
         }
 
-        // Free stack: the LIVE recorded order (retail pops from the
-        // end; recycle entries — if any — sit on top, popped first),
-        // so port-side spawns land on the same slots the recording's
-        // do. Fall back to the load-rebuild scan (999→1) only when the
-        // recorded stack is unusable. The reserved human hole stays
-        // OUT either way.
+        // Free stack: the LIVE recorded order, so port-side spawns land
+        // on the same slots the recording's do. Fall back to the
+        // load-rebuild scan (999→1) only when the recorded stack is
+        // unusable. The reserved human hole stays OUT either way.
+        //
+        // The RECYCLE stack is deliberately NOT chained in. Retail's
+        // `NewEvent_372C0` pops the free stack and only falls through to
+        // the recycle SACRIFICE arm once free is exhausted (:43867-83 vs
+        // :43885-908), and MC1's recycle list is the respawn-window
+        // sacrifice set alone (filled by sub_44D30 :54842, emptied at
+        // :55056) — an arm the port's allocator never reaches with ~925
+        // slots free, and a ruled deviation besides (DEVIATIONS.md
+        // `death_regrant`). Chaining it did two things, both wrong: it
+        // put recycle entries at the TOP of a Vec that `new_event` pops
+        // from the end (inverting retail's priority), and it inflated
+        // the census below so `live.len() == scan_free` could never hold
+        // once a respawn had happened — throwing the whole recorded
+        // order away for the fallback's lowest-free-slot rule. On mc1l2
+        // that misfired from t≈8291 to the end of the take: at t=9089
+        // retail's newborn (10,0) took slot 80 (ahead of its spawner at
+        // 73, so it ticked in its birth frame and its blast landed on
+        // the vulture the same frame), while the port took slot 18 and
+        // the damage never arrived.
         let live: Vec<u16> = st
             .free_stack
             .iter()
-            .chain(st.recycle_stack.iter())
             .copied()
             .filter(|&s| {
                 (s as usize) < pool && s != human_slot && self.g.ent[s as usize].class64 == 0
@@ -498,6 +514,11 @@ impl World {
             r.mana_delta = e.f132;
             r.vdes = w.cmd_speed;
             r.jink = w.strafe;
+            // The pending knock impulse (Type_160 +24/+22). A live
+            // rival never spends it, so a mid-life import carries a
+            // stale one that only its death fall will cash.
+            r.knock_dir = w.knock_dir;
+            r.knock_mag = w.knock_mag;
             r.grace = w.grace;
             // Brain lanes: without these the record imports as Fresh
             // and the cascade re-aims f34 away from retail's lock.
@@ -510,6 +531,10 @@ impl World {
                 &w.learn,
                 &w.hate,
                 &w.war,
+                &w.owned_slots,
+                w.life_rate,
+                w.regen_stall.min(u16::MAX as u32) as u16,
+                st.ents[w.play_index as usize].f148,
             );
         }
 
@@ -557,7 +582,20 @@ impl World {
                     && !(e.f70 % 3 == 0
                         && matches!(
                             e.f70 / 3,
-                            0 | 2 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 16 | 17 | 18 | 19 | 20
+                            0 | 2
+                                | 3
+                                | 6
+                                | 7
+                                | 8
+                                | 9
+                                | 10
+                                | 11
+                                | 13
+                                | 16
+                                | 17
+                                | 18
+                                | 19
+                                | 20
                                 | 21
                                 | 22
                         ))

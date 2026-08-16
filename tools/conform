@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Memory-capped mgc-conform runner: keeps the address-space limit off the
+# caller's shell (a persistent `ulimit -v` would poison later cargo builds)
+# without needing a subshell at the call site.
+ulimit -v "${MGC_CONFORM_VMAX:-8000000}"
+exec target/release/mgc-conform "$@"

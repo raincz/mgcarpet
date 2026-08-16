@@ -1229,6 +1229,22 @@ impl Gen {
             }
         }
     }
+
+    /// The mana-ball arm of the same tick-top sweep (:52290-97) —
+    /// the twin of [`Self::rebuild_mob_chains`] for tests that drive a
+    /// bare `Gen` instead of `World::tick` (whose top sweep at
+    /// world.rs:2702 is the only non-test builder).
+    #[cfg(test)]
+    pub(crate) fn rebuild_ball_chain(&mut self) {
+        self.ball_chain.list.clear();
+        self.ball_chain.cut = usize::MAX;
+        for s in 1..self.ent.len() {
+            let e = &self.ent[s];
+            if e.class64 == 10 && matches!(e.model65, 39 | 40) {
+                self.ball_chain.list.push(s as u16);
+            }
+        }
+    }
 }
 
 /// One sound request: engine sound id (the SNDS bank-0 index), the
@@ -4137,9 +4153,25 @@ impl Gen {
             let (bx, by, bz) = (self.ent[b].x, self.ent[b].y, self.ent[b].z);
             let mut best = 0usize;
             let mut best_d = u32::MAX;
-            for j in 1..self.ent.len() {
+            // sub_46CA0 (:55931-43) walks the TICK-TOP ball chain
+            // (`var_u32_36462[1]`, the head the case-10 arm rebuilds
+            // at :52296) and filters on MODEL 39 + owner ONLY — no
+            // class byte, no act_life, no 0x400. A ball absorbed
+            // EARLIER IN THIS TICK is still a member: sub_41E80
+            // (:52508-11) is nothing but `flags |= 0x400`, and the
+            // reclaim sub_41E90 (:52514-20) runs from the per-slot
+            // walk only at the next tick's top (:52226-31). The mover
+            // ticks at the balloon's slot and the dispatcher at the
+            // castle's, so the dispatcher re-locks onto the corpse it
+            // just drank (mc1l2 t=2409/2435/5443/5767). Dropping the
+            // class test is decompile-mandated too, not cosmetic: the
+            // mid-tick merge reclaim (sub_277D0 :29723+) clears
+            // class64 but leaves model65/+144, and retail still picks
+            // that record. HW twin :51986-52008 is identical.
+            for k in 0..self.ball_chain.visible_len() {
+                let j = self.ball_chain.list[k] as usize;
                 let e = &self.ent[j];
-                if e.class64 != 10 || e.model65 != 39 || e.flags & 0x400 != 0 || e.f144 != own {
+                if e.model65 != 39 || e.f144 != own {
                     continue;
                 }
                 if balloons
@@ -4914,7 +4946,13 @@ impl Gen {
                     }
                 }
             }
-            self.free_entity(i);
+            // sub_275C0 ends on the SOFT kill sub_41E80_421C0
+            // (:29646-59) — `flags |= 0x400`, class and links intact
+            // until the next tick's top sweep reclaims it (:52226-31).
+            // The hard free lost the grave a tick (mc1l2: retail's
+            // grave 18 shows flags 12 → 1036 at t=8302 and goes class
+            // 0 only at 8303).
+            self.ent[i].flags |= 0x400;
         }
     }
 
@@ -4990,13 +5028,17 @@ impl Gen {
         if self.ent[i].mail[0].1 != 0 {
             let (amt, src) = self.ent[i].mail[0];
             self.ent[i].mail[0].1 = 0;
-            // Captured buildings are immune to their OWNER's damage
-            // ("as if they were your castle"); no substrate found in
-            // the decompile's ch0 writer or intake (sub_120B0/:31070)
-            // — verification owed.
-            if src != 0 && src == self.ent[i].f144 {
-                return;
-            }
+            // A CLAIMED BUILDING IS NOT IMMUNE TO ITS OWNER. The port
+            // used to return here when `src == f144` ("as if they were
+            // your castle"); that clause was invented, and its own note
+            // admitted no substrate had been found. sub_29640 (:31070)
+            // is short enough to settle it outright — `+40 = 0`, the
+            // life test, the `+94` src gate, the subtract, the lethal
+            // `+38` latch — and carries NO owner comparison of any
+            // kind. Measured on mc1l2 t=5674: the human's own (10,0)
+            // explosion (id24 295) lands 400 on his claimed house slot
+            // 2 (f144 295), retail taking it to 1600 with `+40 = 295`
+            // where the port held 2000 forever.
             self.ent[i].act_life -= amt as i32;
             if self.ent[i].act_life < 0 {
                 self.ent[i].f38 = src;
@@ -5032,12 +5074,16 @@ impl Gen {
         if self.ent[i].f63 % 40 == 0 {
             self.ent[i].f140 = (self.ent[i].f26 as i32) << 8;
             let cap = self.ent[i].f128;
-            // EXACT equality (:30819), NOT `>=` — occupancy only rises
-            // (militia walk-ins have no cap check, emission never
-            // decrements), so retail's gate self-extinguishes once a
-            // house overshoots. `>=` makes every full house emit
-            // forever, flooding the level with villagers + loose mana
-            // until the pool saturates.
+            // EXACT equality (:30819), NOT `>=` — verbatim retail.
+            // (The old rationale here said occupancy "only rises via
+            // militia walk-ins"; there is no walk-in — that was the
+            // port's own fabricated ladder rung, deleted with the
+            // mc1l2 (5,4)+(10,45) family. Retail's only reachable
+            // occupancy write in the mob range is the defender pop-out
+            // `+26 = v2 - 1` at :30790, so occupancy FALLS.) `>=`
+            // would make every full house emit forever, flooding the
+            // level with villagers + loose mana until the pool
+            // saturates.
             if cap > 5 && self.ent[i].f26 == cap {
                 let d = self.ent_rand(i) % cap as u32;
                 if d > (cap - cap / 16 - 2) as u32 {
@@ -6564,7 +6610,10 @@ mod tests {
         }
         // Spawn pass (stagger hit, f63 = 2): both fresh balloons
         // park untargeted despite the waiting ball.
+        // The pick walks the TICK-TOP ball chain, which `World::tick`
+        // rebuilds inline; a bare `Gen` must stand that up itself.
         g.ent[c].f63 = 2;
+        g.rebuild_ball_chain();
         g.castle_balloons(c);
         let fleet: Vec<usize> = (1..g.ent.len())
             .filter(|&j| g.ent[j].class64 == 3 && g.ent[j].model65 == 3)
@@ -6577,6 +6626,7 @@ mod tests {
         // stand — even a dangling one.
         g.ent[fleet[0]].f146 = 999;
         g.ent[c].f63 = 3;
+        g.rebuild_ball_chain();
         g.castle_balloons(c);
         assert_eq!(g.ent[fleet[0]].f146, 999, "off-turn keeps the stale claim");
         // Stagger pass (f63 = 4): the re-pick runs — a second ball
@@ -6593,6 +6643,7 @@ mod tests {
             e.f140 = 100;
         }
         g.ent[c].f63 = 4;
+        g.rebuild_ball_chain();
         g.castle_balloons(c);
         assert_eq!(
             g.ent[fleet[0]].f146, ball as u16,
@@ -7439,6 +7490,13 @@ mod tests {
         assert_eq!(g.ent[b].tick70, 25, "m4 spawns idle");
         let ctx = ctx_at(0xC000, 0xC000, 0);
         for _ in 0..400 {
+            // The pair-up scan walks the TICK-TOP per-model chain, so a
+            // test that drives `creature_tick` by hand has to rebuild it
+            // exactly where `World::tick` does — otherwise the roster is
+            // empty and nobody is ever a candidate. (This is the same law
+            // that keeps militia evacuated together from pairing on their
+            // shared birth tick — see `Gen::pack_scan`.)
+            g.rebuild_mob_chains();
             // Keep them facing each other so the v_30 cone always admits
             // the sibling — otherwise the wander jitter swings the
             // heading in and out of cone and the scan timing turns
@@ -7465,6 +7523,69 @@ mod tests {
             "the follower's leader is its sibling"
         );
         assert_eq!(g.ent[leader].tick70, 25, "the chosen leader stays idle");
+    }
+
+    /// THE BIRTH-TICK EXCLUSION (sub_1B5D0 :22653-77). The pair-up scan
+    /// walks `var_u32_36462[model]` — the per-model roster rebuilt at
+    /// the TOP of the tick (:52287-313) — so a creature spawned DURING
+    /// a tick is not yet a member and cannot pair, in either direction,
+    /// until the next rebuild. mc1l2's village collapse evacuates
+    /// militia into three slots in ONE tick and retail leaves all three
+    /// unpaired; the port's old POOL scan paired them on their shared
+    /// birth tick, and a packed militiaman follows its leader instead of
+    /// running the two-draw wander — so its own per-entity LCG stops
+    /// advancing and every later roll on it is off by the draws it never
+    /// made (mc1l2 free-run horizon 4965 → 5674 on this one law).
+    ///
+    /// ⚠ This law is INVISIBLE to the pair-mode fixture harness: the obs
+    /// schema carries neither `+52` nor `+70`, and pair mode re-imports
+    /// retail's state every tick, so an importing runner hands the port
+    /// `f52 = 0` and watches it wander correctly. This test IS the
+    /// regression guard.
+    #[test]
+    fn a_creature_born_this_tick_cannot_pair_up() {
+        let mut g = Gen::new(
+            flat_land(8),
+            synthetic_assets(),
+            1,
+            ChassisParams::MC1,
+            crate::verbs::VerbSet::MC1,
+        );
+        let ctx = ctx_at(0xC000, 0xC000, 0);
+        // Two militia born together, close enough and facing each other
+        // — everything the pair-up needs EXCEPT chain membership.
+        let a = g.spawn_creature(4, 0x4000, 0x4000, 0).unwrap();
+        let b = g.spawn_creature(4, 0x4300, 0x4000, 0).unwrap();
+        g.ent[a].f30 = Gen::angle_between(g.ent[a].x, g.ent[a].y, g.ent[b].x, g.ent[b].y);
+        g.ent[b].f30 = Gen::angle_between(g.ent[b].x, g.ent[b].y, g.ent[a].x, g.ent[a].y);
+        // Put both on the ladder cadence, so the scan is reached on the
+        // very first tick they run: `+63 % (4 * v_26) == 0`.
+        g.ent[a].f63 = 0;
+        g.ent[b].f63 = 0;
+
+        // The tick they were born in: the roster predates them.
+        g.creature_tick(a, &ctx);
+        g.creature_tick(b, &ctx);
+        assert_eq!(
+            (g.ent[a].f52, g.ent[b].f52),
+            (0, 0),
+            "a creature born this tick is not a chain member and cannot pair"
+        );
+
+        // The next tick-top rebuild admits them, and the same scan now
+        // finds exactly what it refused before — proving the refusal was
+        // the MEMBERSHIP, not the range, cone or cadence.
+        g.rebuild_mob_chains();
+        g.ent[a].f63 = 0;
+        g.ent[b].f63 = 0;
+        g.creature_tick(a, &ctx);
+        g.creature_tick(b, &ctx);
+        assert!(
+            (g.ent[a].f52 != 0) ^ (g.ent[b].f52 != 0),
+            "once chained, exactly one falls in behind the other (a f52 {}, b f52 {})",
+            g.ent[a].f52,
+            g.ent[b].f52,
+        );
     }
 
     /// The militia death slot (sub_1BC10 :22729) gates on +26: nonzero

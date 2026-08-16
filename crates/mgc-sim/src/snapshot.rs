@@ -67,7 +67,14 @@ const MAGIC: u32 = 0x5343_474D;
 ///    burst-end signed-base restore mail, ±80) and `World::mc1_v14`
 ///    (retail's Type_160 v_14 speed-touched latch) joined the stream
 ///    after `pending_speed_zero`.
-pub const SNAPSHOT_VERSION: u32 = 11;
+/// 12: `Rival::life_rate` — the AI life-regen rate REGISTER (retail
+///    u16_341, applied-then-selected) joined the rival record after
+///    `regen_stall`.
+/// 13: `Rival::knock_dir` / `Rival::knock_mag` — the pending
+///    knockback impulse (retail Type_160 v_24/v_22) joined the rival
+///    record after `jink`. A live rival never spends it; its death
+///    fall does.
+pub const SNAPSHOT_VERSION: u32 = 13;
 
 /// Why a snapshot could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]

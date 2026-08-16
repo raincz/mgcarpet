@@ -487,10 +487,53 @@ fn level_005_golden_state_hashes() {
     // possess claim or castle teardown fires here). See the
     // OBSERVABLE verdict below.
     const GOLDEN: [u64; 6] = [
-        0xe415937b43757b61, // post-init (feature pass + disposition 0)
-        0x5ee6fbf5895fd53d, // A: 32 idle ticks far afield
-        0x4114e13587164c1c, // B: crater trigger fired + 120 dig ticks
-        0xa58b5fcad6582193, // C: ambush disposition fired
+        // ALL SIX re-pinned for THE mc1l2 RIVAL-WIZARD SESSION (the
+        // first live-rival corpus): the wizard ch0 intake gates on the
+        // mail SOURCE and consumes source-only (sub_46540 :55694+ —
+        // src-0 letters are dead residue), the AI life regen applies
+        // the u16_341 register UNCONDITIONALLY (no stall gate,
+        // :17990-18018, `Rival::life_rate` joins the hash — the
+        // post-init/A movement is that layout half), attack casts
+        // gate on 3-D ARRIVAL (sub_15470/sub_42340) with the z-hover
+        // on failed attempts only, rival launcher tokens run the live
+        // sub_56090 burst machine (fire from the token, debit, pool
+        // freeze, decrement), emissions spawn untargeted with the
+        // cost/count +140 stamp, the poverty release is >=, the picker
+        // walks the class-5 chains from the castle anchor, and the
+        // stale-target test is sig-only. Corpus: mc1l2 19,527 → 306
+        // unexplained rows; l0/l1/l32-head hold bit-exact; l5 67 + hw
+        // 182 fixtures promoted, 0 regressions. Behavior change
+        // toward retail by design — OBSERVABLE moves B-E (Vodor
+        // plays the level differently from the dig window on) and
+        // holds at post-init/A.
+        // Re-pinned ALL SIX for THE mc1l2 RESIDUE SESSION. Layout:
+        // `Rival::knock_dir`/`knock_mag` join the hash (SNAPSHOT 13).
+        // Behavior: the arrival gate now compares retail's truncated
+        // isqrt so rivals commit casts on the boundary tick, the
+        // balloon fleet re-picks off the tick-top ball chain, the
+        // militia's fabricated house rung is gone, m2 bees keep their
+        // pre-work on hit/death ticks, and a dying rival drifts on the
+        // killing blow's knock. OBSERVABLE below still holds at
+        // post-init/A and moves B-E — the correct signal.
+        // C/D/E re-pinned for THE mc1l2 FREE-REPLAY SESSION: the
+        // pair-up scan walks the TICK-TOP per-model chain instead of
+        // the pool (a creature born this tick is not yet a member and
+        // cannot pair — sub_1B5D0 :22653-77), the m2 bee ctor stamps
+        // its `+67 = 0` human-only filter (sub_38370 :44744, the only
+        // class-5 ctor that writes the byte), and a CLAIMED BUILDING
+        // takes its own owner's damage (sub_29640 :31070 carries no
+        // owner test — the port's immunity clause was invented).
+        // ⭐ OBSERVABLE below holds byte-for-byte at ALL SIX
+        // checkpoints, post-init through E: on this level the pack
+        // links and the building mailbox are the only words that move,
+        // and no pose, terrain cell or population count follows them —
+        // the layout-only signal. The behavioral half is free-run-only
+        // (mc1l2 horizon 392 → 8282, missing/extra 72/64 → 5/5), where
+        // pair mode re-imports retail's own state every tick.
+        0x76533e7fc18c8b41, // post-init (feature pass + disposition 0)
+        0x62b38cefb306e235, // A: 32 idle ticks far afield
+        0x5d56881e6873bced, // B: crater trigger fired + 120 dig ticks
+        0x620b1bfe17e91e51, // C: ambush disposition fired
         // D/E previously re-pinned for THE CAST-PHASE LAW (the MC1
         // arm→token-fire restructure): every hand cast now arms its
         // spell token at the wizard pass and the token's own tick
@@ -648,8 +691,8 @@ fn level_005_golden_state_hashes() {
         // the correct signal for a pure timing law. Corpus: mc1l1
         // missing-(5,3) 85 → 0; mc1l0 free run stays bit-exact
         // 0..7097; 10/10 suites, 0 regressions.
-        0xed5443e6560371ff, // D: 64 ticks of two-hand fireball combat
-        0x9fdea8453df66de8, // E: 100 aftermath ticks
+        0xec6c62fdd5fdc3c3, // D: 64 ticks of two-hand fireball combat
+        0x518965283f7263ee, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,
@@ -752,8 +795,24 @@ fn level_005_golden_state_hashes() {
     const OBSERVABLE: [u64; 6] = [
         0x9c6fa2c7f861e019, // post-init — + unclaimed-dwelling poses
         0xf2d0e60ad7a88dcc, // A
-        0x99dbb292aeb24b0c, // B — settler phase + feeder leash
-        0x6620d2ab864e42a9, // C — trigger pre-move pose law
+        // B..E re-pinned with THE mc1l2 RIVAL-WIZARD SESSION (see the
+        // GOLDEN note). OBSERVABLE moving from B on is the CORRECT
+        // signal — REAL behavior by design: Vodor heals through
+        // hits at the register rate, holds his fire until 3-D
+        // arrival, chain-boosts on the speed token and hunts along
+        // the chain buckets, so his flight path, casts and every
+        // population he touches differ from the dig window on.
+        // Post-init and A hold — the AI has not diverged in the
+        // far-afield idle.
+        // B-E re-pinned again with THE mc1l2 RESIDUE SESSION —
+        // post-init and A hold byte-for-byte, which is the whole
+        // verdict: nothing changed in the far-afield idle, and every
+        // moved window is a rival/creature machine genuinely playing
+        // differently (boundary-tick casts, tick-top ball picks, no
+        // militia house rung, bee pre-work on death ticks, knocked
+        // corpses).
+        0x5074e1c62554ddbc, // B — settler phase + feeder leash
+        0x6738cadeda82682f, // C — trigger pre-move pose law
         // D/E re-pinned with the state pins above (THE CAST-PHASE
         // LAW + the area-broadcast tile rounding): the D-window
         // fireballs launch at arm+1 with the corpus f140 stamp and
@@ -784,8 +843,8 @@ fn level_005_golden_state_hashes() {
         // outcome is unchanged (B byte-identical), while the C
         // ambush's one-tick-later fire shifts every spawn's ctor
         // draws, poses and downstream combat.
-        0x55e5e3f9e6b90b9b, // D
-        0xd50818406026704f, // E
+        0xcfa4e29486b7cd92, // D
+        0xf2c21907539bafd3, // E
     ];
     assert_eq!(
         obs, OBSERVABLE,

@@ -12406,3 +12406,367 @@ accel-domain + 1 warp gated.
   the live tick builds chains in its top sweep) — the dead-code
   warning is gone.
 - mc1l32 beyond t=60 deliberately unexplored (player scope ruling).
+
+## 🏆🏆 mc1l2 RIVAL-WIZARD INTAKE (2026-08-16): 19,527 → 312, the AI wizard laws
+
+The first live-rival corpus (Vodor, slot 1, castle-less all take).
+Player-reported symptoms — "fireballs fire from my right hand
+simultaneously with possession casts, against the buildings I just
+possessed" and "Vodor's health" — both resolved to rival-machine
+laws. Verify-deltas: 19,527 unexplained field rows → **312** (98.4%),
+conforming pairs 2,001 → 9,611 (10,476/10,588 with explained), pose
+channel 100% bit-exact throughout. mc1l0 (3 rows) and mc1l1 (5+2)
+hold their closed baselines, the mc1l32 head 0..60 stays bit-exact,
+10/10 suites 0 regressions (mc1l5 **67 fixtures promoted**, mc1hwl0
+**182 promoted**), workspace green, fmt clean, 0 warnings.
+
+### THE LAWS
+
+1. **WIZARD ch0 INTAKE IS SOURCE-GATED WITH AMOUNT RESIDUE**
+   (sub_46540 :55694+, the 8,171-row life family): every mailbox
+   channel fires on its SOURCE word only, and a consume clears ONLY
+   the source — the amount stays behind forever. Vodor carried a dead
+   `(1400, 0)` ch0 letter for thousands of ticks; the port re-applied
+   it at every imported pair. The shield quarter keys on the ENTITY's
+   0x4000 flag (one-shot cleared, quartered amount written back), the
+   killer latch (+38) stamps on the DEATH letter only, and a death
+   does NOT consume the letter.
+2. **AI LIFE REGEN HAS NO STALL GATE** (:17990-18018): `act_life +=
+   life_rate` UNCONDITIONALLY through the applied-then-selected
+   u16_341 register (afield max/500, castle/shrine max/200, floor
+   −1). The shared intake arms +383=16 but only the HUMAN's regen
+   reads it — retail's rival heals +20 straight through a −100
+   fireball tick. `Rival::life_rate` joined the struct (SNAPSHOT 12),
+   imported from the record.
+3. **ATTACK CASTS GATE ON 3-D ARRIVAL** (sub_13DD0 + sub_15470 with
+   sub_42340 = isqrt(dx²+dy²+dz²)): the cast attempt runs ONLY when
+   arrived (3072 for wizards/balloons/mana-holders) with burst ≥ 0,
+   and the z-hover toward target+512 runs ONLY on a FAILED attempt
+   (`z += sign(z−tz)·v_14` verbatim). The port fired every tick from
+   7,300 units out while retail sat at charge 200 — the machine-gun
+   wall (rival.charge 1,205 rows + 1,073 extra bolts → 2). The
+   in-app "fireballs from my right hand": Vodor's cross-map homing
+   bolts reached the player, missed (one-shot acquisition), and flew
+   straight on into the buildings ahead.
+4. **THE COMMIT ARMS, THE TOKEN FIRES** (sub_56090/sub_55DD0/
+   sub_55E80): rival launcher tokens run the live burst machine at
+   their own pool slot — fire at full from the owner's settled pose
+   (the commit stamps the wizard's +32 pitch), sub_55E80 debit on the
+   regen delta, mid-burst POOL FREEZE (positive delta pinned 0),
+   decrement last, refused full tick → +48=1. Emissions spawn
+   UNTARGETED (no +146 pre-lock — the l2 corpus reads 0 on every
+   spawn boundary; the bolt's own next-tick sub_54520 scan picks the
+   victim) with +34 = ctor 0 and +140 = cost/count (fireball 40).
+5. **AI BOOK/ECONOMY IMPORT**: `owned` rides the record's +676
+   (retail rebuilds it per tick from the +532 list, sub_45C10 — the
+   stale fresh-spawn binding stamped Vodor's burst onto the HUMAN's
+   imported fireball token, 1,254 rows); the census writes each rival
+   CARPET's +136 ceiling (233 mana_max rows); poverty releases at
+   `>=` min(max/4+6000, max/2); readiness cones are f30-vs-f34 with
+   `>=` refusal; Accelerate readiness has NO cooldown gate (its
+   cadence is the burst window — commit-side busy gate); the aimed
+   group {3,7,8,17,20} busy-gates on the token; Cruise and castle-less
+   Home chain-cast the speed-up (sub_13A10); the rebound-notice
+   success path ends at 15-or-hold (never the 7/20/0 ladder).
+6. **STALE TARGETS ARE SIG-ONLY** (sub_15440): no life test, no free
+   test — retail chases corpses; a freed slot goes stale because the
+   free clears class64. The stored +148 now DECODES from the record
+   and imports raw (recomputing it blinded the test). The mana-hunt
+   pick walks the class-5 MODEL CHAINS from the CASTLE anchor
+   (fallback self) — the raw-pool scan saw chain-dropped creatures
+   (the one hwl0 suite regression, fixed by walking
+   `Gen::mob_chains`). Every pick writes the wizard entity's
+   +146/+148 (the 138-row chase family); targetless transitions
+   leave them stale.
+7. **DEATH SEQUENCE**: the fall applies gravity `z += OLD f46` then
+   decrements (clamp [−256, 0]), floors at ground+v_12 with the
+   impact ON the floor equality, drifts with the speed chasing the
+   stale vdes 16/tick, puffs (10,1) at the POST-drift PRE-gravity
+   pose with flags |= 0x80 ONLY (no port 0x10000) and id24 = the
+   faller. The jar scatter draws ride the DYING WIZARD's LCG (three
+   per jar), and scattered-jar decay rides ACT_LIFE (sub_55A40 top:
+   nonzero counts down 1/tick, freed at zero; authored jars carry 0
+   and live forever) — the strict jar tick now runs it.
+
+### Residue (312 rows, all banked-size)
+
+(3,3) balloon chase 35 (balloon-column targeting, pre-existing);
+(5,4)+(10,45) village-wanted militia f26 36; one (9,13) seeker
+episode 60 (t≈8207); (9,1)/(9,0) lob/bolt z/y/pitch ~60; death-region
+timing (jar free ±2 ticks, grave, (10,1)/(3,1) x/y) ~60; scattered
+small lanes. rival.charge lane: 2 rows.
+
+### Notes
+
+- SNAPSHOT_VERSION 11 → 12 (`Rival::life_rate`).
+- `dump-state <file> <t> wiz` prints the MC1 wizard channel (hands,
+  charge, grace, stall, rate, ai_state, burst, poverty, castle,
+  owned, cooldowns) — the session's triage microscope.
+- level_005 state-hash goldens re-pinned ALL SIX (layout:
+  `life_rate` joins the hash; behavior: Vodor plays differently) —
+  OBSERVABLE holds post-init/A and moves B-E, the correct signal.
+- At-castle grace is SET to 2 (:17975), not floored.
+- The war-clear on a landed cast targets the struck WIZARD's slot
+  (:18337-39), not war[0].
+- PLAYTEST OWED: native rival feel changed wholesale (holds fire
+  until close, 8-shot bursts, heals through hits, Accelerate
+  chain-boost while cruising, bolts can stray onto dwellings).
+
+## 🏆🏆🏆 mc1l2 RESIDUE CLOSED (2026-08-16): 312 → 5, the last laws
+
+The follow-up to the rival intake above: the 312 banked residue rows
+were dug family by family and **312 → 5** (98.4%), missing and extra
+entity rows both to **ZERO** (5/1 → 0/0), conforming pairs 9,611 →
+9,629 of 10,588. mc1l0 (3) and mc1l1 (5+2) hold their closed baselines
+exactly, 10/10 suites 0 regressions with **5 fixtures FIXED** across
+four OTHER corpora (mc1l5, mc1hwl0 ×2, mc1l32-bee-height, mc2l4 — all
+promoted), 43 test suites green, fmt clean, 0 warnings.
+
+### THE LAWS
+
+1. **THE ARRIVAL GATE COMPARES A TRUNCATED isqrt, NEVER A SQUARE**
+   (sub_15470 :19058-62 / :19066). Retail computes the scalar distance
+   `sub_42340` (3-D, :52724) or `sub_423D0` (2-D, :52744) — both end in
+   `Distance_410CE` — and tests `> a3`. The port compared `d²` against
+   `arrive²`, which differs across the whole band
+   `arrive² < d² < (arrive+1)²`: there the square test refuses while
+   the isqrt truncates ONTO the boundary and arrives. Retail keeps
+   squared-only twins (sub_42390/sub_42410) and deliberately does not
+   call them here. t=1824/1895: Vodor at d² = 9,437,778 against
+   3072² = 9,437,184 is 594 over on squares and exactly 3072 on the
+   isqrt — retail casts, the port refused (the `rival.charge` lane and
+   its two missing (9,0) fireballs).
+2. **THE BOLT'S END OF FLIGHT** (sub_54180 :63806-26): the airborne
+   survival arm is the ONLY step onto the new position, and the life
+   decrement lives INSIDE it on a pre-decrement test. A grounding step
+   kills at the PRE-step pose with no decrement; a hit parks the bolt
+   at the victim's aim point. Plus a ctor census: models 0-12 and
+   16-19 write `+140 = 50`, **m13/m14/m15 do not** (:46256+ carries no
+   such write). Closed the whole (9,13) family and the same rows on
+   mc1l32.
+3. **THE AIM LIFT IS AN IN-PLACE BRACKET, NOT A PURE FUNCTION**
+   (sub_524C0 :62509 / sub_524E0 :62514). It writes the MEASURED
+   record's +76, computes, writes back — indistinguishable from
+   `z + f78` for every distinct (shooter, target) pair, and NOT
+   indistinguishable on the ALIAS. When `+146` holds the shooter's own
+   slot the lift raises the shooter too: dz = 0 over dh = 0, bearing
+   (0,0), and homing at yourself is a NO-OP. The alias is reachable —
+   a lob born into a just-freed ball slot is still a tick-top chain
+   member, and the possess acquire gates on `+144` (:64045) where the
+   class-3 and creature sweeps skip the shooter via `id24 == own`, so
+   it scores ITSELF at distance 0 and wins. The pure form pitched
+   1536 (straight up) and climbed 113/tick. Pinned by
+   `a_projectile_homing_at_its_own_slot_holds_its_pose`.
+4. **THE MILITIA HAS NO HOUSE RUNG** (sub_1B5D0 :22539-687). The
+   port's ladder step (3) — nearest house within 0x1000, `house+26 +=
+   1`, `militia+26 = 1` — was INVENTED. Bucket 9 is the model-9 list
+   (the tick-top sweep routes class-10 m45 only to `var_u32_36462[2]`,
+   :52287-313), so the `class != 10 || model != 45` guard at :22643 is
+   never-false shared-template dead code; and even granting a house
+   could win scan B, retail then does NOTHING. Retail's only militia
+   walk-in is the `+146` ANCHOR arm (:22546-63), which no writer can
+   reach. A barren ladder falls straight to the unconditional pair-up
+   — retail itself packs up mid-family (slot 286 f52 0 → 287 at
+   t=5054→5055). Closed 36 rows here and the same signature on mc1l5.
+5. **WRAPPER PRE-WORK OUTLIVES THE DAMAGE PROLOGUE.** The prologue is
+   not a handler's first act — it sits inside the shared core
+   sub_1A120 (:21598-651), so anything a wrapper does before calling
+   that core still lands on hit and death ticks. m2's sting countdown
+   and direct z step (:22342-54) are hoisted above the port's
+   centralized intake. (m6's `+126 = 30` :23146 is the same class and
+   is deliberately still unhoisted — no row demands it.)
+6. **A DYING WIZARD SPENDS THE KILLING BLOW'S KNOCKBACK.** The shared
+   intake arms `v_24`/`v_22` on EVERY sourced letter including the
+   fatal one (:55714-19 precedes the death return at :55726), the AI's
+   live mover never reads it, and the state-2 fall's shared mover
+   sub_455D0 (:55204-19) is the ONLY place a rival ever cashes it —
+   drifting the corpse along that bearing at 4/tick decay. Vodor's
+   400-damage letter gave v_22 = 40 and ~180 units over ten ticks,
+   carrying him off the spire; without it the port's corpse never
+   moved and fired its whole death payout **19 ticks early**, sliding
+   every later allocation that tick down the free stack. `Rival`
+   gained `knock_dir`/`knock_mag` (SNAPSHOT 13), imported from the
+   record's already-decoded +24/+22. ⚠ Retail's gate is bare
+   `src > 0`; the port must fall back to the pinned human pose for
+   `PLAYER_TARGET` or the law is corpus-only and every player kill
+   still drops straight down. −69 rows, ~28% of the level's residue
+   from one law.
+7. **THE SOFT KILL IS NOT A FREE.** `sub_41E80` (:52508-11) is
+   `flags |= 0x400` and nothing else; the record keeps its class and
+   links for the rest of the tick and is reclaimed by the NEXT tick's
+   top sweep (:52226-31). The hard free is `sub_41E90` (:52514-20).
+   The jar decay (:64755-63) and the grave tick (:29646-59) both call
+   the SOFT one — the port called the hard one and lost each a tick of
+   visibility.
+8. **THE SCATTER MOVE-RELINKS, THE BRAIN OUTLIVES THE HOUSEKEEPING,
+   AND THE CORPSE KEEPS BIT 3.** `Gen::link` early-returns on flags
+   bit 2, which an imported parked token carries, so the jar scatter's
+   positions were silently never written (retail uses
+   sub_41C70 :55546); the state byte INCREMENTS (`++*(v16+70)`
+   :55535); flags bit 0 clears (:55529). The death arm at :17980-84
+   returns from the HOUSEKEEPING only — its caller sub_13170 discards
+   that return and runs the state handler anyway (:17846-51), so a
+   dying rival still runs its state leg on the fatal tick. And the
+   impact's flag write is a bare `|= 0x20` (:55568): retail's corpse
+   goes 12 → 44, keeping the hittable bit the port's `& !8` cleared.
+9. **THE BURST GATE RUNS ON EVERY BURST TICK.** The token handler
+   calls sub_55DD0 before the full/mid split (:65030-88), and that
+   gate refuses on `owner.+140 < 0 || owner.+12 < 0` (:64915-24) —
+   no state test, and the mid-burst path short-circuits before the
+   mana compare. Any refusal sets `+48 = 1` and falls into the
+   unconditional decrement, so an owner dying mid-burst cancels the
+   rest of it in one double drop.
+10. **THE MC1 FREE-STACK IMPORT MUST NOT CHAIN THE RECYCLE STACK**
+    (conformance-only). Retail's NewEvent pops free first and reaches
+    the recycle SACRIFICE arm only on exhaustion (:43867-83 vs
+    :43885-908); MC1's recycle list is the respawn-window sacrifice
+    set alone. Chaining it inverted the pop priority AND inflated the
+    census, so `live.len() == scan_free` could never hold once a
+    respawn had happened and the whole recorded order was discarded
+    for the fallback's lowest-free-slot rule — on mc1l2 that misfired
+    from t≈8291 to the end of the take.
+11. **m12 SEEK SCORES HOUSES IN 3-D** (:25241-49 via sub_42340), as a
+    truncated isqrt under strict `<`. The m4 militia's own scan
+    (:22628-31) is `dx² + dy²` with no z term — they are different
+    laws and no longer share a helper.
+
+### Residue (5 rows)
+
+t=1518 (9,0) x (2 units); t=5674 (10,45) life 1600-vs-2000; t=8282
+(5,4) target_yaw (2 units); t=8289 (10,0) chase + f26 on one
+explosion. None clustered, none with a named mechanism.
+
+### Notes
+
+- SNAPSHOT_VERSION 12 → 13 (`Rival::knock_dir`/`knock_mag`).
+- level_005 goldens re-pinned ALL SIX (layout: the knock fields join
+  the hash; behavior: the rival machines play differently).
+  **OBSERVABLE holds byte-for-byte at post-init and A and moves B-E**
+  — the correct signal, and the whole verdict.
+- `tools/conform` — a memory-capped wrapper so probes need no
+  `(ulimit …; …)` subshell at the call site.
+- DEVIATIONS.md:120's ball-pick clause is RETIRED (see there); its
+  `castle_absorb` sibling is recorded there as still open.
+- PLAYTEST OWED (carried, and now larger): rivals commit casts on the
+  arrival boundary, balloons re-lock onto balls they just drank,
+  militia never shelter in houses, bees keep stinging cadence through
+  the blow that kills them, and dying rivals are KNOCKED — they now
+  tumble away from the killing blow instead of dropping in place.
+
+## 🏆🏆🏆 mc1l2 FREE REPLAY FAITHFUL (2026-08-16): horizon 392 → 8282, the level now plays end-to-end
+
+The lesson banked at the end of the previous session — *5 residue rows in
+pair mode did NOT mean a faithful replay* — is now discharged. Grading
+mc1l2 with `replay` instead of `verify-deltas` exposed three laws that
+pair mode structurally cannot see, because it re-imports retail's state
+every tick and so never lets a wrong decision compound.
+
+| | before | after |
+|---|---|---|
+| bit-exact horizon | 392 boundaries | **8282** |
+| clean pairs | 4404 / 10588 | **10568 / 10588** |
+| field rows | 25,815 | **17** |
+| missing / extra | 72 / 64 | **5 / 5** |
+| first entity-set break | t=6200 | t=8297 |
+
+Everything after t=8310 is clean to the end of the take. **PLAYER-RULED
+2026-08-16: the free replay now plays end-to-end exactly** — Vodor dies,
+the level terminates, and the "shooting into empty space" the player
+reported is gone. That was the session's success test, not the row count.
+
+### THE LAWS
+
+1. **THE PAIR-UP SCAN WALKS THE TICK-TOP CHAIN, NOT THE POOL**
+   (sub_1B5D0 :22653-77). Retail takes `var_u32_36462[model]` head-to-
+   tail through `->next` — the per-model roster rebuilt once at the top
+   of the tick (:52287-313) — so **a creature born THIS TICK is not yet
+   a member and cannot pair, in either direction**. Its only in-walk
+   gates are `+52 == 0` and identity; the `act_life >= 0` / `+70 != 120`
+   tests the port carried inline are the CHAIN REBUILD's, which is why
+   retail's walk re-tests neither. mc1l2's village collapse at t=4935
+   evacuates militia into slots 285/286/287 in ONE tick and retail
+   leaves all three unpaired (286 only finds 287 at t=5054); the port's
+   pool scan paired 287 onto 286 on their shared birth tick. A packed
+   militiaman follows its leader instead of running the two-draw wander,
+   so **its own LCG stops advancing** and every later roll on that
+   entity is off by the draws it never made — the per-entity rng
+   divergence the player suspected, with the global LCG never moving.
+   Horizon 4965 → 5674 on this one law. ⚠ The same chain law is already
+   proven for the ball chain and the acquire walk; audit any remaining
+   `for j in 1..ent.len()` that stands in for a retail chain walk.
+2. **A CLAIMED BUILDING IS NOT IMMUNE TO ITS OWNER** (sub_29640
+   :31070). The port returned out of the building intake when
+   `src == +144` ("as if they were your castle") — an invented clause
+   whose own comment admitted no substrate had ever been found.
+   sub_29640 is eleven lines and settles it outright: `+40 = 0`, the
+   life test, the `+94` src gate, the subtract, the lethal `+38` latch,
+   and **no owner comparison of any kind**. Measured at t=5674: the
+   human's own (10,0) explosion (id24 295, `+44` 400) lands on his
+   claimed house slot 2 (f144 295) and retail takes it 2000 → 1600 with
+   `+40 = 295`, where the port held 2000 for the rest of the level.
+   Horizon 5674 → 8282. ⚠ Retail also zeroes `+40` as sub_29640's FIRST
+   statement, which the port still does not — unobserved, ungraded, and
+   left alone deliberately (one law per measurement).
+3. **THE m2 BEE IS THE ONLY CREATURE THAT NARROWS `+67`** (sub_38370
+   :44744). A census of all sixteen class-5 constructors finds exactly
+   one `+67` write — the bee's `= 0` — so every other model keeps
+   `NewEvent`'s `0xFF` wildcard. This closed the t=393 crack (eight
+   newborn bees at once, retail 0 / port 255) and lifted the horizon
+   392 → 4965. ⚠ **It was behaviourally INERT over this whole window**:
+   the entity-set channel and the missing/extra counts did not move at
+   all, because a bee's own bite is `mail_write_single` straight to its
+   acquired target and never consults the filter. `+66/+67` is read by
+   the AREA writer and by the m6/m8 beams that copy their TARGET's
+   pair — so the byte matters when something shoots AT a bee, not when
+   the bee stings. Correct law, no behavioural reach here.
+
+### Method note
+
+The break the previous session scoped at t=6200 was a SYMPTOM: the
+player's own fireball detonating four ticks early because an explosion
+allocation had slid. Bisecting the first *field* divergence per (slot,
+field) instead — retail's `rand` moving while the port's stood still on
+slot 287 at t=4965 — named the entity that had stopped drawing, and the
+state byte (`+70`) that explained it **is not in the obs schema at
+all**. Two instruments were added and kept:
+
+- `MGC_MOB_TRACE=<slot>[;<slot>…]:<t0>:<t1>` (replay) — retail's state
+  byte / pack link / phase clock beside the port's live ones, via
+  `World::debug_mob_machine`. The obs grades neither `+70` nor `+52`, so
+  a creature in the WRONG STATE reports only as downstream yaw and rand
+  rows. This is what cracked the pack bug.
+- `MGC_GRADE_TICK_BYTE=1` (verify/replay) — grades `+63`, normally
+  analysed only as a phase-clock channel. Ruled out a phase desync in
+  one run (the port's clock was exact through 4965).
+
+### Residue (20 dirty pairs, t=8282-8310)
+
+t=8282-8286 slot 286 `target_yaw` 2 units (heals itself); t=8289 slot
+287 `chase` 295-vs-0 (one tick); t=8297-8301 a balanced (10,40)
+missing/extra 18-vs-65 — the free-list slot-order desync class the
+runner already tags — with slot 268's `chase` following it to t=8310.
+Nothing after 8310.
+
+### Notes
+
+- Pair lane: mc1l2 **5 → 4** unexplained, 0 missing/extra. mc1l0 (3) and
+  mc1l1 (5+2) unchanged; l0 and l1 free runs stay BIT-EXACT end to end.
+- 10/10 fixture suites, **7,830 fixtures, 0 regressions**; all test
+  suites pass; fmt clean; no new clippy warnings.
+- level_005 goldens: state re-pinned at C/D/E, and **OBSERVABLE holds
+  byte-for-byte at ALL SIX checkpoints** (post-init through E) — on that
+  level the pack links and the building mailbox are the only words that
+  move and no pose, terrain cell or population follows them. The
+  behavioural half is free-run-only, as the table above records.
+- `idle_militia_pairs_up_into_a_pack` now rebuilds the mob chains inside
+  its tick loop, exactly where `World::tick` does — a hand-driven
+  `creature_tick` test has no roster otherwise.
+- ⚠ **Law 1 is INVISIBLE to the pair-mode fixture harness**, so it gets
+  a unit test instead: the obs schema carries neither `+52` nor `+70`,
+  and pair mode re-imports retail's state every tick — an importing
+  runner hands the port `f52 = 0` and watches it wander correctly, so no
+  fixture at any tick can catch it. `a_creature_born_this_tick_cannot_
+  pair_up` is the guard, and it is non-vacuous (restoring the pool scan
+  fails it on the birth-tick assert). Laws 2 and 3 ARE obs-carried
+  (`life`, `smodel`) and do make good fixtures. **Decide per law which
+  lane guards it before spending bundle bytes.**

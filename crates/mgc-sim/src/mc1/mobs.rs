@@ -462,6 +462,16 @@ impl Gen {
             e.f44 = c.f44;
             e.row156 = c.row;
             e.f66 = 3;
+            // Model 2 is the ONLY creature that narrows the second
+            // filter byte (sub_38370 :44744, `+67 = 0`) — a census of
+            // all sixteen class-5 ctors finds no other `+67` write, so
+            // every other model keeps NewEvent's 0xFF wildcard. The bee
+            // therefore stings the HUMAN wizard alone (class 3 model 0)
+            // where its siblings admit any class-3 body, rivals
+            // included.
+            if model == 2 {
+                e.f67 = 0;
+            }
         }
 
         // Mana: most models sub_36F90 (+140 = life/2, :43741); the
@@ -815,31 +825,47 @@ impl Gen {
         dx.wrapping_mul(dx).wrapping_add(dy.wrapping_mul(dy))
     }
 
-    /// Pack scan (inside IDLE :21384 / asleep WANDER): nearest same-
-    /// model packless creature within v_28² and the v_30 facing cone
-    /// becomes the leader; state → base+3.
+    /// Pack scan (inside IDLE :21384 / asleep WANDER, and the militia's
+    /// own copy :22651-84): nearest same-model packless creature within
+    /// v_28² and the v_30 facing cone becomes the leader; state →
+    /// base+3.
+    ///
+    /// THE CANDIDATE SET IS THE TICK-TOP CHAIN, not the pool. Retail
+    /// walks `var_u32_36462[model]` head-to-tail through `->next`
+    /// (:22653-77) — the per-model roster rebuilt once at the top of
+    /// the tick (:52287-313) — so a creature BORN THIS TICK is not yet
+    /// a member and cannot be seen, by itself or by anyone else. The
+    /// port's pool scan saw newborns and paired them instantly: mc1l2's
+    /// village collapse at t=4935 evacuates militia into slots 285/286/
+    /// 287 in ONE tick, and retail leaves all three unpaired (they only
+    /// find each other later — 286 packs onto 287 at t=5054), where the
+    /// port packed 287 onto 286 on their shared birth tick. That single
+    /// wrong pairing is the whole mc1l2 free-run break: a packed
+    /// militiaman follows its leader instead of running the two-draw
+    /// wander, so its own LCG stops advancing and every later roll on
+    /// that entity is off by the draws it never made.
+    ///
+    /// The chain rebuild already applies the `act_life >= 0` and
+    /// `tick70 != 120` membership gates, which is why retail's walk
+    /// re-tests neither — only `+52 == 0` and identity (:22660).
     fn pack_scan(&mut self, i: usize, base: u8) {
         let e = &self.ent[i];
         let row = &BEHAVIOR[e.row156 as usize];
         let (ex, ey, yaw, model) = (e.x, e.y, e.f30, e.model65);
         let r2 = (row.v_28 as i32) * (row.v_28 as i32);
+        let cone = row.v_30 as u16;
         let mut best: Option<(usize, i32)> = None;
-        for j in 1..self.ent.len() {
+        for &member in self.mob_chains.visible(model as usize) {
+            let j = member as usize;
             let c = &self.ent[j];
-            if j == i
-                || c.class64 != 5
-                || c.model65 != model
-                || c.tick70 == 120
-                || c.act_life < 0
-                || c.f52 != 0
-            {
+            if j == i || c.f52 != 0 {
                 continue;
             }
             let d2 = Self::dist2_sq(ex, ey, c.x, c.y);
             if d2 > r2 {
                 continue;
             }
-            if Self::angdist(yaw, Self::angle_between(ex, ey, c.x, c.y)) >= row.v_30 as u16 {
+            if Self::angdist(yaw, Self::angle_between(ex, ey, c.x, c.y)) >= cone {
                 continue;
             }
             if best.is_none_or(|(_, bd)| d2 < bd) {
@@ -1182,7 +1208,18 @@ impl Gen {
     /// "no-escape" burst. The sting itself (in the melee thunk)
     /// recoils and re-arms the cooldown; leaving the chase state
     /// resets speed to base (:22363-66).
-    fn bee_chase(&mut self, i: usize, base: u8, ctx: &MobCtx) {
+    /// sub_1B3C0's PRE-WORK (:22342-54) — the wrapper's first two acts,
+    /// hoisted out of [`Gen::bee_chase`] because retail's damage
+    /// prologue does NOT sit above them: the mail read, chain scan,
+    /// lethal test and state-abort all live inside the shared core
+    /// `sub_1A120` (:21598-21651), which the wrapper only reaches at
+    /// :22355. So on the tick a bee is hit or dies, retail has already
+    /// run the sting countdown and the z step. The port's centralized
+    /// [`Gen::inbox`] returns before the handler and lost both — the
+    /// mc1l2 (5,2) z + f26 family, all of them bee DEATH ticks.
+    /// Runs on hit and already-dead-on-entry ticks too (:22342-54 is
+    /// unconditional), though no row here exercises those arms.
+    fn m2_chase_prework(&mut self, i: usize, ctx: &MobCtx) {
         let v1 = self.ent[i].f26;
         if v1 != 0 {
             self.ent[i].f26 = v1 - 1;
@@ -1197,7 +1234,9 @@ impl Gen {
         // scratch slot; a dead target still steers). The mover's alt
         // clamp then fights it: net +24/tick climbing in-band, a hard
         // ceiling at ground + v_10, and the short bob cycle about the
-        // victim's altitude once level.
+        // victim's altitude once level. The read takes the OLD +146 —
+        // the Hit arm's retarget lands after, as in retail (:22349
+        // reads +146 before sub_1A120 rewrites it at :21642).
         let tgt = self.ent[i].f146;
         let tz = if tgt == PLAYER_TARGET {
             ctx.pz
@@ -1208,6 +1247,10 @@ impl Gen {
         let sign = i32::from(d > 0) - i32::from(d < 0);
         let v14 = BEHAVIOR[self.ent[i].row156 as usize].v_14 as i32;
         self.ent[i].z = self.ent[i].z.wrapping_add((sign * v14) as i16);
+    }
+
+    fn bee_chase(&mut self, i: usize, base: u8, ctx: &MobCtx) {
+        // The pre-work already ran in `creature_tick`, above the intake.
         self.mob_chase(i, base, ctx);
         if self.ent[i].tick70 != base + 2 {
             self.chase_exit_trailer(i, 2);
@@ -1917,21 +1960,21 @@ impl Gen {
 
     /// m4 IDLE, state 25 (sub_1B5D0 :22436): the movement core, the
     /// unarmed-look / filter restore, then the wander jitter and every
-    /// 4·v_26 the acquisition ladder — (1) a wizard on the village
-    /// wanted list (+528 ≠ 0, the hostility gate) within aggro range,
-    /// (2) the nearest burrower (m9), NO gate — villagers fight
-    /// burrowers on their own, (3) a house within 0x1000 to move back
-    /// into (the death slot with +26 = 1 = the silent-absorb walk-in;
-    /// house occupants++). Retail runs `sub_196E0` (`creature_move`) on
+    /// 4·v_26 a TWO-rung acquisition ladder — (1) a wizard on the
+    /// village wanted list (+528 ≠ 0, the hostility gate) within aggro
+    /// range, (2) the nearest burrower (m9), NO gate — villagers fight
+    /// burrowers on their own. There is no third rung: the port used to
+    /// invent a house walk-in here (see the pair-up note below).
+    /// Retail runs `sub_196E0` (`creature_move`) on
     /// the ALIVE path every tick (:22541) — the sole carrier of the
     /// altitude clamp `sub_42000`, so a militiaman spawned above ground
     /// by a village collapse settles onto it (every behavior row's
     /// v_14 is negative), and the idle speed (f128 = 30) makes him
     /// wander with the same two-draw yaw jitter as `mob_wander`
-    /// (:22572-79). When nothing hostile, no burrower and no house is
-    /// in reach, the idle pair-up scan (:22661-90) runs — identical to
-    /// the shared `pack_scan`, so a lone militiaman falls in behind the
-    /// nearest packless sibling (state 0x1B).
+    /// (:22572-79). When neither rung lands, the idle pair-up scan
+    /// (:22661-90) runs UNCONDITIONALLY — identical to the shared
+    /// `pack_scan`, so a lone militiaman falls in behind the nearest
+    /// packless sibling (state 0x1B).
     fn militia_idle(&mut self, i: usize, base: u8, ctx: &MobCtx) {
         self.militia_idle_body(i, base, ctx);
         // sub_1B5D0's trailer (:22689-90): acquiring a target arms him
@@ -1997,36 +2040,49 @@ impl Gen {
             self.ent[i].tick70 = base + 2;
             return;
         }
-        if let Some(b) = self.nearest_building(ex, ey, Some(0x1000 * 0x1000)) {
-            self.ent[b].f26 += 1;
-            self.ent[i].f26 = 1;
-            self.ent[i].tick70 = base + 4;
-        } else {
-            // Nothing to fight and no house in the +36418 list to shelter
-            // in (a house there blocks the pair-up in retail) → fall in
-            // behind the nearest packless sibling. The scan matches the
-            // shared pack_scan exactly (same-model, f52==0, v_28² range,
-            // v_30 cone → leader + state base+3, 0x1B).
-            self.pack_scan(i, base);
-        }
+        // A barren ladder falls STRAIGHT through to the pair-up: there
+        // is no house rung. Bucket 9 (`+36382 + 4*9`) is the model-9
+        // list — the per-tick rebuild routes class-10 model 45 only to
+        // `var_u32_36462[2]` (+36470) and lets nothing but class 5 into
+        // the model-indexed array (:52287-52313) — so the `class != 10
+        // || model != 45` guard at :22643 is never-false shared-template
+        // dead code. And even granting a house could win scan B, retail
+        // would then do NOTHING: the guard skips the chase arm and the
+        // non-zero winner skips the pack scan. Retail's only militia
+        // walk-in is the +146 ANCHOR arm (:22546-63), which no writer
+        // can reach — nothing ever puts a house in an m4's +146. The
+        // port's invented house rung stamped `house.f26 += 1` and
+        // `f26 = 1` where retail's last write of the tick is `+26 = 0`
+        // (:22482), which is the whole mc1l2 (5,4)+(10,45) family (18
+        // paired ticks) and the same signature in mc1l5. Retail itself
+        // packs up mid-family: slot 286 goes f52 0 → 287 at t=5054→5055.
+        self.pack_scan(i, base);
     }
 
-    /// Nearest live m45 house (the original's per-tick +36470 list;
-    /// pool order stands in for list order, same approximation as the
-    /// pack scans). `max_d2` = squared engine-unit window.
-    fn nearest_building(&self, x: u16, y: u16, max_d2: Option<i32>) -> Option<usize> {
-        let mut best: Option<(usize, i32)> = None;
+    /// Nearest live m45 house on the original's per-tick +36470 list
+    /// (pool order stands in for list order, same approximation as the
+    /// pack scans), scored the way m12 SEEK scores it (:25241-49):
+    /// `sub_42340_42680` (:52721-27), the THREE-axis distance, compared
+    /// as a TRUNCATED isqrt under a strict `<` — so equal-rounding
+    /// candidates resolve to the earlier entry. The `d != 0` skip is
+    /// retail's own `if (v10 && v10 < v1)`.
+    ///
+    /// SEEK is the only caller. The m4 militia's 2-D `dx*dx + dy*dy`
+    /// scan (:22628-31) used to share a helper here, but that whole
+    /// ladder rung was the port's own invention and is gone — see
+    /// [`Gen::militia_idle`].
+    fn nearest_building_3d(&self, x: u16, y: u16, z: i16) -> Option<usize> {
+        let mut best: Option<(usize, u32)> = None;
         for j in 1..self.ent.len() {
             let c = &self.ent[j];
             if c.class64 != 10 || c.model65 != 45 || c.flags & 0x400 != 0 {
                 continue;
             }
-            let d2 = Self::dist2_sq(x, y, c.x, c.y);
-            if max_d2.is_some_and(|m| d2 > m) {
-                continue;
-            }
-            if best.is_none_or(|(_, b)| d2 < b) {
-                best = Some((j, d2));
+            let dz = c.z.wrapping_sub(z) as i32;
+            let sum = Self::dist2_sq(x, y, c.x, c.y).wrapping_add(dz.wrapping_mul(dz));
+            let d = Self::isqrt(sum as u32);
+            if d != 0 && best.is_none_or(|(_, b)| d < b) {
+                best = Some((j, d));
             }
         }
         best.map(|(j, _)| j)
@@ -2065,8 +2121,8 @@ impl Gen {
     /// around construction) → APPROACH; none on the map → wander
     /// forever (villages only grow around existing buildings).
     fn m12_seek(&mut self, i: usize) {
-        let (x, y) = (self.ent[i].x, self.ent[i].y);
-        if let Some(b) = self.nearest_building(x, y, None) {
+        let (x, y, z) = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
+        if let Some(b) = self.nearest_building_3d(x, y, z) {
             self.ent[i].f146 = b as u16;
             self.ent[i].f26 = 10;
             self.ent[i].tick70 = 74;
@@ -3329,6 +3385,19 @@ impl Gen {
             4 => return self.mob_death(i, base),
             5 => return self.mob_corpse(i),
             _ => {}
+        }
+        // Per-model wrapper PRE-WORK that retail runs ABOVE its damage
+        // prologue. The prologue is not the handler's first act — it
+        // lives inside the shared core `sub_1A120` (:21598-21651), so
+        // anything a wrapper does before calling that core still lands
+        // on hit and death ticks. Only m2's is hoisted here (:22342-54,
+        // the mc1l2 (5,2) family). m6's `+126 = 30` (sub_1C4F0 :23146,
+        // likewise the handler's first statement) is the same class of
+        // pre-work and is DELIBERATELY still below the intake at its
+        // own site — the banked "HIT-ABORT RESTRUCTURE" spec lists it
+        // separately and no corpus row has demanded it yet.
+        if (model, role) == (2, 2) {
+            self.m2_chase_prework(i, ctx);
         }
         // The damage inbox block opening every live state handler
         // (:21330-81): apply pending damage, dispatch death/aggro.

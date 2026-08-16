@@ -556,6 +556,18 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
         let (a, b) = v.split_once(':')?;
         Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
     });
+    // MGC_MOB_TRACE=<slot>[;<slot>…]:<t0>:<t1> — the creature-machine
+    // microscope: retail's state byte / pack link / phase clock beside
+    // the port's live ones. The obs schema grades neither +70 nor +52,
+    // so a creature that entered the WRONG STATE reports only as the
+    // downstream yaw and rand rows — this is how the state itself is
+    // read.
+    let mtrace = std::env::var("MGC_MOB_TRACE").ok().and_then(|v| {
+        let (slots, ts) = v.split_once(':')?;
+        let (a, b) = ts.split_once(':')?;
+        let slots: Vec<usize> = slots.split(';').filter_map(|s| s.parse().ok()).collect();
+        Some((slots, a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
+    });
     // MGC_SITE_TRACE=<x>,<y>:<t0>:<t1> — the site-roster companion:
     // every non-castle entity within 8 tiles of the site, both sides,
     // compact — the crush/effect-lifetime microscope.
@@ -802,6 +814,39 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         flags,
                         d.tx,
                         d.ty
+                    );
+                }
+            }
+            if let Some((slots, t0, t1)) = mtrace.as_ref()
+                && tick.t >= *t0
+                && tick.t <= *t1
+            {
+                for &s in slots {
+                    let re = &st.ents[s];
+                    let p = world.debug_mob_machine(s);
+                    let pf = p.map_or_else(
+                        || "  port <none>".to_string(),
+                        |(t70, f52, f63, f34, f146, f126, rand)| {
+                            format!(
+                                "  port f70={t70} f52={f52} f63={f63} f34={f34} \
+                                 f146={f146} f126={f126} rand={rand}"
+                            )
+                        },
+                    );
+                    println!(
+                        "MOB t={} slot {s} ({},{}) retail f70={} f52={} f63={} f34={} \
+                         f146={} f126={} rand={}\nMOB t={} slot {s}{pf}",
+                        tick.t,
+                        re.class64,
+                        re.model65,
+                        re.f70,
+                        re.f52,
+                        re.f63,
+                        re.f34,
+                        re.f146,
+                        re.f126,
+                        re.rand,
+                        tick.t,
                     );
                 }
             }

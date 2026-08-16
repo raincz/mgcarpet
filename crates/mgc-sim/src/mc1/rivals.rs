@@ -188,12 +188,29 @@ pub(crate) struct Rival {
     site: (u16, u16),
     /// Lateral dodge velocity (v_16; impulse 80, decay 4/tick).
     pub(crate) jink: i16,
+    /// Knockback bearing (v_24) and magnitude (v_22), armed by the
+    /// shared damage intake (:55714-19) on EVERY letter including the
+    /// fatal one. The AI's live mover `sub_14EB0` never spends it, so
+    /// the impulse sits pending for the whole of a rival's life; the
+    /// state-2 death fall's shared mover `sub_455D0` (:55204-19) is
+    /// the only place a rival ever cashes it, drifting the corpse
+    /// along the killing blow's bearing at 4/tick decay.
+    pub(crate) knock_dir: u16,
+    pub(crate) knock_mag: i16,
     /// Desired speed (v_12) toward which f126 accelerates 16/tick.
     pub(crate) vdes: i16,
     /// Spawn grace (u16_331): mailbox discarded while > 0.
     pub(crate) grace: u16,
-    /// Post-hit regen stall (u32_383).
+    /// Post-hit regen stall (u32_383). Armed by the shared intake
+    /// like retail's, but the AI regen NEVER reads it — only the
+    /// HUMAN's regen tail does (:55387-90); the AI housekeeping
+    /// (:17990-18021) heals straight through fresh hits.
     regen_stall: u16,
+    /// Life-regen rate REGISTER (u16_341): the housekeeping APPLIES
+    /// this, then re-selects it from the at-castle/shrine test
+    /// (:17994-18018) — the rate applied at tick N was chosen at
+    /// N−1, the AI twin of the human's :55388 staircase.
+    life_rate: i32,
     /// Dead and castle-less: permanently out (byte_13329_6 = 0,
     /// :55622). Property is NOT torn down.
     pub eliminated: bool,
@@ -231,9 +248,12 @@ impl Rival {
             target_sig: 0,
             site: (0, 0),
             jink: 0,
+            knock_dir: 0,
+            knock_mag: 0,
             vdes: 0,
             grace: 100,
             regen_stall: 0,
+            life_rate: 0,
             eliminated: false,
             shield: false,
             invisible: false,
@@ -533,7 +553,9 @@ impl World {
                 && ((ey.wrapping_sub(e.y) as i16).unsigned_abs()) <= e.f82
         });
         if at_castle {
-            self.rivals[ri].grace = self.rivals[ri].grace.max(2);
+            // Retail SETS 2 (:17975 `+331 = 2`) — a spawn grace still
+            // counting is OVERWRITTEN at the own castle, not floored.
+            self.rivals[ri].grace = 2;
         }
         if self.rivals[ri].grace > 0 {
             self.rivals[ri].grace -= 1;
@@ -553,6 +575,10 @@ impl World {
                 // rest of the level.
                 self.g.ent[i].flags &= !0x8000;
                 self.g.snd(16, i); // the death scream (:55424-30)
+                // The death arm returns from the HOUSEKEEPING only —
+                // its caller runs the state handler regardless. See
+                // [`Self::rival_dispatch_tail`].
+                self.rival_dispatch_tail(ri, i);
                 return;
             }
         }
@@ -587,16 +613,27 @@ impl World {
         if at_castle || at_shrine {
             self.g.ent[i].flags &= !0x1000;
         }
-        if self.rivals[ri].regen_stall > 0 {
-            self.rivals[ri].regen_stall -= 1;
-        } else {
+        // Life regen (:17990-18018): act_life += the RATE REGISTER,
+        // floor −1 / ceiling max, then the register re-selects from
+        // the same at-castle/shrine fork as the mana delta —
+        // UNCONDITIONALLY. The AI regen has NO stall gate: the shared
+        // intake arms +383 = 16 on every processed hit, but only the
+        // human's regen tail reads that field; retail's rival heals
+        // +20 straight through a −100 fireball tick (the l2 corpus
+        // life lane measures the −80 net).
+        {
             let max = self.g.ent[i].max_life as i32;
-            let heal = if at_castle || at_shrine {
+            let rate = self.rivals[ri].life_rate;
+            let e = &mut self.g.ent[i];
+            e.act_life = (e.act_life + rate).clamp(-1, max);
+            self.rivals[ri].life_rate = if at_castle || at_shrine {
                 max / 200
             } else {
                 max / 500
             };
-            self.g.ent[i].act_life = (self.g.ent[i].act_life + heal).min(max);
+        }
+        if self.rivals[ri].regen_stall > 0 {
+            self.rivals[ri].regen_stall -= 1;
         }
 
         // Spell learning (sub_15EC0 :19381-443).
@@ -626,8 +663,21 @@ impl World {
             );
         }
 
-        // State handler + the decision cascade (fresh runs the
-        // cascade twice, :17850-51).
+        self.rival_dispatch_tail(ri, i);
+    }
+
+    /// The brain's own body (sub_13170 :17846-51): the state handler
+    /// and the decision cascade (a Fresh rival runs the cascade
+    /// twice). It sits in the CALLER of the housekeeping, and the
+    /// caller DISCARDS the housekeeping's return — so the death arm
+    /// (:17980-84) ends `sub_132B0` only, never the brain. The dying
+    /// rival therefore still runs its state handler on the fatal tick,
+    /// which for an attack state is the hover leg (the cast attempt
+    /// itself refuses — mc1l2 t=8278: Vodor is poverty-latched at mana
+    /// 100/1000, so retail hovers 1514 → 1510 on row 8's v_14 = −4 and
+    /// does not cast). Verbatim in the HW twin (:16112-17).
+    fn rival_dispatch_tail(&mut self, ri: usize, i: usize) {
+        let think = self.g.ent[i].f63 % self.rivals[ri].think_period() == 0;
         let fresh = self.rivals[ri].state == AiState::Fresh;
         self.rival_state_tick(ri, i, think);
         self.rival_selector(ri, i, think);
@@ -653,26 +703,20 @@ impl World {
     }
 
     /// The shared wizard damage intake (sub_46540 :55641) on the
-    /// rival's mailbox: shield quarter + mana pays it, steal/grip
-    /// channels, regen stall, kill-credit latch. Also our hate-feed
-    /// point (APPROX: the original feeds the ledger from the
-    /// projectile scan sub_16540 — same inputs, slightly earlier).
+    /// rival's mailbox. EVERY channel gates on its SOURCE word, and a
+    /// consume clears ONLY the source — the amount stays behind as
+    /// permanent residue retail never re-reads (the l2 corpus: Vodor
+    /// carries a dead `(1400, 0)` ch0 letter for thousands of ticks;
+    /// re-applying it at every imported pair was the 8k-row life
+    /// family). Hate feed lives in `proj_hate_sweep`.
     fn rival_damage_intake(&mut self, ri: usize, i: usize) {
-        // ch3 mana steal (:55689-91): the attacker banks it.
-        let (steal_amt, steal_src) = self.g.ent[i].mail[3];
-        if steal_src != 0 {
-            let take = (steal_amt as u32).min(self.rivals[ri].mana);
-            self.rivals[ri].mana -= take;
-            self.credit_wizard_mana(steal_src, take);
-            self.g.ent[i].mail[3] = (0, 0);
-        }
         // ch4 duel grip (:55663-82): the CASTER gets pulled toward
         // this victim; the victim only takes the side effects
         // (regen stall — the pull state lives on the ATTACKER).
-        let (_, grip_src) = self.g.ent[i].mail[4];
+        let (grip_amt, grip_src) = self.g.ent[i].mail[4];
         if grip_src != 0 {
             self.rivals[ri].regen_stall = 16;
-            self.g.ent[i].mail[4] = (0, 0);
+            self.g.ent[i].mail[4] = (grip_amt, 0);
             if self.owner_slot_of_source(grip_src) == Some(0) {
                 // u16_314/316/318 on the human: victim, counter,
                 // clamp(dist, 1024, 3072) (:55671-77).
@@ -683,31 +727,68 @@ impl World {
                 self.set_duel_latch(self.rivals[ri].ent, hold);
             }
         }
-        // ch0 damage.
+        // ch3 mana steal (:55689-91): the attacker banks it.
+        let (steal_amt, steal_src) = self.g.ent[i].mail[3];
+        if steal_src != 0 {
+            let take = (steal_amt as u32).min(self.rivals[ri].mana);
+            self.rivals[ri].mana -= take;
+            self.credit_wizard_mana(steal_src, take);
+            self.rivals[ri].regen_stall = 16;
+            self.g.ent[i].mail[3] = (steal_amt, 0);
+        }
+        // ch0 damage (:55694-56737): SRC-gated — a src-0 letter is
+        // dead residue, not applied and not cleared.
         let (amt, src) = self.g.ent[i].mail[0];
-        if src == 0 && amt == 0 {
+        if src == 0 {
             return;
         }
-        self.g.ent[i].mail[0] = (0, 0);
         let mut dmg = amt.min(i32::MAX as u32) as i32;
-        if dmg <= 0 {
-            return;
-        }
-        // Shield quarter (:55700-07): mana pays the reduced hit.
-        if self.rivals[ri].shield && self.rivals[ri].mana > 0 {
+        // Shield quarter (:55700-07): keyed on the ENTITY's 0x4000
+        // bit (retail +17 & 0x40) — the imported flag, not the
+        // port-side buff mirror — quartered amount written BACK to
+        // the letter (the residue keeps the reduced value), mana pays
+        // it, and the bit clears ONE-SHOT.
+        if self.g.ent[i].flags & 0x4000 != 0 {
             dmg /= 4;
-            let pay = (dmg as u32).min(self.rivals[ri].mana);
+            let pay = (dmg.max(0) as u32).min(self.rivals[ri].mana);
             self.rivals[ri].mana -= pay;
+            self.g.ent[i].flags &= !0x4000;
         }
         self.g.ent[i].act_life -= dmg;
-        self.g.ent[i].f38 = src; // killer latch (+38)
+        // Knockback (:55714-19), armed on ANY sourced letter — the
+        // fatal one included, since this block precedes the death
+        // return at :55726. v_24 = the attacker→victim bearing, v_22 =
+        // amount/10 clamped to [0, 80]. Retail's gate is just
+        // `src > 0`: the human is a pool entity there, but the port
+        // stamps human-fired projectiles with PLAYER_TARGET, so that
+        // case reads the pinned human pose instead (as `home` and the
+        // area writers already do) — without it every rival the PLAYER
+        // kills would drop straight down and the law would be
+        // corpus-only.
+        let attacker = if src == PLAYER_TARGET {
+            Some((self.human_pose.0, self.human_pose.1))
+        } else {
+            let s = src as usize;
+            (s != 0 && s < self.g.ent.len() && self.g.ent[s].class64 != 0)
+                .then(|| (self.g.ent[s].x, self.g.ent[s].y))
+        };
+        if let Some((ax, ay)) = attacker {
+            let (vx, vy) = (self.g.ent[i].x, self.g.ent[i].y);
+            self.rivals[ri].knock_dir = Gen::angle_between(ax, ay, vx, vy) & 0x7FF;
+            self.rivals[ri].knock_mag = ((dmg.max(0) / 10) as i16).clamp(0, 80);
+        }
         self.rivals[ri].regen_stall = 16;
         self.g.snd(17, i);
-        // (The hate feed lives in `proj_hate_sweep` now — retail's
-        // per-projectile one-shot ledger scan `sub_16540`, run at the
-        // tick top. The intake-time bump that used to sit here was
-        // the interim approximation of that scan; keeping both would
-        // double-count every targeted hit.)
+        if self.g.ent[i].act_life < 0 {
+            // Death (:55734-36): the killer latch stamps ONLY here,
+            // and the letter is NOT consumed — the corpse keeps it.
+            self.g.ent[i].f38 = src;
+            self.g.ent[i].mail[0] = (dmg.max(0) as u32, src);
+            return;
+        }
+        // Survive: consume = clear the source, keep the (possibly
+        // quartered) amount (:55738-40).
+        self.g.ent[i].mail[0] = (dmg.max(0) as u32, 0);
     }
 
     /// Resolve a mailbox source id to the attacking wizard's slot:
@@ -930,12 +1011,21 @@ impl World {
             let e = &mut self.g.ent[i];
             e.f126 += 16 * (vdes - e.f126).signum();
             // Turn toward the desired heading (:18835-57): rate =
-            // err / (8 + (255-tempo)/16), clamped to the row's caps.
-            let err = Gen::angdist(e.f30, e.f34) as i32;
+            // err / (8 + (255-tempo)/16), clamped to the row's caps,
+            // applied FULL then snapped to +34 only when the raw u16
+            // compare says the step crossed it — retail keeps an
+            // overshoot that wrapped through zero (no snap there),
+            // where a min(err) step would land exactly.
+            let err = Gen::angdist(e.f30, e.f34 & 0x7FF) as i32;
             let div = 8 + ((255 - self.rivals[ri].tempo as i32) / 16);
             let step = (err / div).clamp(v4 as i32, v2 as i32) as i16;
-            let t = Gen::turn_step(e.f30, e.f34, step);
-            e.f30 = (e.f30 as i32 + t as i32) as u16 & 0x7FF;
+            let old = e.f30;
+            let des = e.f34;
+            let new = (old as i32 + (Gen::turn_sign(old, des) * step) as i32) as u16 & 0x7FF;
+            e.f30 = new;
+            if (old < des && new > des) || (old > des && des > new) {
+                e.f30 = des;
+            }
         }
     }
 
@@ -993,13 +1083,92 @@ impl World {
     fn rival_token(&self, ri: usize, spell: usize) -> Option<usize> {
         let m = self.rivals[ri].owned[spell] as usize;
         let e = self.g.ent.get(m)?;
+        // Both encodings are owned TOKENS: the native MANIFEST_BASE +
+        // spell, and retail's phase-0 `spell*3` (a conformance import
+        // — `owned` comes from the record's +676 there, and the
+        // importer stamps +42 into f144, so the binding is anchored).
+        let tick_ok =
+            e.tick70 >= crate::engine::world::MANIFEST_BASE || e.tick70 as usize == spell * 3;
         (m != 0
             && e.class64 == 12
             && e.model65 as usize == spell
-            && e.tick70 >= crate::engine::world::MANIFEST_BASE
+            && tick_ok
             && e.f144 == self.rivals[ri].ent
             && e.flags & 0x400 == 0)
             .then_some(m)
+    }
+
+    /// The rival-owned LAUNCHER token's burst machine (retail's
+    /// sub_56090 :65100 head → sub_55DD0 gate → the per-spell bolt
+    /// spawners), run at the TOKEN's own pool slot from
+    /// `class12_tick` — both encodings. The commit
+    /// ([`World::rival_cast`]) only arms +48 = +50; here the FULL
+    /// tick fires the emission from the owner's settled pose (+30/+32
+    /// — the commit stamped the pitch) and lands the sub_55E80 debit
+    /// on the regen delta, a MID-burst tick pins a positive delta to
+    /// 0 (the pool freezes for the whole burst), and the counter
+    /// decrements LAST (:65260). A refused full tick (dead wizard /
+    /// short pool) drops the burst to 1 so the shared decrement zeroes
+    /// it (:64926-31) — silent for the AI, no buzz.
+    pub(crate) fn rival_manifestation_tick(&mut self, m: usize, ri: usize, spell: usize) {
+        if !matches!(spell, 0 | 3 | 7 | 8 | 11 | 13 | 15 | 17 | 20) {
+            return;
+        }
+        let f26 = self.g.ent[m].f26;
+        if f26 <= 0 {
+            return;
+        }
+        let def = &self.spells()[spell];
+        let count = def.count as i16;
+        let cost = def.possess_mana;
+        let i = self.rivals[ri].ent as usize;
+        // The OWNER-DEAD refusal runs on EVERY burst tick, not just the
+        // full one: the token handler calls sub_55DD0_56300 before the
+        // full/mid split (:65030-88), and that gate refuses on
+        // `owner.+140 < 0 || owner.+12 < 0` (:64915-24) — no state
+        // test, and the mid-burst path short-circuits before the mana
+        // compare. Any refusal sets +48 = 1 and falls into the
+        // unconditional decrement (:64926-31, :65046), so a wizard
+        // dying mid-burst cancels the rest of it in one double drop —
+        // mc1l2 token 301 goes 2 → 0 on the tick rival 300's act_life
+        // crosses to −280.
+        if self.g.ent[i].act_life < 0 {
+            self.g.ent[m].f26 = 1;
+            if self.g.ent[m].f26 > 0 {
+                self.g.ent[m].f26 -= 1;
+            }
+            return;
+        }
+        if f26 == count {
+            let alive = self.g.ent[i].tick70 == 1;
+            if alive && self.rivals[ri].mana >= cost {
+                let (ex, ey, ez, yaw, pitch, mz) = {
+                    let e = &self.g.ent[i];
+                    (e.x, e.y, e.z, e.f30, e.f32, e.z.wrapping_add(e.f78 as i16))
+                };
+                let _ = ez;
+                self.rival_emit(ri, i, spell, ex, ey, mz, yaw, pitch);
+                // sub_55E80's full arm (:64942-52) — LIVE in retail
+                // (the remc1 `//fix` comment-out is the maintainer's).
+                let r = &mut self.rivals[ri];
+                let c = cost.min(i32::MAX as u32) as i32;
+                r.mana_delta = if r.mana_delta >= 0 {
+                    -c
+                } else {
+                    r.mana_delta - c
+                };
+            } else {
+                self.g.ent[m].f26 = 1;
+            }
+        } else {
+            // Mid-burst regen pin (sub_55E80's else arm :64956).
+            if self.rivals[ri].mana_delta > 0 {
+                self.rivals[ri].mana_delta = 0;
+            }
+        }
+        if self.g.ent[m].f26 > 0 {
+            self.g.ent[m].f26 -= 1;
+        }
     }
 
     /// Buff flags derive from the manifestations' burst counters
@@ -1259,11 +1428,26 @@ impl World {
         learn: &[u16; SPELL_COUNT],
         hate: &[u16; 8],
         war: &[u16; 8],
+        owned_slots: &[u16; SPELL_COUNT],
+        life_rate: u16,
+        regen_stall: u16,
+        stored_sig: u16,
     ) {
         let e = &self.g.ent[self.rivals[ri].ent as usize];
         let target = e.f146;
         let site = (e.dest_x, e.dest_y);
-        let sig = self.target_sig(target);
+        // The stored signature imports RAW (the carpet's +148, passed
+        // through from the record) — recomputing it from the live
+        // target would blind the staleness test (sub_15440 is
+        // sig-vs-stored ONLY): retail freezes on a target whose
+        // record changed since the pick, and a recomputed sig always
+        // matches itself. The human target keeps the port's sentinel
+        // convention.
+        let sig = if target == PLAYER_TARGET {
+            PLAYER_TARGET
+        } else {
+            stored_sig
+        };
         let r = &mut self.rivals[ri];
         r.state = AiState::from_retail(ai_state);
         r.target = target;
@@ -1277,12 +1461,39 @@ impl World {
         for (w, &v) in r.war.iter_mut().zip(war) {
             *w = v != 0;
         }
+        // The book columns ride the record: +676 (owned manifestation
+        // slots by spell id — retail rebuilds it every housekeeping
+        // tick from the +532 acquisition list, sub_45C10 :55304, so
+        // the settled value IS the rebuild's output). Without this the
+        // record kept the FRESH world's spawn slots and every cast arm
+        // (`owned[s]`) stamped a stranger's f26 — the l2 corpus put
+        // Vodor's burst on the HUMAN's imported fireball token, 1254
+        // rows. `known` follows: a nonzero slot is an owned spell.
+        r.owned = *owned_slots;
+        for (s, &m) in owned_slots.iter().enumerate() {
+            if m != 0 {
+                r.known[s] = true;
+            }
+        }
+        // The regen lanes (:17990-18018): the applied-then-selected
+        // life-rate register and the (AI-unread, but mirrored) stall.
+        r.life_rate = life_rate as i32;
+        r.regen_stall = regen_stall;
     }
 
     fn set_rival_state(&mut self, ri: usize, s: AiState, target: u16) {
         self.rivals[ri].state = s;
         self.rivals[ri].target = target;
         self.rivals[ri].target_sig = self.target_sig(target);
+        // Every retail pick writes the wizard ENTITY's +146/+148
+        // directly (sub_14B10 :18744-45 and its siblings) — the
+        // corpus grades the column. Targetless transitions (Home,
+        // Upgrade) leave the old value STALE, exactly like retail's
+        // state setters, which touch only +415.
+        if target != 0 {
+            let ent = self.rivals[ri].ent as usize;
+            self.g.ent[ent].f146 = target;
+        }
     }
 
     /// Target signature (sub_15420 :19039): team + model + class<<7.
@@ -1299,16 +1510,20 @@ impl World {
             .wrapping_add((e.class64 as u16) << 7)
     }
 
-    /// Target staleness (sub_15440 :19044).
+    /// Target staleness (sub_15440 :19044): the SIGNATURE compare and
+    /// NOTHING else — no life test, no free-flag test. A dying
+    /// creature stays a valid target (retail chases the corpse); a
+    /// FREED slot goes stale because the free clears class64 and the
+    /// sig moves. The human carpet's sig survives death AND respawn —
+    /// retail never drops the human by staleness.
     fn target_alive(&self, target: u16, sig: u16) -> bool {
         if target == 0 {
             return false;
         }
         if target == PLAYER_TARGET {
-            return self.player.state == LifeState::Alive;
+            return sig == PLAYER_TARGET;
         }
-        let e = &self.g.ent[target as usize];
-        e.flags & 0x400 == 0 && e.act_life >= 0 && self.target_sig(target) == sig
+        self.target_sig(target) == sig
     }
 
     /// Castle-site scout (sub_13F00 :18358-402): walk the 4x4 grid of
@@ -1620,17 +1835,23 @@ impl World {
             .map(|c| (self.g.ent[c].x, self.g.ent[c].y))
             .unwrap_or((self.g.ent[i].x, self.g.ent[i].y));
         let mut best: Option<(u16, i32)> = None;
-        for j in 1..self.g.ent.len() {
-            let e = &self.g.ent[j];
-            if e.class64 != 5 || e.flags & 0x400 != 0 || e.act_life < 0 || e.tick70 == 120 {
-                continue;
-            }
-            if e.id24 == me || e.f140 <= 0 {
-                continue;
-            }
-            let d = Gen::dist2_sq(anchor.0, anchor.1, e.x, e.y);
-            if best.is_none_or(|(_, bd)| d < bd) {
-                best = Some((j as u16, d));
+        // Retail's walk (:18669-91) is the class-5 MODEL CHAINS
+        // (heads at 36382 + 4·model, bucket-major) — the tick-top
+        // membership snapshot, NOT the raw pool: a creature that died
+        // after the rebuild is still visible, one that was dying AT
+        // tick top never entered. Only +140 > 0 and the owner tag
+        // filter at walk time (live fields off the members).
+        for m in 0..self.g.mob_chains.list.len() {
+            for jj in 0..self.g.mob_chains.visible(m).len() {
+                let j = self.g.mob_chains.visible(m)[jj];
+                let e = &self.g.ent[j as usize];
+                if e.id24 == me || e.f140 <= 0 {
+                    continue;
+                }
+                let d = Gen::dist2_sq(anchor.0, anchor.1, e.x, e.y);
+                if best.is_none_or(|(_, bd)| d < bd) {
+                    best = Some((j, d));
+                }
             }
         }
         if let Some((t, _)) = best {
@@ -1709,7 +1930,7 @@ impl World {
                     let e = &self.g.ent[c];
                     (e.x, e.y, e.z)
                 };
-                if self.rival_approach(ri, i, cx, cy, 512, 2048) {
+                if self.rival_approach(ri, i, cx, cy, Some(cz), 512, 2048) {
                     self.rival_hover_toward(i, cz.saturating_add(512));
                     self.rival_cast(ri, i, 16);
                 }
@@ -1717,7 +1938,7 @@ impl World {
             // Fly to the scouted site; plant (sub_138F0 :18142-68).
             AiState::Build => {
                 let (sx, sy) = self.rivals[ri].site;
-                if self.rival_approach(ri, i, sx, sy, 2048, 3072) {
+                if self.rival_approach(ri, i, sx, sy, None, 2048, 3072) {
                     self.rival_cast(ri, i, 16);
                     if self.rival_castle(self.rivals[ri].ent).is_some() {
                         self.rivals[ri].state = AiState::Fresh;
@@ -1728,8 +1949,11 @@ impl World {
             // and inside ~5 degrees write the claim directly.
             AiState::Possess => {
                 let t = self.rivals[ri].target as usize;
-                let (tx, ty) = (self.g.ent[t].x, self.g.ent[t].y);
-                if self.rival_approach(ri, i, tx, ty, 1024, 3072) {
+                let (tx, ty, tz) = {
+                    let e = &self.g.ent[t];
+                    (e.x, e.y, e.z)
+                };
+                if self.rival_approach(ri, i, tx, ty, Some(tz), 1024, 3072) {
                     let cast = self.rival_cast(ri, i, 3);
                     let facing = Gen::angdist(
                         self.g.ent[i].f30,
@@ -1741,11 +1965,20 @@ impl World {
                         // re-derive — recolor at the claim.
                         self.g.ball_resize(t);
                         self.g.snd(4, t); // the claim chime (:29444)
-                        self.rivals[ri].state = AiState::Fresh;
+                        // The state STAYS Possess (:18250-56 writes
+                        // no +415): the ball is now MINE, so the
+                        // think-tick cascade re-picks past it (the
+                        // ball pick's own-ball filter); until then
+                        // the handler idles at the claimed sphere.
                     }
+                    // The z-hover toward ball + 512 runs on EVERY
+                    // arrived tick, cast or no cast (:18258-63).
+                    self.rival_hover_toward(i, tz.saturating_add(512));
                 }
             }
-            // Castle raid (sub_13CA0 :18271-92).
+            // Castle raid (sub_13CA0 :18271-92): the cast attempt AND
+            // the hover both live inside the arrived + think-period
+            // gate; a fired cast tick does not hover.
             AiState::RaidCastle => {
                 let t = self.rivals[ri].target as usize;
                 let (tx, ty, tz) = {
@@ -1753,15 +1986,23 @@ impl World {
                     (e.x, e.y, e.z)
                 };
                 self.rival_face_target(i, tx, ty, tz);
-                self.rival_approach(ri, i, tx, ty, 2048, 3584);
-                if think {
-                    if let Some(s) = self.rival_attack_pick(ri, false) {
-                        self.rival_cast(ri, i, s);
+                if self.rival_approach(ri, i, tx, ty, Some(tz), 2048, 3584) && think {
+                    let fired = match self.rival_attack_pick(ri, false) {
+                        Some(s) => self.rival_cast(ri, i, s),
+                        None => false,
+                    };
+                    if !fired {
+                        self.rival_hover_toward(i, tz.saturating_add(512));
                     }
                 }
             }
-            // Wizard / balloon / mana-holder attack (sub_13DC0
-            // :18314-40): burst-gated.
+            // Wizard / balloon / mana-holder attack (sub_13DD0
+            // :18314-40): the cast attempt runs ONLY when ARRIVED
+            // (inside 3072) with the burst lockout clear — retail
+            // returns before the pick otherwise (the l2 corpus wall:
+            // the port fired every tick from 7300 units out while
+            // retail held a saturated charge meter) — and the z-hover
+            // toward target + 512 runs only when the attempt FAILED.
             AiState::AttackWizard | AiState::RaidBalloon | AiState::HuntMana => {
                 let (tx, ty, tz) = match self.rivals[ri].target {
                     PLAYER_TARGET => self.human_pose,
@@ -1771,15 +2012,32 @@ impl World {
                     }
                 };
                 self.rival_face_target(i, tx, ty, tz);
-                self.rival_approach(ri, i, tx, ty, 3072, 4096);
-                self.rival_hover_toward(i, tz.saturating_add(512));
-                if self.rivals[ri].burst >= 0 {
-                    if let Some(s) = self.rival_attack_pick(ri, true) {
-                        if self.rival_cast(ri, i, s) && self.rivals[ri].target == PLAYER_TARGET {
-                            // Landing a cast clears the war flag
-                            // toward that wizard (:18338-39).
-                            self.rivals[ri].war[0] = false;
+                if self.rival_approach(ri, i, tx, ty, Some(tz), 3072, 4096)
+                    && self.rivals[ri].burst >= 0
+                {
+                    let fired = match self.rival_attack_pick(ri, true) {
+                        Some(s) => self.rival_cast(ri, i, s),
+                        None => false,
+                    };
+                    if fired {
+                        // Landing a cast clears MY war flag toward the
+                        // struck WIZARD — carpet targets only, human
+                        // or rival (:18337-39; the target's +65 <= 1
+                        // gate).
+                        let target = self.rivals[ri].target;
+                        let is_carpet = target == PLAYER_TARGET
+                            || self
+                                .g
+                                .ent
+                                .get(target as usize)
+                                .is_some_and(|e| e.class64 == 3 && e.model65 <= 1);
+                        if is_carpet {
+                            if let Some(o) = self.owner_slot(target) {
+                                self.rivals[ri].war[o as usize] = false;
+                            }
                         }
+                    } else {
+                        self.rival_hover_toward(i, tz.saturating_add(512));
                     }
                 }
             }
@@ -1787,47 +2045,110 @@ impl World {
             // teleport-home attempt is authentically dead code.
             AiState::Home => {
                 let Some(c) = self.rival_castle(self.rivals[ri].ent) else {
+                    // Castle-less Home (:18209-19): cloak + the Cruise
+                    // speed logic, and the state STAYS Home — the
+                    // cascade is what moves it on.
                     self.rival_cast(ri, i, 12);
-                    self.rivals[ri].state = AiState::Cruise;
+                    self.rival_cruise_speed(ri, i);
                     return;
                 };
                 let (cx, cy) = (self.g.ent[c].x, self.g.ent[c].y);
                 self.rival_cast(ri, i, 12);
-                self.rival_approach(ri, i, cx, cy, 256, 2048);
+                let cz = self.g.ent[c].z;
+                self.rival_approach(ri, i, cx, cy, Some(cz), 256, 2048);
                 if self.g.ent[i].act_life >= self.g.ent[i].max_life as i32 {
                     self.rivals[ri].state = AiState::Fresh;
                 }
             }
-            // Cruise (sub_13A10 :18188): full throttle, heading held.
+            // Cruise (sub_13A10 :18188).
             AiState::Cruise => {
-                self.rivals[ri].vdes = self.g.ent[i].f128;
+                self.rival_cruise_speed(ri, i);
             }
         }
     }
 
+    /// The Cruise speed logic (sub_13A10 :18188-203, shared by the
+    /// castle-less Home arm): an ACTIVE speed burst owns the speed
+    /// columns (sub_15E60's +48 test — vdes untouched); else the AI
+    /// chain-casts the speed-up whenever ready, else full throttle.
+    fn rival_cruise_speed(&mut self, ri: usize, i: usize) {
+        if self
+            .rival_token(ri, 2)
+            .is_some_and(|m| self.g.ent[m].f26 > 0)
+        {
+            return;
+        }
+        if self.rival_cast_ready(ri, 2) {
+            self.rival_cast(ri, i, 2);
+        } else {
+            self.rivals[ri].vdes = self.g.ent[i].f128;
+        }
+    }
+
     /// Shared travel helper (sub_15470 :19050-94): inside arriveR →
-    /// stop, done; else full speed, and beyond boostR cast the
-    /// speed-up. Returns "arrived".
+    /// stop, done. The distance is FULL 3D against an entity target
+    /// (sub_42340: isqrt(dx²+dy²+dz²) — a wizard hovering high above
+    /// a ground creature is NOT arrived; the 2-D read was the l2
+    /// machine-gun wall's second half) and 2-D against a bare SITE
+    /// (the a2==0 branch's sub_423D0 on +150). Beyond it, an ACTIVE
+    /// speed burst owns the speed columns (:19063 sub_15E60 — return
+    /// with vdes UNTOUCHED, the token machine is driving); a
+    /// boost-cast tick returns the same way; only the plain leg
+    /// writes vdes = f128. Returns "arrived". (Retail's callers stamp
+    /// +34 themselves; the fold here matches every live call site.)
+    #[allow(clippy::too_many_arguments)]
     fn rival_approach(
         &mut self,
         ri: usize,
         i: usize,
         tx: u16,
         ty: u16,
+        tz: Option<i16>,
         arrive: i32,
         boost: i32,
     ) -> bool {
-        let (px, py) = (self.g.ent[i].x, self.g.ent[i].y);
-        let d2 = Gen::dist2_sq(px, py, tx, ty);
+        let (px, py, pz) = {
+            let e = &self.g.ent[i];
+            (e.x, e.y, e.z)
+        };
+        // Retail compares the TRUNCATED scalar distance, never the
+        // square: sub_15470 tests `sub_42340(...) > a3` (:19058-62)
+        // and `> a4` (:19066), and both helpers end in the isqrt
+        // (:52724 / :52744 — their squared-only twins sub_42390 /
+        // sub_42410 exist and are deliberately NOT the ones called
+        // here). The two forms differ across the whole band
+        // arrive² < d² < (arrive+1)², where the square test refuses
+        // but the isqrt truncates onto the boundary and ARRIVES —
+        // mc1l2 t=1824/1895: Vodor at d² = 9,437,778 against
+        // 3072² = 9,437,184 is 594 over on squares, exactly 3072 on
+        // the isqrt, and retail casts.
+        let d = {
+            let dh = Gen::dist2_sq(px, py, tx, ty);
+            let sum = match tz {
+                Some(z) => {
+                    let dz = z.wrapping_sub(pz) as i32;
+                    dh.wrapping_add(dz.wrapping_mul(dz))
+                }
+                None => dh,
+            };
+            Gen::isqrt(sum as u32) as i32
+        };
         self.g.ent[i].f34 = Gen::angle_between(px, py, tx, ty);
-        if d2 <= arrive.saturating_mul(arrive) {
+        if d <= arrive {
             self.rivals[ri].vdes = 0;
             return true;
         }
-        self.rivals[ri].vdes = self.g.ent[i].f128;
-        if d2 > boost.saturating_mul(boost) {
-            self.rival_cast(ri, i, 2);
+        if self
+            .rival_token(ri, 2)
+            .is_some_and(|m| self.g.ent[m].f26 > 0)
+        {
+            return false;
         }
+        if d > boost && self.rival_cast_ready(ri, 2) {
+            self.rival_cast(ri, i, 2);
+            return false;
+        }
+        self.rivals[ri].vdes = self.g.ent[i].f128;
         false
     }
 
@@ -1838,16 +2159,15 @@ impl World {
         self.g.ent[i].f34 = Gen::angle_between(px, py, tx, ty);
     }
 
-    /// Per-state altitude nudge toward target z + 512 (:18122-27).
+    /// Per-state altitude nudge toward target z + 512: `z +=
+    /// sign(z − tz) · row.v_14` verbatim (:18258-63 / :18328-32 /
+    /// :18287-91) — v_14 is the NEGATIVE settle step, so above sinks
+    /// and below climbs; a zero row steps nothing.
     fn rival_hover_toward(&mut self, i: usize, tz: i16) {
-        let row = &BEHAVIOR[self.g.ent[i].row156 as usize];
-        let step = row.v_14.abs().max(1);
+        let v14 = BEHAVIOR[self.g.ent[i].row156 as usize].v_14;
         let e = &mut self.g.ent[i];
-        if e.z < tz {
-            e.z = e.z.saturating_add(step);
-        } else if e.z > tz {
-            e.z = e.z.saturating_sub(step);
-        }
+        let d = e.z as i32 - tz as i32;
+        e.z = (e.z as i32 + d.signum() * v14 as i32) as i16;
     }
 
     /// The attack-spell picker (sub_16030 :19459 / castle variant
@@ -1855,14 +2175,25 @@ impl World {
     /// 17 → 8 → (anti-rebound 15) → 7 → 20 → 0 → 15. Returns the
     /// spell to cast now; None = hold (save up or poor).
     pub(crate) fn rival_attack_pick(&mut self, ri: usize, vs_wizard: bool) -> Option<usize> {
-        // Poverty latch (:19468-91).
+        // Poverty latch (:19468-91): latch under max/4; release the
+        // tick mana REACHES the threshold (min(max/4 + 6000, max/2)
+        // — retail's `>` tests are on the still-poor side, so the
+        // boundary itself releases; the port's old strict `>` held
+        // one extra tick, which under the +100/tick floor pushed
+        // every early-Vodor fireball one tick late).
         {
             let r = &mut self.rivals[ri];
-            if r.mana < r.mana_max / 4 {
+            let quarter = r.mana_max / 4;
+            if r.mana < quarter {
                 r.poverty = true;
             } else if r.poverty {
-                let release = (r.mana_max / 4 + 6000).min(r.mana_max / 2);
-                if r.mana > release {
+                let v3 = quarter + 6000;
+                let still_poor = if v3 >= r.mana_max {
+                    r.mana_max / 2 > r.mana
+                } else {
+                    v3 > r.mana
+                };
+                if !still_poor {
                     r.poverty = false;
                 }
             }
@@ -1872,7 +2203,9 @@ impl World {
         }
         // Anti-rebound notice (:19507-16): the target visibly
         // rebounding switches the plan to lightning, acc% of the
-        // time.
+        // time — and that success path ENDS the walk: 15-when-ready
+        // or hold, never falling through to 7/20/0 (:19517-31; the
+        // 7/20/0/15 ladder is the roll's ELSE arm).
         let target_rebounds = vs_wizard
             && match self.rivals[ri].target {
                 PLAYER_TARGET => self.player.rebound,
@@ -1883,19 +2216,27 @@ impl World {
                     .is_some_and(|r| r.rebound),
             };
         let mut order: Vec<usize> = vec![17, 8];
+        let mut lightning_plan = false;
         if target_rebounds {
             let roll = (self.g.ent_rand(self.rivals[ri].ent as usize) % 255) as u16;
             if roll < self.rivals[ri].acc {
-                order.push(15);
+                lightning_plan = true;
             }
         }
-        order.extend([7, 20, 0, 15]);
+        if lightning_plan {
+            order.push(15);
+        } else {
+            order.extend([7, 20, 0, 15]);
+        }
         for s in order {
             if self.rivals[ri].owned[s] == 0 {
                 continue;
             }
             if self.rival_cast_ready(ri, s) {
                 return Some(s);
+            }
+            if lightning_plan && s == 15 {
+                return None; // the plan holds for the bolt (:19525-29)
             }
             // WAIT-vs-continue discriminant (sub_15E90 :19497): fall
             // through to the next spell when this one is unaffordable by
@@ -1931,7 +2272,15 @@ impl World {
     fn rival_cast_ready(&self, ri: usize, s: usize) -> bool {
         let r = &self.rivals[ri];
         let m = r.owned[s] as usize;
-        if m == 0 || r.cooldown[s] != 0 {
+        if m == 0 {
+            return false;
+        }
+        // The recast cooldown gates every case EXCEPT Accelerate —
+        // sub_15A00's case 2 tests token + mana only (:19260-63);
+        // its cadence comes from the burst window (the commit's +48
+        // test), and the armed-but-unread AI_RECAST[2]=32 would have
+        // starved retail's chain-cast Cruise boosts.
+        if s != 2 && r.cooldown[s] != 0 {
             return false;
         }
         let def = &self.spells()[s];
@@ -1947,42 +2296,28 @@ impl World {
         if r.mana < cost {
             return false;
         }
-        // ALREADY-ACTIVE gate (sub_15A00 case 4/0xC/0xE, remc1
-        // :19289-96 / remc1hw :17422-29): a self-buff whose
-        // manifestation still carries burst (+48, our f26) is NOT
-        // ready — retail's Shield/Invisible/Rebound each run one
-        // uninterrupted `count`-tick window per cast and re-arm only
-        // after it lapses. Without it the 1-tick AI_RECAST on 14 (and
-        // 0 on 4/12) let the port re-cast every other tick for as long
-        // as the trigger held, paying `possess_mana` each time; the
-        // mc1hwl0 corpus shows retail casting Rebound ONCE per window
-        // where the port fired three times in twelve ticks.
-        //
-        // Retail applies the same gate to the aimed group (3/7/8/17/20,
-        // :19265-68) and to Castle (0x10, :19305), and `sub_155F0`'s own
-        // case 2 gates Accelerate the same way (:19151). Only the group
-        // whose burst the port actually decrements for rivals
-        // (`rival_refresh_buffs`) is gated here — the offensive
-        // manifestations' rival-side countdown is unported, so gating
-        // them would freeze the picker after one shot. Banked.
-        if matches!(s, 2 | 4 | 12 | 14)
+        // ALREADY-ACTIVE gate: a token still carrying burst (+48, our
+        // f26) is NOT ready. Retail runs it for the self-buff group
+        // (case 4/0xC/0xE :19289-96), for the AIMED group (case
+        // 3/7/8/0x11/0x14 :19265-68) and Castle (:19305) — but NOT
+        // for the fireball group (case 0/0xB/0xD/0xF), whose bolts
+        // re-arm mid-burst freely. Accelerate's lives in the COMMIT
+        // (sub_155F0 case 2 :19151), mirrored in `rival_cast`.
+        if matches!(s, 3 | 4 | 7 | 8 | 12 | 14 | 17 | 20)
             && self
                 .rival_token(ri, s)
                 .is_some_and(|m| self.g.ent[m].f26 > 0)
         {
             return false;
         }
-        // Aimed groups: the readiness pre-gate cone
-        // ((255-acc)/4+20 degrees, :19252-57).
-        if matches!(s, 0 | 3 | 7 | 8 | 11 | 13 | 15 | 17 | 20) && r.target != 0 {
+        // Aimed groups: the readiness pre-gate cone ((255-acc)/4+20
+        // degrees, :19252-57) — between the ACTUAL heading and the
+        // DESIRED one (+30 vs +34, the state handler's stamp), not a
+        // recomputed target bearing, and `>=` refuses.
+        if matches!(s, 0 | 3 | 7 | 8 | 11 | 13 | 15 | 17 | 20) {
             let cone = ((255 - r.acc as u32) / 4 + 20) * 2048 / 360;
             let e = &self.g.ent[r.ent as usize];
-            let (tx, ty) = match r.target {
-                PLAYER_TARGET => (self.human_pose.0, self.human_pose.1),
-                t => (self.g.ent[t as usize].x, self.g.ent[t as usize].y),
-            };
-            let want = Gen::angle_between(e.x, e.y, tx, ty);
-            if Gen::angdist(e.f30, want) as u32 > cone {
+            if Gen::angdist(e.f30, e.f34 & 0x7FF) as u32 >= cone {
                 return false;
             }
         }
@@ -2016,15 +2351,20 @@ impl World {
                 (e.x, e.y, e.z)
             }
         };
-        let (ex, ey, ez, yaw) = {
+        let (ex, ey, ez, yaw, des) = {
             let e = &self.g.ent[i];
-            (e.x, e.y, e.z, e.f30)
+            (e.x, e.y, e.z, e.f30, e.f34)
         };
-        let want = Gen::angle_between(ex, ey, tx, ty);
+        // The commit clears the entity's 0x100 bit whenever readiness
+        // passed (:19110, `+17 &= ~1`), before any case gate.
+        self.g.ent[i].flags &= !0x100;
+        // Commit cones compare the ACTUAL heading against the DESIRED
+        // one (+30 vs +34), `>=` refusing — not a recomputed target
+        // bearing (:19120-23 / :19163-66).
         match s {
             // Precision-aimed burst pair (:19113-37).
             0 | 15 => {
-                if self.rivals[ri].burst < 0 || Gen::angdist(yaw, want) > 0xAA {
+                if self.rivals[ri].burst < 0 || Gen::angdist(yaw, des) >= 0xAA {
                     return false;
                 }
                 self.rivals[ri].burst += 1;
@@ -2034,7 +2374,15 @@ impl World {
                 }
             }
             // Aimed group (:19158-77): the wider cone.
-            3 | 7 | 8 | 11 | 13 | 17 | 20 if Gen::angdist(yaw, want) > 0xE3 => {
+            3 | 7 | 8 | 11 | 13 | 17 | 20 if Gen::angdist(yaw, des) >= 0xE3 => {
+                return false;
+            }
+            // Accelerate (:19151): the busy gate lives HERE, not in
+            // readiness — a live burst refuses the re-commit.
+            2 if self
+                .rival_token(ri, 2)
+                .is_some_and(|m| self.g.ent[m].f26 > 0) =>
+            {
                 return false;
             }
             _ => {}
@@ -2067,27 +2415,24 @@ impl World {
         {
             return true;
         }
-        let m = self.rivals[ri].owned[s] as usize;
-        self.g.ent[m].f26 = def.count as i16;
-        // The debit rides the regen delta (sub_55E80 :64936 — the
-        // authored behavior; remc1 ships it commented out).
-        {
-            let r = &mut self.rivals[ri];
-            let c = def.possess_mana.min(i32::MAX as u32) as i32;
-            r.mana_delta = if r.mana_delta >= 0 {
-                -c
-            } else {
-                r.mana_delta - c
-            };
+        // The commit only ARMS the token (+48 = +50, through the
+        // VALIDATED binding) — the bolt, the sub_55E80 debit and the
+        // mid-burst regen freeze all run at the TOKEN's own pool slot
+        // ([`World::rival_manifestation_tick`], retail's sub_56090
+        // machine). A token below the caster fires next pass, above
+        // it the same tick — retail's phase for free.
+        if let Some(m) = self.rival_token(ri, s) {
+            self.g.ent[m].f26 = def.count as i16;
         }
-        // Absolute aim pitch to the target (:19125-27).
+        // Absolute aim pitch to the target (:19125-27 / :19168-71):
+        // the commit stamps the WIZARD's own +32 — the token-side
+        // spawner reads the pose (and the corpus grades the column).
         let dh = Gen::isqrt(Gen::dist2_sq(ex, ey, tx, ty) as u32) as i32;
         let pitch = Gen::pitch_toward(ez, tz, dh);
-        // Emission — the AI launches dead-center (no hand offset,
-        // :64963: neither hand bit set) at carpet height + half
-        // extent.
-        let mz = ez.wrapping_add(self.g.ent[i].f78 as i16);
-        self.rival_emit(ri, i, s, ex, ey, mz, yaw, pitch);
+        if matches!(s, 0 | 3 | 7 | 8 | 11 | 13 | 15 | 17 | 20) {
+            self.g.ent[i].f32 = pitch;
+        }
+        let _ = (ex, ey, ez, yaw);
         true
     }
 
@@ -2205,27 +2550,24 @@ impl World {
         e.f128 = e.f126;
         e.id24 = owner;
         e.f30 = yaw;
-        e.f34 = yaw;
         e.f32 = pitch;
         e.f36 = pitch;
         e.f44 = def.damage.min(u16::MAX as u32) as u16;
-        e.f140 = def.possess_mana as i32;
-        // Live homing target — the class-9 re-acquire keeps it warm.
-        // NOT the possess lob: retail's emission (sub_56510 :65233-52)
-        // never writes the projectile's +146 — for the AI exactly as
-        // for the human — so the lob spawns untargeted and its own
-        // one-shot sub_54520 case-1 acquisition (balls AND houses)
-        // picks the victim. Pre-locking the AI's mana-ball target here
-        // bypassed that scan, which is what made a rival bolt unable
-        // to stray onto a dwelling (the accidental house possession
-        // retail allows).
-        if target != 0 && s != 3 {
-            e.f146 = target;
-            if target == PLAYER_TARGET {
-                // Being targeted arms the danger music (:64013/:64095).
-                self.g.player_danger = 100;
-            }
-        }
+        // +140 carries the per-burst-tick debit quantum (cost/count —
+        // the token ctor's stamp, corpus: fireball token 200/5 = 40 on
+        // the bolt), not the full one-shot cost.
+        e.f140 = (def.possess_mana / (def.count as u32).max(1)) as i32;
+        // NO +34 write and NO +146 pre-lock — retail's emission
+        // (sub_56510 :65233-52) leaves the bolt's desired-yaw at the
+        // ctor 0 and never writes the target: the bolt's own one-shot
+        // muzzle acquisition (sub_54520 case 1, next tick — the bolt's
+        // pool slot already ran this pass) picks the victim, for the
+        // AI exactly as for the human. Pre-locking bypassed that scan
+        // (no accidental house possession, no natural misses) and
+        // faked a spawn-tick +34/+146 the corpus reads as 0. The
+        // danger music arms at ACQUISITION (the class-9 machinery),
+        // not at emission.
+        let _ = target;
         match s {
             3 => {
                 let e = &mut self.g.ent[pr];
@@ -2265,13 +2607,19 @@ impl World {
 
     // ---- mortality ------------------------------------------------------
 
-    /// State 2 — the death fall (sub_45FC0 :55434): drift on, gravity
-    /// -2/tick (min -256), a (10,1) fire-trail puff per tick; ground
-    /// contact runs the impact block.
+    /// State 2 — the death fall (sub_45FC0 :55434-90): the shared
+    /// death-drift mover first (sub_455D0 — stick lanes are zero for
+    /// the AI, but the speed still chases the stale vdes 16/tick and
+    /// the body drifts level), THEN gravity `z += OLD f46` with the
+    /// decrement clamped into [−256, 0] after the add, the floor at
+    /// ground + row.v_12, a (10,1) trail puff at the POST-drift
+    /// PRE-gravity pose (flags |= 0x80 only, id24 = the faller), and
+    /// the impact block exactly when z LANDED ON the floor.
     fn rival_death_fall(&mut self, ri: usize, i: usize) {
         {
+            let vdes = self.rivals[ri].vdes;
             let e = &mut self.g.ent[i];
-            e.f46 = (e.f46 - 2).max(-256);
+            e.f126 += 16 * (vdes - e.f126).signum();
         }
         let (yaw, speed, vz) = {
             let e = &self.g.ent[i];
@@ -2282,19 +2630,54 @@ impl World {
             (e.x, e.y, e.z)
         };
         Gen::polar_step(&mut pos, yaw, 0, speed);
+        // The knock lane of the same shared mover (:55204-19). The AI's
+        // live mover never runs it, so the killing blow's whole impulse
+        // is still pending when the corpse enters state 2: retail's
+        // body drifts along that bearing for ~10 ticks at 4/tick decay
+        // (~180 units) — off whatever lip it was hovering over — and
+        // only then meets the floor. Without it the port's corpse never
+        // moved, so the very first fall tick clamped it onto the floor
+        // and fired the impact 18 ticks early, sliding every later
+        // allocation that tick down the free stack.
+        // ⚠ The upper clamp is retail's (:55207-08); it has NO lower
+        // clamp, so a negative magnitude would decay by +4 forever —
+        // unreachable from the [0, 80] arm, and left as retail has it.
+        {
+            let r = &mut self.rivals[ri];
+            if r.knock_mag != 0 {
+                let mag = r.knock_mag.min(128);
+                Gen::polar_step(&mut pos, r.knock_dir, 0, mag);
+                let mut next = mag - mag.signum() * 4; // dword_93A94 = 4
+                if next.abs() < 4 {
+                    next = 0;
+                }
+                r.knock_mag = next;
+            }
+        }
+        // sub_455D0 :55158-60 stamps the body's +32 from the control
+        // block's u16_329 (HIBYTE &= 7), which is 0 for an AI.
+        self.g.ent[i].f32 = 0;
+        let puff = pos;
         pos.2 = pos.2.saturating_add(vz);
-        let ground = self.g.ground_z(pos.0, pos.1) as i16;
-        // The trail (10,1) burning puff.
-        if let Some(s) = self.g.spawn_effect(1, pos.0, pos.1, pos.2) {
-            self.g.ent[s].flags |= 0x80 | 0x10000;
+        {
+            let e = &mut self.g.ent[i];
+            e.f46 = (vz - 2).clamp(-256, 0);
+        }
+        let floor = {
+            let row = &BEHAVIOR[self.g.ent[i].row156 as usize];
+            (self.g.ground_z(pos.0, pos.1) as i16).saturating_add(row.v_12)
+        };
+        if pos.2 < floor {
+            pos.2 = floor;
+        }
+        // The trail (10,1) burning puff (:55480-84).
+        if let Some(s) = self.g.spawn_effect(1, puff.0, puff.1, puff.2) {
+            self.g.ent[s].flags |= 0x80;
             self.g.ent[s].id24 = self.rivals[ri].ent;
         }
-        if pos.2 <= ground.saturating_add(128) {
-            pos.2 = ground.saturating_add(128);
-            self.g.move_relink(i, pos.0, pos.1, pos.2);
+        self.g.move_relink(i, pos.0, pos.1, pos.2);
+        if pos.2 == floor {
             self.rival_death_impact(ri, i);
-        } else {
-            self.g.move_relink(i, pos.0, pos.1, pos.2);
         }
         self.entities_dirty = true;
     }
@@ -2323,36 +2706,60 @@ impl World {
         self.set_notification(format!("{name} has died."), 100, [0xFF, 0, 0]);
         // JAR SCATTER (:55519-49): every owned manifestation detaches
         // into a decaying ground jar around the corpse.
-        let (cx, cy) = (self.g.ent[i].x, self.g.ent[i].y);
+        // The scatter anchors on the corpse's own +76 (:55537 copies
+        // `*(WORD *)(a1 + 76)` into the position struct), i.e. the z
+        // the fall just clamped onto the floor — not a fresh ground
+        // sample. (Both readings coincide in the mc1l2 window, so this
+        // is decompile authority, not a corpus-proven claim.)
+        let (cx, cy, cz) = {
+            let e = &self.g.ent[i];
+            (e.x, e.y, e.z)
+        };
         for s in 0..SPELL_COUNT {
             let m = self.rivals[ri].owned[s] as usize;
             self.rivals[ri].owned[s] = 0;
             if m == 0 {
                 continue;
             }
-            let dx = (self.g.ent_rand(m) & 0x1FF) as i32 - 256;
-            let dy = (self.g.ent_rand(m) & 0x1FF) as i32 - 256;
+            // The scatter draws ride the DYING WIZARD's own LCG
+            // (:55563-70 — `a1+4`, three draws per jar), not the
+            // jar's.
+            let dx = (self.g.ent_rand(i) & 0x1FF) as i32 - 256;
+            let dy = (self.g.ent_rand(i) & 0x1FF) as i32 - 256;
             let jx = (cx as i32 + dx) as u16;
             let jy = (cy as i32 + dy) as u16;
-            let jz = self.g.ground_z(jx, jy) as i16;
-            let life = (self.g.ent_rand(m) % 90 + 200) as i16;
+            let life = (self.g.ent_rand(i) % 90 + 200) as i16;
             {
                 let e = &mut self.g.ent[m];
+                // :55529-31 — the token is un-parked: flags bit 0
+                // clears and the state byte INCREMENTS (`++*(v16+70)`,
+                // :55535). Assigning the phase outright happened to
+                // agree on mc1l2 only because both tokens sat at
+                // phase 0.
+                e.flags &= !1;
                 // Strict-retail worlds (a conformance import) carry
                 // RETAIL's class-12 encoding — a scattered jar is
                 // spell*3 + 1 (a phase-1 world jar the strict pickup
-                // poll serves); the native DROPPED_JAR value would
-                // alias the heal TOKEN there (spell-1 phase 0) and
-                // vanish from the draw set.
-                e.tick70 = if self.strict_retail {
-                    (s * 3 + 1) as u8
+                // poll serves), and its decay rides ACT_LIFE (the jar
+                // tick's top, sub_55A40 :64755-61: nonzero counts
+                // down, freed at zero; authored jars carry 0 and sit
+                // forever). The native encoding keeps its own f26
+                // countdown.
+                if self.strict_retail {
+                    e.tick70 = e.tick70.wrapping_add(1);
+                    e.act_life = life as i32;
+                    e.f26 = 0;
                 } else {
-                    crate::engine::world::DROPPED_JAR // pickup-able, decaying
-                };
+                    e.tick70 = crate::engine::world::DROPPED_JAR; // pickup-able, decaying
+                    e.f26 = life; // the decay countdown
+                }
                 e.f144 = 0; // no owner — a free copy
-                e.f26 = life; // the decay countdown
             }
-            self.g.link(m, jx, jy, jz);
+            // MOVE_RELINK (:55546 `sub_41C70_41FB0`), not the bare
+            // link: `Gen::link` early-returns on flags bit 2, which an
+            // imported parked token carries, so the scattered position
+            // was silently never written and every jar stayed parked.
+            self.g.move_relink(m, jx, jy, cz);
         }
         // The grave (10,40) + in-flight ball re-point (:55550-65).
         let gz = self.g.ground_z(cx, cy) as i16;
@@ -2373,7 +2780,9 @@ impl World {
         {
             let e = &mut self.g.ent[i];
             e.tick70 = 3;
-            e.flags = (e.flags | 0x20) & !8; // hidden + unhittable
+            // :55568 is a bare `|= 0x20` — the hittable bit 3 is NOT
+            // cleared here (retail's corpse goes 12 → 44, keeping it).
+            e.flags |= 0x20;
             e.f26 = (32 * ((255 - self.rivals[ri].tempo as i32) / 8) + 32) as i16;
         }
         // Post-death truce: everyone's hate toward this slot decays
@@ -2514,9 +2923,12 @@ impl Snap for Rival {
             target_sig,
             site,
             jink,
+            knock_dir,
+            knock_mag,
             vdes,
             grace,
             regen_stall,
+            life_rate,
             eliminated,
             shield,
             invisible,
@@ -2544,9 +2956,12 @@ impl Snap for Rival {
         w.put(target_sig);
         w.put(site);
         w.put(jink);
+        w.put(knock_dir);
+        w.put(knock_mag);
         w.put(vdes);
         w.put(grace);
         w.put(regen_stall);
+        w.put(life_rate);
         w.put(eliminated);
         w.put(shield);
         w.put(invisible);
@@ -2576,9 +2991,12 @@ impl Snap for Rival {
             target_sig: r.get()?,
             site: r.get()?,
             jink: r.get()?,
+            knock_dir: r.get()?,
+            knock_mag: r.get()?,
             vdes: r.get()?,
             grace: r.get()?,
             regen_stall: r.get()?,
+            life_rate: r.get()?,
             eliminated: r.get()?,
             shield: r.get()?,
             invisible: r.get()?,

@@ -1094,6 +1094,9 @@ pub(crate) fn compare(retail: &ObsMc1, port: &ObsMc1, human_slot: u16) -> PairDi
         // tick_byte is analyzed as the phase-clock channel by the
         // runner (retail steps +63 only through rows with a live
         // handler; see the presence table in the report).
+        if std::env::var_os("MGC_GRADE_TICK_BYTE").is_some() {
+            cmp_field!(out, s, "tick_byte", re.tick_byte, pe.tick_byte);
+        }
         cmp_field!(out, s, "rand", re.rand, pe.rand);
     }
     for (slot, pe) in &pmap {
