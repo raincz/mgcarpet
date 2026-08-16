@@ -2,5 +2,46 @@
 # Memory-capped mgc-conform runner: keeps the address-space limit off the
 # caller's shell (a persistent `ulimit -v` would poison later cargo builds)
 # without needing a subshell at the call site.
+#
+# Kill switches and instrument toggles go through `--env K=V`, BEFORE the
+# mode, and never as a shell prefix:
+#
+#     ./tools/conform --env MGC_MOB_TRACE=1 verify-deltas foo.mgcr
+#
+# A shell prefix (`MGC_MOB_TRACE=1 ./tools/conform …`) is a DIFFERENT
+# command as far as the permission allowlist is concerned — it no longer
+# begins with `./tools/conform`, so it stops matching the rule and stalls
+# the run on an approval prompt. Keeping the toggles inside the argv means
+# every invocation, however instrumented, is the same allowlisted command.
+set -u
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--env)
+		[ $# -ge 2 ] || {
+			echo "tools/conform: --env needs K=V" >&2
+			exit 2
+		}
+		case "$2" in
+		*=*) export "${2?}" ;;
+		*)
+			echo "tools/conform: --env wants K=V, got '$2'" >&2
+			exit 2
+			;;
+		esac
+		shift 2
+		;;
+	--env=*)
+		case "${1#--env=}" in
+		*=*) export "${1#--env=}" ;;
+		*)
+			echo "tools/conform: --env wants K=V, got '${1#--env=}'" >&2
+			exit 2
+			;;
+		esac
+		shift
+		;;
+	*) break ;;
+	esac
+done
 ulimit -v "${MGC_CONFORM_VMAX:-8000000}"
 exec target/release/mgc-conform "$@"

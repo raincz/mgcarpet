@@ -4518,6 +4518,60 @@ impl World {
         Some(m)
     }
 
+    /// The class-12 GROUND-JAR constructor `sub_3BF70` (:47981),
+    /// driven by the per-spell thunk arguments `off_987DE[spell]`
+    /// (:48020-161) that [`SPELLS`] already transcribes — a4 →
+    /// +136/+140, a5 → +50, a9 → +44. Distinct from [`Self::
+    /// grant_spell`], which mints the wizard's owned TOKEN: this
+    /// mints a fresh collectable jar, life 0/0 (the ctor zeroes +8
+    /// and +12, which is the decay arm's "authored jars live
+    /// forever").
+    ///
+    /// `state` is the caller's +70, because the two encodings differ:
+    /// strict-retail worlds carry retail's `3 * spell + phase`, the
+    /// native world the bare phase (0..=2, [`DROPPED_JAR`] = 3).
+    ///
+    /// The port models neither +60/+61/+62 (fire/charge mode) nor
+    /// +132 (the castle requirement) as entity fields — both spell
+    /// gates read the static table instead — so those four ctor
+    /// writes have no destination here, exactly as in `grant_spell`.
+    fn spawn_spell_jar(
+        &mut self,
+        spell: usize,
+        state: u8,
+        x: u16,
+        y: u16,
+        z: i16,
+    ) -> Option<usize> {
+        let def = *self.spells().get(spell)?;
+        let m = self.g.new_event()?;
+        {
+            let e = &mut self.g.ent[m];
+            e.class64 = 12;
+            e.model65 = spell as u8;
+            e.tick70 = state;
+            e.f44 = def.damage.min(u16::MAX as u32) as u16; // a9 → +44
+            e.f50 = def.count as i16; // a5 → +50
+            // :47996 — +140 is a4 divided by the count just written.
+            e.f136 = def.possess_mana as i32; // a4 → +136
+            e.f140 = def.possess_mana as i32 / def.count.max(1) as i32;
+            e.max_life = 0; // :47994-95, then RefillLife → act 0 too
+            e.act_life = 0;
+            e.flags &= !8; // :48001 — never a damage victim
+        }
+        self.g.link(m, x, y, z);
+        // The 4x extent override + sprite 77 every jar carries
+        // (:48009-11); without them a re-minted jar draws as sprite 0.
+        self.g.set_sprite(m, 77);
+        let (h4, v4) = {
+            let e = &self.g.ent[m];
+            (e.f80 * 4, e.f84 * 4)
+        };
+        self.g.extents(m, h4, v4);
+        self.entities_dirty = true;
+        Some(m)
+    }
+
     /// The level-init hand assignment (`sub_3DD50_3E090` :49193-49254,
     /// HW `hw:45339-45383`): clear both hands, then walk the canonical
     /// BOOK order [`DISPLAY_ORDER`] (`byte_99B88` :5752) and bind the
@@ -6349,6 +6403,34 @@ impl World {
                 self.g.ent[i].f144 = PLAYER_TARGET;
                 self.g.snd_player(18);
                 self.entities_dirty = true;
+                // THE PHASE-2 JAR RE-MINTS ITSELF. `sub_55D30`
+                // (:64875-84) is the phase-2 WRAPPER around the poll
+                // above: once the grant has converted this record
+                // into the owned token it runs the spell's own ctor
+                // thunk at the jar's position, so the pickup point is
+                // PERMANENT and a rival can still learn the spell
+                // there. Phase 1 (`sub_55DB0` :64904) is a bare call
+                // with no such arm — those jars are consumed.
+                //
+                // Both decompiles print the `+= 2` on `a1x`, the
+                // picked-up record — but they share one transcription,
+                // so that is not two witnesses, and it cannot be
+                // right: the grant has just set `a1x`'s +70 to
+                // `a3 = 3*spell` (the token), and adding 2 would flip
+                // it straight back to a phase-2 jar and undo the
+                // conversion, with `wizext+532` still pointing at it.
+                // It lands on `result`, whose ctor `a3` is `3*spell`
+                // for every thunk — so the NEWBORN is the 3*spell+2
+                // jar. mc1l32 t=80/81 rules the same way: the
+                // picked-up record ends at 3*spell with bit0 SET and
+                // the newborn at 3*spell+2 with bit0 clear.
+                if phase == 2 {
+                    let (x, y, z) = {
+                        let e = &self.g.ent[i];
+                        (e.x, e.y, e.z)
+                    };
+                    self.spawn_spell_jar(spell, (spell * 3 + 2) as u8, x, y, z);
+                }
             }
             return;
         }
@@ -6416,6 +6498,11 @@ impl World {
         if spell >= SPELL_COUNT || self.player.owned[spell] != 0 {
             return;
         }
+        // The native encoding keeps retail's jar sub-state bare in +70
+        // (0..=2 authored, `DROPPED_JAR` = 3), so phase 2 is just 2.
+        // Only phase 2 re-mints — the strict arm above carries the
+        // full `sub_55D30` citation.
+        let phase2 = self.g.ent[i].tick70 == 2;
         let f44 = self.spells()[spell].damage.min(u16::MAX as u32) as u16;
         {
             let e = &mut self.g.ent[i];
@@ -6432,6 +6519,13 @@ impl World {
         // The pickup chime (:64848 — sound 18 at the wizard).
         self.g.snd_player(18);
         self.entities_dirty = true; // the jar sprite leaves the world
+        if phase2 {
+            let (x, y, z) = {
+                let e = &self.g.ent[i];
+                (e.x, e.y, e.z)
+            };
+            self.spawn_spell_jar(spell, 2, x, y, z);
+        }
     }
 
     /// The owned-spell manifestation tick — the class-12 per-spell

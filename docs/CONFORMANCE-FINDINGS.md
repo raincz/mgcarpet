@@ -12770,3 +12770,334 @@ Nothing after 8310.
   fails it on the birth-tick assert). Laws 2 and 3 ARE obs-carried
   (`life`, `smodel`) and do make good fixtures. **Decide per law which
   lane guards it before spending bundle bytes.**
+
+## 🏆🏆 THE PENDING-FIXTURE SWEEP (2026-08-16b): 23 → 0 PENDING, five laws
+
+The banked queue was "22 pending fixtures, try to actually fix them".
+Measured first, dug second. **Every remaining fixture now conforms**:
+25 fixtures, 0 open, 0 capture. Nine pending rows closed by five
+laws — one HARNESS defect and four retail laws — and the other
+fifteen DELETED as capture-domain artifacts of a format-1 take.
+
+### THE LAWS
+
+- **THE DAMAGE-DEAF STATES** (`mc1l32` t=2032/2040, `(5,9)` slot 4).
+  The mailbox prologue (:21330-81) opens *most* live state handlers,
+  not all. Four open straight on body work and never read
+  `str_29885_90` at all: `(5,0)` `sub_1BD10` :22775-78 (a bare promote
+  to wander), `(9,0)` `sub_1CFF0` :23591-623 (the materialize
+  countdown), `(11,0)` `sub_1DE40` :24317-84, `(12,0)` `sub_1EA40`
+  :24835-992. An entity in one of them is DAMAGE-DEAF for the state's
+  whole duration — `actLife` never debits, no attacker lands in
+  +40/+38/+146, and because the AREA protocol accumulates while its
+  source stays pending, the unread amount SNOWBALLS until a state that
+  DOES carry the prologue reads it.
+  The corpus proof is the mailbox itself, not the life value: a mound
+  materializing inside the player's fire holds `act_life` 1000 while
+  `mail[0]` climbs **(400,14) → (800,14) → (1200,14)** with the source
+  pinned at the human. Nothing ever read it. The port's centralized
+  intake (`mobs.rs`) ran above every state and paid the whole snowball
+  at once — life 600, then **-200** — and promoted the mound into a
+  chase on the human (`chase` 0 → 14), skipping the countdown
+  (`f26` 13 → 14). `sub_1CFF0` is byte-identical in the HW twin
+  (remc1hw :22148-81). This is item 1 of the banked "HIT-ABORT
+  RESTRUCTURE" spec, the only one still unlanded.
+  FIX: `Gen::state_is_damage_deaf`, gate at the intake.
+  `MGC_NO_DEAF_STATES=1` A/Bs it (non-vacuity verified: the switch
+  restores both failures exactly).
+  ⚠ Only `(9,0)` is corpus-proven. The other three come from the
+  audited spec + handler-head reads; no suite or golden moved, but
+  they are UNGUARDED — no corpus row exercises them.
+
+- **THE PHASE-2 JAR RE-MINTS ITSELF** (`mc1l32` t=80/81, `(12,3)` and
+  `(12,0)`). `sub_55D30` :64875-84 is the phase-2 WRAPPER around the
+  pickup poll: after the grant converts the picked-up record into the
+  wizard's owned token, it runs the spell's own ctor thunk
+  (`off_987DE[model]`, `sub_3BF70` :47981) **at the jar's position**,
+  minting a fresh still-collectable jar. A phase-2 pickup point is
+  therefore PERMANENT. Phase 1 (`sub_55DB0` :64904) is a bare call
+  with no such arm — those jars are consumed. The port had ported the
+  poll and collapsed away both wrappers (only `sub_55A40` was cited).
+  ⚠ **DECOMPILE CORRECTION, ruled by the corpus AND by arithmetic.**
+  Both binaries print `a1x->var_u8_29865_70 += 2` — on the PICKED-UP
+  record — but they share one transcription, so that is one witness,
+  not two. It cannot be right: the grant has just set `a1x`'s +70 to
+  `a3 = 3*spell` (the token) and `wizext+532` points at it, so adding
+  2 would flip it back to a phase-2 jar and undo the conversion. It
+  lands on `result`, whose ctor `a3` is `3*spell` for every thunk —
+  the NEWBORN is the `3*spell+2` jar. The recording agrees: the
+  picked-up record ends at `3*spell` with bit0 SET, the newborn at
+  `3*spell+2` with bit0 clear, and the newborn's `f44`/`f50`/`f136`/
+  `f140`/`type86`/extents match the thunk literals on eight fields.
+  FIX: `World::spawn_spell_jar` (the `sub_3BF70` ground-jar ctor,
+  distinct from `grant_spell`'s TOKEN mint), called from both the
+  strict and native pickup arms. Native play is unchanged at the
+  default (`prune_owned_jars` culls the newborn next tick);
+  `--no-prune-owned-jars` is now retail-faithful. This is the
+  substrate for DEVIATIONS.md's "retail leaves such jars forever".
+
+- **THE SUITE WAS NOT RECONSTRUCTING INPUT LIKE verify-deltas**
+  (harness, 3 fixtures). Only FIRE rides the raw input channel; equips
+  and demolish are rebuilt FROM THE PAIR by `recover_pair_mc1`.
+  `verify::run` does that; `fixtures::for_each_pair`'s MC1 loop did
+  not — while its own MC2 twin documents the requirement and obeys it.
+  So under the suite the port's hands never changed and every
+  equip-lane pair failed on a `wizard0.hand_*` row the triage run
+  cannot reproduce. `hand-resolution-ledger-entry-6` (mc1l0 t=49) and
+  both `equip-cast-input-reconstruction` exemplars (t=127/412) were
+  filed as port leads BY A HARNESS GAP; `castle-z-equip-recon` carried
+  a phantom second atom. **mc1l0 is now 4/4 conforming.**
+
+### THE FORMAT-1 WALL — the rest is capture, not port
+
+`recordings/mc1l32.mgcr` is **format 1: no terrain channel** (the
+recorder's `pin_terrain` ran before `wait_until_live` and both
+2026-08-08 l32 takes silently degraded — fixed since, retried after
+go-live). So the port replays every l32 pair on PRISTINE terrain while
+retail's world had been dug. Measured across every remaining fixture:
+of **466** divergent z rows where the port reads 6272, **463** have
+retail BELOW the port. The port's ground is undug, level-wide.
+
+Two independent confirmations this session:
+- **`(10,0)` ent-rand is a TERRAIN read, not an rng law.** Walking
+  `9377x+9439` from the pair start: retail took **1** draw, the port
+  **2**, and `port_rand == lcg(retail_rand)` exactly. The extra draw
+  is `sub_24F60`'s scorch-depth draw (:28100), whose gate (:28096-98)
+  is four terms — terrain type, the `angle & 7` scorch latch,
+  `z - ground <= 128`, and the `sub_11760` water probe — **all four
+  terrain reads and nothing else**. Port ground 6272 → `z-g = 32` →
+  fires; retail ground 6049-6125 → `z-g = 179-255` → refuses. ⚠ The
+  fixture's z CONFORMED anyway, which looked like evidence AGAINST
+  terrain: the port's extra draw happened to land in the same residue
+  class mod 0x41, and its `d%7` depth drew 0 so no height moved. A
+  1-in-65 coincidence, not a signal.
+- **The castle `(3,2)` z is pure live ground.** The entity's +76 is
+  re-pinned to `sub_11F50` every settled tick (`sub_46DB0` :56012,
+  `sub_46F10` cases 1/4/6 :56073-78) — the port's `castle_tick` is
+  faithful line-for-line. Retail's 1536 is its own BUILD-row painter's
+  mound: the level-1 row's centre cell decodes to goal `target + 48`,
+  and 48 height bytes × 32 = **1536 exact**. The `(3,3)` balloon
+  hovering on it inherits the same hole through the row-9 altitude
+  servo: reconstructing the painted plane and running the port's own
+  `interp_plane` gives ground 1493, +512 = **2005 exact** (port 1532).
+  Two entities, two different formulas, one reconstructed heightfield,
+  both exact — the plane is wrong, not the law.
+  ⚠ The banked label **"castle z+64 lead" is STALE**: that was a
+  2-height-byte painter residual on a DIFFERENT castle in
+  `mc1l32-castle-bug.mgcr` (:931-33). These fixtures come from
+  `mc1l32.mgcr`, whose only castle was built BEFORE the take and never
+  painted at all — a 48-byte hole.
+  An MC1 `PAD_REPLAY` import arm (the twin of MC2's) could reconstruct
+  the pad from recorded state — anchor from x/y, datum from `site_z`,
+  row from `f26` — but it is IMPORT-ONLY (native play paints the mound
+  itself), and a v2 re-record subsumes it and the other nine rows too.
+
+**PLAYER RULING (2026-08-16): do not nurse fixtures cut from an
+incomplete capture.** The campaign walks levels 0→49 exhaustively and
+every real law resurfaces hundreds of times in real play, so a
+terrain-blocked exemplar is deleted rather than reconstructed around.
+mc1l32 wants a v2 re-record WITH the terrain channel whenever the walk
+reaches it; until then these rows are unattributable by construction.
+
+### ALSO SETTLED
+
+- **HIT-ABORT CAUSE B IS LANDED.** `mobs.rs` already freezes every hit
+  tick including non-wizard attackers. Re-run at its own exemplar tick
+  (t=3284) slot 4 no longer diverges at all; what remains is the
+  cause-A terrain datum. **That fixture's name is stale.**
+- `tools/conform` now takes `--env K=V` before the mode, so a kill
+  switch never changes the command's identity to the permission
+  allowlist. `verify-deltas` reads per-fixture evidence files (the
+  obs-stripped leads count as `ungraded leads`) — previously the suite
+  could report a law failing while the only tool that can say HOW
+  refused to open the evidence.
+- ⚠ **No fixture carries `capture.fixture.baked`** (0 of 43): the
+  level-data digest was never stamped at cut time, so the
+  "level changed ⇒ don't trust the fixtures" gate still cannot be
+  built without re-freezing every file.
+
+### TWO MORE LAWS, from the one fixture the audit refused to delete
+
+The terrain audit was run adversarially — told to REFUTE the
+capture-artifact claim, because the verdict's consequence is deletion.
+It cleared nine of ten as terrain-only and flagged **t=23132 as
+MIXED**, which is what saved these two:
+
+- **THE BLAST RING'S CHILDREN INHERIT ITS HEADING.** `sub_25CE0`
+  :28717 copies the ring's `+30` into every fire it lays —
+  `v7x->var_u16_29825_30 = a1x->var_u16_29825_30;` — exactly as the
+  spreader `sub_24E60` :28176 does. The port set the child's `id24`,
+  flags, extents and `+26` and dropped that ONE line, so every
+  blast-ring fire was born heading 0. mc1l32 t=23132: **75** newborn
+  (10,0) rows, all children of one (10,17) ring, every one
+  `heading: retail 724 port 0` — 724 being the ring's own `f30`.
+
+- **m5's REGEN IS A WRAPPER TRAILER AND SURVIVES THE HIT FREEZE.**
+  `sub_1BF60` (:22959-65) and `sub_1C110` (:22976-82) call the shared
+  handler and THEN run `if act < max { act += max >> 7 }`
+  unconditionally; the hit abort happens inside `sub_1A120`, BELOW
+  them, so it cannot skip the trailer. The port's centralized intake
+  returned above the whole per-state match and lost it. mc1l32
+  t=23132: **16** crabs in state 32 take the blast ring's 800, retail
+  freezes their movement exactly as the port does, and every one still
+  lands its regen — retail above the port by precisely `max_life >> 7`
+  (39 / 78 / 117 for max 5000 / 10000 / 15000, verified on five slots).
+  **This is the banked HIT-ABORT RESTRUCTURE's item 4, and it proves
+  the current blanket abort OVER-aborts.** Scoped to the HIT arm; the
+  death arm's trailer would credit a corpse and no corpus row
+  exercises it.
+
+Together these took t=23132 from **129 divergent rows to 38**, and the
+38 are 33 terrain `z` + 1 terrain `rand` + the open lead below.
+
+⚠ Both laws are guarded by UNIT TESTS, not fixtures
+(`blast_ring_children_inherit_the_rings_heading`,
+`a_hit_freezes_the_crab_but_its_regen_trailer_still_runs`, both
+non-vacuous — reverting either fix fails its test). Their only corpus
+exemplar sits in a format-1 take whose pristine terrain keeps that
+pair permanently divergent, so **no l32 fixture of them could ever be
+conforming**. Decide the lane per law before spending bundle bytes.
+
+### ⚠ OPEN LEAD, banked with its evidence (its exemplar was deleted)
+
+**A (5,1) IN STATE 6 MOVED IN RETAIL AND STOOD STILL IN THE PORT.**
+mc1l32 t=23132 slot 28: retail steps it (2155,43238,8130) →
+(2084,43306,8126) — |Δxy| = 98 = its own `f126`, a plain polar step
+along `f30 = 1288`, with **zero LCG draws** (rand byte-identical
+across the tick; only f58/f63/x/y/z moved). The port left it
+bit-identical. The lone `target_yaw` row (slot 31, `f52 = 28`) is the
+downstream knock-on: its bearing-to-leader differs precisely because
+the leader never moved.
+Checked and NOT the cause: the shared idle `sub_19B10` :21311-21419
+ends at the pack scan with **no mover at all**, so `Gen::mob_idle` is
+faithful, and the m0 idle wrapper `sub_1B060` :22167-69 is a bare call
+with no trailer either. The mover must live in *this* model's own
+wrapper — that is where the next dig starts. It was the only state-6
+creature in the pair; every other (5,1) (states 7/8/9) matched
+exactly.
+
+### THE FIFTEEN DELETED, and why that is not a loss
+
+Player ruling 2026-08-16: *"don't waste time with fixtures that are
+potentially incomplete… we'll keep going over individual levels until
+we're at level 049. The methodology is exhaustive and we don't need to
+treat every fixture as precious. Every fixture will show up hundreds
+of times in real play across the entire campaign."*
+
+- **10 terrain-datum (cause A)** — grounded fires/mana balls (t=886,
+  467, 2061, 2109, 817), the human's climb-authority term (2126), the
+  castle plateau + guard `cap_bit` early return (39412), the (5,3)
+  segment chain hanging off a ground-clamped head (3284, 3028), and
+  t=23132's residue. All ONE law wearing ten costumes.
+- **5 castle z** — four carried the byte-identical signature
+  `8163248d28644622`; the fifth was a strict superset. One law, five
+  files, because each was named for co-occurring atoms that have since
+  been fixed.
+- **1 `stuck-explosion`** — mis-statused twice over: a registered
+  DEVIATIONS.md entry wearing an `open` status (a deviation wants a
+  CONFORMING fixture on the KEPT behaviour, never an open one on the
+  divergence), and at t=39509 the wedge has not even started — retail's
+  slot 2 still ticks normally, so the roster rule claims nothing and
+  the fixture was open on unrelated churn.
+- **2 duplicates** of laws fixed this session, collapsed to one
+  exemplar each and renamed off their wrong names
+  (`m9-materialize-state-is-damage-deaf`,
+  `phase-2-spell-jar-remints-itself` — "ecology churn", "regen" and
+  "undug" were all misnomers from the auto-classifier).
+
+⚠ **DELETING THE SYMPTOM IS NOT DELETING THE DIG.** These verdicts say
+every row reduces to a terrain-PLANE difference under pair-mode
+import; they do NOT say the port's terrain code is right. Cause A's
+own candidate (the `dig_cell` protection abort, features.rs ~1712) is
+untestable at format 1 — `terrain-diff` refuses a format-1 take. **The
+v2 re-record ask survives the deletion.** mc1l32 wants a fresh take
+WITH the terrain channel whenever the level walk reaches it; the
+recorder bug that caused this (`pin_terrain` before `wait_until_live`)
+is already fixed and retried after go-live.
+
+### 🏆 THE OPEN LEAD, CLOSED SAME SESSION: only the vulture moves while idle
+
+The lead banked above was dug on the player's call and it is a LAW, not
+a capture artifact.
+
+**m1's idle wrapper `sub_1B160` (:22222-46) is the ONLY idle that
+MOVES.** It calls the shared idle and then `sub_196E0` — the mover —
+as a wrapper TRAILER, then re-aims at its target (`+34 =
+angle_between(pos, ent[+146].pos)`) or, if that record has gone class
+0, drops it (`+146 = 0`) and falls back to wander (state 7).
+
+Enumerated, not assumed: **ten** wrappers call the shared idle
+`sub_19B10` (bases 0/6/12/18/24/36/42/48/60/96) and exactly one of
+them calls the mover. The other nine are 3-5 line bodies. It is also
+the only one that makes sense — m1 is the VULTURE, a glider that
+cannot hover. `remc1hw` :20779-801 is byte-identical, so this is two
+witnesses rather than one transcription.
+
+Ruled OUT first, by reading: the shared idle `sub_19B10` :21311-419
+ends at the pack scan with **no mover at all**, so `Gen::mob_idle` was
+faithful all along and the m0 idle wrapper `sub_1B060` :22166-69 is a
+bare call with no trailer either. The defect was a missing `(1, 0)`
+arm falling through to the bare `(_, 0)`.
+
+Corpus: mc1l32 t=23132 slot 28 — retail steps the bird 98 units,
+exactly its own `f126`, along `f30 = 1288`, with **zero LCG draws**
+(rand byte-identical across the tick; only f58/f63/x/y/z moved) while
+the port left it bit-identical. The lone `target_yaw` row on slot 31
+was the downstream knock-on (`f52 = 28`: its bearing-to-leader moved
+only because the leader did). **Verified on the FULL take, not a
+fixture** — after the fix both slot 28 and slot 31 vanish from
+t=23132, leaving only terrain `z` and the terrain-gated (5,15) guard.
+
+⚠ **NEXT QUESTION, deliberately not answered here.** The mover sits in
+the WRAPPER, textually after `sub_19B10` returns, so retail runs it on
+a HIT tick too — the same trailer-survives-the-freeze shape the m5
+regen row proves. It is left out of the port's hit arm because no
+corpus row exercises it, and because that arm's existing m0 bob
+carries the same known gap on the promote-and-return paths. Fixing
+both together wants one dig and one exemplar.
+
+Guarded by `only_the_vulture_moves_while_idle` (non-vacuous: deleting
+the `creature_move` call fails it), with m0 as the in-test control.
+Fixture-guarding is impossible — the only exemplar's take is format 1
+and its pair is permanently divergent on terrain.
+
+## 🏆 `status` RETIRED (2026-08-17): existence IS the assertion
+
+With every pending fixture fixed or deleted the day before, `status`
+had become a constant — so the machinery reading it was comparing a
+value that never varied. Demolished:
+
+- `Status` (`conforming`/`open`/`capture`), `sig`/`atoms`, the FNV
+  `sig_hash`, `won_sig`/`won_atoms`, `--promote`, `--demote`, and the
+  FIXED / DRIFT / PROMOTED / DEMOTED verdicts.
+- `conformance/carry_curation.py` (112 lines) and
+  `classify_fixtures.py` (71) — both existed ONLY to carry statuses and
+  signatures across a re-extract, and had nothing left to carry. A
+  fixture is a self-contained COPY, so a superseded take does not
+  invalidate the suite cut from it and there is nothing to bridge.
+- **fixtures.rs 209 lines removed** (−107 net); 546 deletions overall.
+
+The suite now has two outcomes — pass, or **REGRESSION** (exit 1, named
+by law, atoms listed) — plus two structural errors that exit 2 before
+anything runs. It is also a PURE READER: no flag rewrites a manifest,
+so a test run can no longer launder a failure into a new expectation.
+The only way to change what is asserted is a human editing the
+manifest or `git rm`, and both show up in review.
+
+**What the manifest still buys.** It is nearly a list of file names,
+but a DECLARED LIST is checkable where a directory is not, and both
+directions have caught real mistakes — a file on disk but UNDECLARED
+(orphaned by a rename, silently testing nothing) and a file DECLARED
+but missing (a fixture deleted without its entry, which would just
+shrink the suite in silence). Both verified firing, exit 2, by name.
+
+`extract` changed shape rather than dying: it writes the CONFORMING
+pairs as unnamed candidates and PRINTS the failing stories (deduped,
+minimal exemplar first) for the ledger. It no longer files its own
+unexplained divergences as `open` fixtures — which is precisely how a
+corpus of 7,830 accumulated in which 96% carried no note. The
+"only fixed work" rule is now STRUCTURAL: there is no status to file a
+pending lead under, so the suite cannot become a backlog again.
+
+State: **25 fixtures, 2 manifests, all pass.** fmt clean, clippy at
+its 9-warning pre-existing baseline, `cargo test --workspace` green.

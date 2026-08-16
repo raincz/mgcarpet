@@ -4,35 +4,27 @@
   "fixtures": [
     {
       "t": 49,
-      "status": "open",
-      "sig": "a1a1758349b40a12",
-      "atoms": [
-        "field:wizard0.hand_right"
-      ],
-      "note": "hand resolution (ledger entry 6)",
       "file": "hand-resolution-ledger-entry-6.mgcr",
-      "source": "mc1l0"
+      "source": "mc1l0",
+      "note": "hand resolution (ledger entry 6)"
     },
     {
       "t": 51,
-      "status": "conforming",
-      "note": "cast/impact input latency (ledger entry 4); f26/charge raw-lane surfacing \u2014 lanes not compared at freeze",
       "file": "cast-impact-input-latency-ledger-entry-4.mgcr",
-      "source": "mc1l0"
+      "source": "mc1l0",
+      "note": "cast/impact input latency (ledger entry 4); f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
     },
     {
       "t": 604,
-      "status": "conforming",
-      "note": "THE SEVERED BALL CHAIN: the (9,1) lob reusing collected ball 642's slot scans only the tick-head chain prefix (chase 104, not the closer-scoring 714 above the cut) \u2014 ledger 2026-08-14.",
       "file": "the-severed-ball-chain-the-9-1-lob-reusing-colle.mgcr",
-      "source": "mc1l0"
+      "source": "mc1l0",
+      "note": "THE SEVERED BALL CHAIN: the (9,1) lob reusing collected ball 642's slot scans only the tick-head chain prefix (chase 104, not the closer-scoring 714 above the cut) \u2014 ledger 2026-08-14."
     },
     {
       "t": 1364,
-      "status": "conforming",
-      "note": "mana magnet (10,54) lifecycle + ball pull \u2014 untriaged",
       "file": "mana-magnet-10-54-lifecycle-ball-pull-untriaged.mgcr",
-      "source": "mc1l0"
+      "source": "mc1l0",
+      "note": "mana magnet (10,54) lifecycle + ball pull \u2014 untriaged"
     }
   ]
 }

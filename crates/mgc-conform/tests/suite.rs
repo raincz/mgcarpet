@@ -106,7 +106,8 @@ fn conformance_suite() {
         eprint!("{}", String::from_utf8_lossy(&out.stderr));
         assert!(
             out.status.success(),
-            "conformance suite {} reported regressions, drift or unpromoted fixes",
+            "conformance suite {} reported a REGRESSION (or an undeclared / \
+             missing evidence file) — see the law names above",
             m.display()
         );
         ran += 1;

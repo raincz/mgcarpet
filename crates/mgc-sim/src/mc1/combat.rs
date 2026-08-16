@@ -4715,6 +4715,14 @@ impl Gen {
             let fy = y.wrapping_add((160 * dy as i32 + j2 - 96) as u16);
             if let Some(f) = self.spawn_effect(0, fx, fy, z) {
                 self.ent[f].id24 = owner;
+                // :28717 — the ring's children inherit its +30 exactly
+                // as the spreader's do (:28176 above). The port set
+                // id24/flags/extents/+26 and dropped this one line, so
+                // every blast-ring fire was born heading 0: mc1l32
+                // t=23132 shows 75 newborn (10,0) rows, all children of
+                // one (10,17) ring, all `heading: retail 724 port 0`
+                // — 724 being the ring's own f30.
+                self.ent[f].f30 = self.ent[i].f30;
                 self.ent[f].flags |= 0x80 | 0x10000;
                 self.extents(f, 512, 512);
                 self.ent[f].f26 = 0;

@@ -7954,4 +7954,157 @@ mod tests {
         assert_eq!(p1.angle, p2.angle);
         assert_eq!(p1.shading, p2.shading);
     }
+
+    /// THE BLAST RING'S CHILDREN INHERIT ITS HEADING. `sub_25CE0`
+    /// :28717 copies the ring's `+30` into every fire it lays, exactly
+    /// as the spreader's `sub_24E60` :28176 does — the port set the
+    /// child's id24, flags, extents and `+26` and dropped that one
+    /// line, so every blast-ring fire was born heading 0. mc1l32
+    /// t=23132 caught it as 75 newborn (10,0) rows, all children of one
+    /// (10,17) ring, every one `heading: retail 724 port 0`.
+    ///
+    /// Guarded here rather than by a fixture: the only corpus exemplar
+    /// sits in a format-1 take whose pristine terrain keeps that pair
+    /// permanently divergent, so no l32 fixture can ever be conforming.
+    #[test]
+    fn blast_ring_children_inherit_the_rings_heading() {
+        let mut g = Gen::new(
+            flat_land(8),
+            synthetic_assets(),
+            1,
+            ChassisParams::MC1,
+            crate::verbs::VerbSet::MC1,
+        );
+        let ctx = ctx_at(0xC000, 0xC000, 0);
+        let ring = g.spawn_effect(17, 0x4000, 0x4000, 0).expect("ring slot");
+        {
+            let e = &mut g.ent[ring];
+            e.f30 = 724;
+            e.f26 = 3; // a non-zero radius, so the ring actually lays cells
+            e.max_life = 10;
+            e.act_life = 5;
+            e.f44 = 8000;
+        }
+        g.effect_tick(ring, &ctx);
+        let kids: Vec<usize> = (1..g.ent.len())
+            .filter(|&j| {
+                j != ring
+                    && g.ent[j].class64 == 10
+                    && g.ent[j].model65 == 0
+                    && g.ent[j].flags & 0x400 == 0
+            })
+            .collect();
+        assert!(!kids.is_empty(), "a radius-3 ring lays fires");
+        for k in kids {
+            assert_eq!(g.ent[k].f30, 724, "slot {k} inherits the ring's +30");
+        }
+    }
+
+    /// A HIT FREEZES THE CRAB BUT ITS REGEN TRAILER STILL RUNS. Retail's
+    /// m5 wrappers `sub_1BF60` (:22959-65) and `sub_1C110` (:22976-82)
+    /// call the shared handler and THEN run `act += max >> 7`
+    /// unconditionally — the hit abort happens inside `sub_1A120`,
+    /// below them, so it cannot skip the trailer. The port's
+    /// centralized intake returned above the whole per-state match and
+    /// lost it, which is the banked HIT-ABORT RESTRUCTURE's item 4:
+    /// the blanket abort OVER-aborts.
+    ///
+    /// mc1l32 t=23132: 16 crabs in state 32 take the blast ring's 800
+    /// and retail freezes their movement exactly as the port does, yet
+    /// every one still lands its regen — retail above the port by
+    /// precisely `max_life >> 7`.
+    #[test]
+    fn a_hit_freezes_the_crab_but_its_regen_trailer_still_runs() {
+        let mut g = Gen::new(
+            flat_land(8),
+            synthetic_assets(),
+            1,
+            ChassisParams::MC1,
+            crate::verbs::VerbSet::MC1,
+        );
+        let ctx = ctx_at(0xC000, 0xC000, 0);
+        // The attacker is another CREATURE, so the wizard-only arm of
+        // the intake cannot be what keeps the mover still.
+        let biter = g.spawn_creature(4, 0x5000, 0x5000, 0).expect("biter slot");
+        assert!(
+            !g.attacker_is_wizard(biter as u16),
+            "the fixture's attacker was a crab, not a wizard"
+        );
+        let crab = g.spawn_creature(5, 0x4000, 0x4000, 0).expect("crab slot");
+        {
+            let e = &mut g.ent[crab];
+            e.tick70 = 32; // (5,2) — the chase state the corpus rows sit in
+            e.max_life = 10000;
+            e.act_life = 5000;
+        }
+        let (x0, y0) = (g.ent[crab].x, g.ent[crab].y);
+        g.mail_write_single(
+            crate::mc1::combat::MailTarget::Pool(crab),
+            0,
+            800,
+            biter as u16,
+        );
+        g.creature_tick(crab, &ctx);
+        assert_eq!(
+            (g.ent[crab].x, g.ent[crab].y),
+            (x0, y0),
+            "the hit still freezes the mover"
+        );
+        assert_eq!(
+            g.ent[crab].act_life,
+            5000 - 800 + (10000 >> 7),
+            "the wrapper's regen trailer survives the freeze"
+        );
+    }
+
+    /// THE VULTURE IS THE ONLY CREATURE THAT MOVES WHILE IDLE. m1's
+    /// idle wrapper `sub_1B160` (:22222-46) calls the shared idle and
+    /// then `sub_196E0` — the mover — as a wrapper TRAILER, then
+    /// re-aims at its target or drops it. Nine other idle wrappers
+    /// exist and every one is a 3-5 line body with no mover, so
+    /// `Gen::mob_idle` (the shared `sub_19B10`, which ends at the pack
+    /// scan) was never the culprit. remc1hw :20779-801 is
+    /// byte-identical.
+    ///
+    /// mc1l32 t=23132 slot 28: retail stepped the bird 98 units — its
+    /// own `f126` — along `f30 = 1288` with ZERO LCG draws while the
+    /// port left it bit-identical. Guarded here because that pair's
+    /// take is format 1: its pristine terrain keeps the pair
+    /// permanently divergent, so no fixture of it can ever be green.
+    #[test]
+    fn only_the_vulture_moves_while_idle() {
+        let mut g = Gen::new(
+            flat_land(8),
+            synthetic_assets(),
+            1,
+            ChassisParams::MC1,
+            crate::verbs::VerbSet::MC1,
+        );
+        let ctx = ctx_at(0xC000, 0xC000, 0);
+        let bird = g.spawn_creature(1, 0x4000, 0x4000, 0).expect("m1 slot");
+        g.ent[bird].tick70 = 6; // (1,0), the idle state
+        let before = (g.ent[bird].x, g.ent[bird].y);
+        let rand_before = g.ent[bird].rand;
+        g.creature_tick(bird, &ctx);
+        assert_ne!(
+            (g.ent[bird].x, g.ent[bird].y),
+            before,
+            "the idle vulture still runs sub_196E0"
+        );
+        assert_eq!(
+            g.ent[bird].rand, rand_before,
+            "the mover costs no per-entity LCG draw"
+        );
+        // A creature whose idle carries NO mover is the control: m0's
+        // sub_1B060 (:22166-69) is a bare call, so it must stand still.
+        let worm = g.spawn_creature(0, 0x6000, 0x6000, 0).expect("m0 slot");
+        g.ent[worm].tick70 = 0; // (0,0), idle
+        let wbefore = (g.ent[worm].x, g.ent[worm].y);
+        g.creature_tick(worm, &ctx);
+        assert_eq!(
+            (g.ent[worm].x, g.ent[worm].y),
+            wbefore,
+            "every other idle wrapper has no mover"
+        );
+    }
 }

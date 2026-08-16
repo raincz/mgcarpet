@@ -63,9 +63,9 @@ every time — 18 versions, 178 MB, for 10 live bundles).
 
 Evidence files are COMMITTED via git-lfs (`.gitattributes` tracks
 `conformance/fixtures/**/*.mgcr`) and are WRITE-ONCE: nothing rewrites
-a `.mgcr` after it is cut. Everything mutable — status, signature,
-note — lives in the manifest TEXT, so `--promote` never touches a
-binary. Fullsize recordings NEVER enter git — too large, and useless
+a `.mgcr` after it is cut, and no suite run rewrites a manifest
+either. The only mutable thing is the manifest TEXT, and only a human
+edits it. Fullsize recordings NEVER enter git — too large, and useless
 in their entirety; `/recordings` stays ignored. The full take remains
 the source for `verify-deltas` runs and re-cutting, and it is the
 final authority: a fixture is a derived artifact, and a derived
@@ -75,25 +75,34 @@ A **manifest** (`conformance/<level>.json`, committed) records per
 fixture:
 
 - `t` — the pair.
-- `status` — the expected verdict:
-  - `conforming`: passed at extraction; must stay green. The
-    regression corpus.
-  - `open`: known-failing PORT lead; expected to fail with the
-    recorded signature until the law is fixed. Carries a ledger note.
-  - `capture`: known capture-domain limitation (terrain closure,
-    input latency) — expected to fail, NOT a port bug. Kept so the
-    day the closure gap is fixed, the whole class flips visibly.
-- `sig`/`atoms` — the pair's diff **signature**: the sorted, deduped,
-  slot- and value-free atom set (`missing:c,m`, `extra:c,m`,
-  `field:c,m:name`, `field:player.mana`, `rng`). It captures the
-  STORY of the failure, not its exact numbers, so it is stable across
-  incidental drift.
-- `won_sig`/`won_atoms` — the signature this fixture carried while it
-  was an expected failure, kept when `--promote` closes it. A promoted
-  fixture's receipt: what it proved, after it stopped failing.
+- `file` — the evidence file inside `dir`. Named for the LAW.
 - `source` — which take the pair was cut from. PROVENANCE ONLY: it
   does not change what the fixture pins, and the take may be gone.
-- `note` — free-form triage pointer (ledger entry, family name).
+- `note` — free-form pointer to the ledger entry the law lives in.
+
+**And nothing else. EXISTENCE IS THE ASSERTION.** There is no status
+field: a fixture means *this law works, keep it working*, so it
+either passes or it is a REGRESSION, and retracting one is `git rm`.
+
+That is a deliberate demolition (2026-08-16b) of a machine that had
+grown around a value which never varied — expected statuses
+(`conforming`/`open`/`capture`), diff signatures and their FNV hashes,
+`won_sig`/`won_atoms` receipts, `--promote`/`--demote`, and the
+FIXED/DRIFT verdicts. All of it existed to describe fixtures that were
+EXPECTED TO FAIL, and the corpus no longer contains any: every pending
+fixture was fixed or deleted first. Keeping the machinery would have
+meant maintaining a comparison whose answer was known.
+
+The manifest survives the cull because a DECLARED LIST is checkable in
+ways a directory is not, and both directions have caught real
+mistakes:
+
+- a file on disk but **not declared** — orphaned by a rename or a
+  half-finished cut, silently testing nothing;
+- a file **declared but missing** — a fixture deleted without its
+  entry, which would otherwise just shrink the suite in silence.
+
+Both are hard errors (exit 2), reported by law name.
 
 Fullsize recordings and `baked/` stay local corpus data (like the
 goldens' baked tree); the fixture files are repo artifacts. The
@@ -111,34 +120,28 @@ expected to actually run.
 
 ## Verdicts
 
-`mgc-conform fixtures conformance/mc1l0.json` replays every fixture
-and classifies:
+`mgc-conform fixtures conformance/mc1l0.json` replays every declared
+fixture. There are two outcomes and one of them is red:
 
-| manifest says | pair now | verdict |
-|---|---|---|
-| conforming | passes | ok |
-| conforming | fails | **REGRESSION** — exit 1 |
-| open / capture | fails, same signature | ok (expected) |
-| open / capture | fails, different signature | **DRIFT** — exit 1 until acknowledged |
-| open / capture | **passes** | **FIXED** — exit 1 until acknowledged |
+| pair now | verdict |
+|---|---|
+| passes | ok |
+| fails | **REGRESSION** — exit 1, named by law, atoms listed |
 
-The FIXED case being red is deliberate: progress must be
-acknowledged, never silently absorbed. `--promote` accepts it
-(status → conforming, live signature moved to `won_sig`) and refreshes
-drifted signatures, rewriting the manifest — the diff then shows up in
-review as the fix's conformance receipt.
+plus two structural errors that exit 2 before anything runs: an
+undeclared evidence file, and a declared file that is missing.
 
-DRIFT is red for the same reason. A changed signature means the pair
-now fails a DIFFERENT way than the manifest recorded, so the recorded
-expectation has stopped describing reality; under a subtle regression
-that is the only signal there is, and it used to print and exit 0.
+The regression message carries the diff **signature** — the sorted,
+deduped, slot- and value-free atom set (`missing:c,m`, `extra:c,m`,
+`field:c,m:name`, `field:player.mana`, `rng`). It is no longer
+COMPARED against anything; it is simply the best available description
+of what moved, naming families rather than slots or numbers that shift
+harmlessly.
 
-`--promote` moves a won signature to `won_sig`/`won_atoms` rather than
-clearing it. A promoted fixture conforms and so carries no live `sig`
-— and without a record of what it once proved it is byte-indistinguish-
-able from a `--sample-every` corpus pair, which is precisely how
-`carry_curation.py` (a signature bridge) used to drop the fixtures a
-fix had EARNED, without even listing them as vanished.
+**The suite is a pure reader.** No flag makes it rewrite a manifest,
+so a test run cannot launder a failure into a new expectation — the
+only way to change what is asserted is to edit the manifest or
+`git rm` the evidence, both of which show up in review.
 
 ## Sizing: only fixed work, only what can be named
 
@@ -152,7 +155,17 @@ apply:
   backlog item as an expected-failure fixture makes the suite half
   assertion and half TODO list, and it is the reason the corpus needed
   a status machine, a signature-drift lane, and a `--promote` dance in
-  the first place.
+  the first place. This rule is now STRUCTURAL rather than advisory:
+  there is no status field to file a pending lead under, so the suite
+  cannot become a backlog again.
+- **Some laws do not belong here at all.** Pair mode re-imports retail
+  state every tick and the obs schema does not carry every field, so a
+  law can be invisible to any possible fixture (`+52`/`+70`). Others
+  have their only exemplar in a take that is permanently divergent for
+  capture reasons — a format-1 recording replayed on pristine terrain
+  can never produce a green pair, however correct the port is. Both
+  get UNIT TESTS instead. Decide the lane per law before spending
+  bundle bytes.
 - **Only what can be NAMED.** A fixture's file name is a claim about
   what it pins. If nobody can describe the pair in a sentence, it is
   `--sample-every` ballast and it does not earn a file. This is not a
@@ -174,17 +187,18 @@ from real data.
 ## Lifecycle
 
 1. **Extract** — after a recording session:
-   `mgc-conform extract recordings/mc1l0.mgcr --input-delay 2
-   --out conformance/mc1l0.json`. Failing pairs dedup by signature,
-   keeping minimal exemplars up to `--max-open` (default 24);
-   conforming pairs sample as the generic corpus. The extract is a
-   STARTING POINT — curate it down to one exemplar per story before
-   committing.
-2. **Triage** — everything failing extracts as `open`. Curate:
-   collapse same-story exemplars, reclassify closure-domain ones to
-   `capture`, write notes citing ledger entries. Statuses are
-   ledger-governed; the manifest is the enforcement, the ledger is
-   the argument.
+   `mgc-conform extract recordings/mc1l0.mgcr
+   --out conformance/mc1l0.json`. The manifest gets the CONFORMING
+   pairs, sampled every `--sample-every` (default 10), as unnamed
+   CANDIDATES. Failing pairs are deduped by story and **printed, not
+   written** — minimal exemplar first, for the ledger. An extract that
+   files its own unexplained divergences as fixtures is how a corpus of
+   7,830 accumulated in which 96% carried no note.
+2. **Triage** — read the printed failing stories into
+   docs/CONFORMANCE-FINDINGS.md, and into `known-deviations.json` if a
+   family should be excused during triage. Then pick, from the
+   candidates, the pairs that pin a law worth a file. The ledger is
+   the argument; the manifest is only the enforcement.
 3. **Cut** — after curation:
    `conformance/cut_fixture_files.py conformance/mc1l0.json` copies
    each fixture's `t-1 .. t+1` window out of the take into its own
@@ -197,40 +211,30 @@ from real data.
    lines fails HERE rather than becoming a silently unreachable
    fixture. The runner REFUSES a manifest with no `dir` (an un-cut
    extract is not a suite).
-4. **Fix** — a port fix flips its fixtures to FIXED; run with
-   `--promote` and commit the manifest with the fix.
-5. **Append** — a NEW failure found later (a playtest report, a new
+4. **Fix** — when a port fix closes a law, cut its exemplar in DELIBERATELY,
+   by name, in the same change: the fixture is the fix's receipt. If the
+   law cannot be fixture-guarded (see Sizing), write the unit test instead
+   and say so in the ledger entry.
+5. **Append** — a NEW law fixed later (a playtest report, a new
    verify-deltas family) gets its exemplar added by hand: run
-   `verify-deltas --dump <t>` to pick the minimal pair, add the
-   entry with status `open` and the measured signature (run the
-   suite once; it will report the drift/signature to record — or
-   add with an empty `sig` and let `--promote` fill it).
-6. **Re-extract** — when a recording is superseded. The frozen
-   bundle keeps the OLD suite fully replayable even after its take
-   is deleted — archive the manifest+bundle pair if its exemplars
-   are still earning their keep. Signatures make the old and new
-   manifests comparable:
-   `conformance/carry_curation.py` ports statuses + notes onto the
-   fresh extract by a three-tier bridge — live `sig`, then the
-   `won_sig` receipt (a story that closed and has now come back is
-   reported `REVIVED`, and its extracted `open` status is NOT
-   overwritten), then the tick, which is the only bridge a promoted
-   fixture has when the take was re-EXTRACTED rather than re-recorded.
-   Every curated fixture — anything with a note, a receipt, or a
-   hand-set status — that finds no home is reported `VANISHED`.
-   `conformance/classify_fixtures.py` then
-   auto-triages the still-noteless fixtures from the verify-deltas
-   `--csv` rule column (all rows capture-explained → `capture`, else
-   `open`, note = matched rule ids). Recording-side utilities
-   (gap scan, level-transition boundary finder, conjoined-take cutter)
-   live in `recordings/*.py`.
+   `verify-deltas --dump <t>` to pick the minimal pair, cut it, and add
+   `{t, file, source, note}`. There is nothing to measure or record —
+   if it passes it belongs, and if it does not it is not fixed yet.
+6. **Re-extract** — when a recording is superseded. Existing evidence
+   files are self-contained and keep working: a fixture is a COPY, so a
+   superseded take does not invalidate the suite cut from it, and the
+   old fixtures need no bridging onto the new extract. (The two scripts
+   that used to carry statuses and signatures across a re-extract,
+   `carry_curation.py` and `classify_fixtures.py`, were deleted with
+   the status machine — they had nothing left to carry.) Recording-side
+   utilities (gap scan, level-transition boundary finder, conjoined-take
+   cutter) live in `recordings/*.py`.
 
 ## Rules
 
-- Never hand-edit `sig`/`atoms`/`won_sig`/`won_atoms` — they are
-  measured values; use `--promote` to refresh.
-- Statuses may be hand-edited freely; that is what they are for.
-  Every non-empty `note` should point at a ledger entry.
+- Every non-empty `note` should point at a ledger entry.
+- A fixture is added when a law is FIXED and removed with `git rm`
+  when it stops being worth asserting. There is no third state.
 - The suite runs the manifest's own `pin_pose` — reproducibility over
   CLI convenience. (`input_delay` is gone: it was 0 in every manifest
   and both pair loops discarded it, superseded by the dw_0 cast lane.)
@@ -241,6 +245,26 @@ from real data.
   authority, and it can always mint a replacement with real data.
 - Keep suites per take (`mc1l0.json`, `mc1l32.json`, …); a
   re-recorded take gets a fresh extract, not an edit of the old one.
+- **Run every probe through `tools/conform`**, and pass kill switches
+  as `--env K=V` BEFORE the mode:
+  `./tools/conform --env MGC_NO_DEAF_STATES=1 fixtures conformance/mc1l32.json`.
+  The wrapper caps the address space (a bare `ulimit -v` in the calling
+  shell would poison later cargo builds) and keeps every invocation,
+  however instrumented, the SAME command — a shell prefix
+  (`MGC_X=1 ./tools/conform …`) is a different command to the
+  permission allowlist and stalls the run on an approval prompt.
+  ⚠ It execs `target/release`, so `cargo build --release` after a
+  schema change or the probe reads the old binary.
+- `verify-deltas` reads per-fixture evidence files directly — the
+  obs-stripped lead records are skipped and counted as `ungraded
+  leads`. That is the microscope for a failing fixture: the suite says
+  WHICH law broke, `--dump <t> --max-diffs N` says how.
+- ⚠ The suite and `verify-deltas` must reconstruct input IDENTICALLY
+  or a fixture's verdict drifts from the triage run that recorded it.
+  Only FIRE rides the raw input channel; equips and demolish are
+  rebuilt from the pair by `recover_pair_mc1`. The MC1 suite loop was
+  missing that recovery until 2026-08-16 and filed three equip-lane
+  pairs as port leads.
 - Conformance (and goldens) run against PRISTINE bakes only. A bake
   with community-overlay files applied (docs/MODDING.md) carries a
   `MODDED` marker at the baked root and `meta.overlay` in each
@@ -254,7 +278,7 @@ from real data.
 | manifest | take | fixtures |
 |---|---|---|
 | `conformance/mc1l0.json` | mc1l0 — certified bit-exact end-to-end (0..7097) | 4 |
-| `conformance/mc1l32.json` | mc1l32 + the retired bee-height cut (13 of the 39 come from it, including the bee z-law, HIT-ABORT and terrain-datum corner, which the surviving take never captured) | 39 |
+| `conformance/mc1l32.json` | mc1l32 + the retired bee-height cut | 21 |
 
 43 fixtures, 1.6 MB, **0.2 s**. For scale, the corpus this replaced
 was 7,830 fixtures across 10 takes in 158 MB of bundles taking ~40 s —

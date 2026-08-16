@@ -121,9 +121,17 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             continue;
         };
         let st = decode_retail_mc1(state)?;
-        let obs: ObsMc1 = match &tick.obs {
-            Some(v) => serde_json::from_value(v.clone()).map_err(|e| format!("obs: {e}"))?,
-            None => return Err(format!("t={}: no obs channel", tick.t)),
+        // The obs is the pair END's grading channel, so a record
+        // without one cannot CLOSE a pair — but its state still OPENS
+        // the next one. Fixture files carry three records (t-1 .. t+1)
+        // with obs stripped from the two leads and kept only on the
+        // graded end, so the old eager decode (a hard error on the
+        // first lead) made every fixture file unreadable by this
+        // microscope — the suite could report a law failing while the
+        // only tool that can say HOW refused to open the evidence.
+        let obs: Option<ObsMc1> = match &tick.obs {
+            Some(v) => Some(serde_json::from_value(v.clone()).map_err(|e| format!("obs: {e}"))?),
+            None => None,
         };
         // The cast lane rides dw_0, the CONSUMED move/fire word in the
         // record's own state (bits 16/32 = fire L/R): retail's input
@@ -158,7 +166,13 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             if args.start.is_some_and(|s| pt < s) {
                 // Before the triage window — keep the pairing chain
                 // and the input ring warm, execute nothing.
-            } else if tick.t == pt + 1 {
+            } else if tick.t == pt + 1 && obs.is_none() {
+                // Contiguous, but the end record carries no obs: there
+                // is nothing to grade against. Counted separately from
+                // gaps so an obs-stripped file reports honestly instead
+                // of looking like a clean run of zero pairs.
+                stats.ungraded += 1;
+            } else if let (true, Some(obs)) = (tick.t == pt + 1, obs.as_ref()) {
                 if args.start.is_some() || std::env::var_os("MGC_PACK_TRACE").is_some() {
                     eprintln!("pair {pt}");
                 }
@@ -169,7 +183,7 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 // stepped/unstepped slot bands and the global LCG can
                 // show 0 draws. Such a state is not an inter-tick
                 // closure — the pair is not fixture-grade.
-                if !capture_clean(&pst, &obs) {
+                if !capture_clean(&pst, obs) {
                     stats.torn += 1;
                 } else {
                     world.restore_planes(&pristine);
@@ -311,8 +325,8 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     };
                     let port = world.obs_project_mc1(&pin);
                     stats.absorb_rng(pst.rand, obs.rng, port.rng);
-                    stats.absorb_phase(&pst, &obs, &port, report.human_slot);
-                    let mut pd = compare(&obs, &port, report.human_slot);
+                    stats.absorb_phase(&pst, obs, &port, report.human_slot);
+                    let mut pd = compare(obs, &port, report.human_slot);
                     append_hand_diffs(&mut pd, &st, &port, pst.local_player as usize);
                     append_charge_diffs(&mut pd, &st, &world, report.human_slot);
                     let pd = pd;
@@ -356,7 +370,7 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                             measured_planes(&timg),
                             &pst,
                             &st,
-                            &obs,
+                            obs,
                             pcmd,
                             prev_cmd,
                             !matches!(pin_pose, PinPose::N1),
@@ -366,7 +380,7 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     }
                     let tags = tags;
                     if let Some(w) = csv.as_mut() {
-                        emit_csv(w, pt, &pd, &obs, &port, roster.as_ref(), tags.as_ref())
+                        emit_csv(w, pt, &pd, obs, &port, roster.as_ref(), tags.as_ref())
                             .map_err(|e| e.to_string())?;
                     }
                     let dump = args.dump == Some(pt)
@@ -374,7 +388,7 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     stats.absorb(pt, pd, tags.as_ref(), roster.as_ref(), args);
                     if dump {
                         // Re-diff for the full print (absorb consumed it).
-                        let pd = compare(&obs, &port, report.human_slot);
+                        let pd = compare(obs, &port, report.human_slot);
                         print!("{}", pd.render(pt, usize::MAX));
                         if args.dump_port {
                             for e in &port.entities {
@@ -1142,6 +1156,10 @@ pub(crate) struct FieldStat {
 pub(crate) struct Stats {
     pub(crate) pairs: u64,
     pub(crate) gaps: u64,
+    /// Contiguous pairs whose END record carries no obs channel — the
+    /// obs-stripped leads of a per-fixture evidence file. Not gradeable,
+    /// not a gap, and never silent.
+    pub(crate) ungraded: u64,
     /// Pairs rejected by the capture-tear gate (mid-pass snapshots).
     pub(crate) torn: u64,
     pub(crate) clean_pairs: u64,
@@ -1361,9 +1379,9 @@ impl Stats {
         let fixture = self.pairs - self.torn;
         let _ = writeln!(
             s,
-            "   {} pairs ({} gaps skipped): {} TORN (mid-pass capture, excluded), \
-             {} fixture-grade",
-            self.pairs, self.gaps, self.torn, fixture
+            "   {} pairs ({} gaps skipped, {} ungraded leads): {} TORN \
+             (mid-pass capture, excluded), {} fixture-grade",
+            self.pairs, self.gaps, self.ungraded, self.torn, fixture
         );
         let _ = writeln!(
             s,

@@ -38,6 +38,15 @@ fn no_turn_tie_fix() -> bool {
     *V.get_or_init(|| std::env::var_os("MGC_NO_TURN_TIE").is_some())
 }
 
+/// `MGC_NO_DEAF_STATES=1` restores the unconditional damage intake,
+/// i.e. runs the mailbox prologue above EVERY live state — see
+/// [`Gen::state_is_damage_deaf`]. Kept so one binary can be A/B'd;
+/// read once, a whole-process arm.
+fn no_deaf_states() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var_os("MGC_NO_DEAF_STATES").is_some())
+}
+
 /// Per-tick context the creature handlers need: the player's position
 /// in engine units (the wizard list of the original, reduced to the
 /// one human player until AI wizards land).
@@ -1219,6 +1228,32 @@ impl Gen {
     /// mc1l2 (5,2) z + f26 family, all of them bee DEATH ticks.
     /// Runs on hit and already-dead-on-entry ticks too (:22342-54 is
     /// unconditional), though no row here exercises those arms.
+    /// THE DAMAGE-DEAF STATES. The mailbox prologue (:21330-81) opens
+    /// *most* live state handlers, not all of them: four open straight
+    /// on body work and never touch `str_29885_90` at all, so an entity
+    /// in one of them cannot be hurt for the state's whole duration —
+    /// `actLife` is never debited, no attacker is latched into
+    /// +40/+38/+146, and because the AREA protocol accumulates while
+    /// its source stays pending (`mail_write`), the unread amount
+    /// SNOWBALLS until a state that *does* carry the prologue finally
+    /// reads it.
+    ///
+    /// - `(5,0)` `sub_1BD10` :22775-78 — a bare promote to wander.
+    /// - `(9,0)` `sub_1CFF0` :23591-623 — the materialize countdown.
+    /// - `(11,0)` `sub_1DE40` :24317-84 — the blink cycle.
+    /// - `(12,0)` `sub_1EA40` :24835-992 — the build attempt.
+    ///
+    /// Corpus proof is the m9 pair, mc1l32 t=2032/2040 slot 4: a mound
+    /// materializing inside the player's fire holds `act_life` 1000
+    /// with its mailbox climbing 400 → 800 → 1200 and its source
+    /// pinned at the human — nothing ever read it — while the port
+    /// debited the whole snowball at once (600, then -200) and
+    /// promoted the mound into a chase on the human. `sub_1CFF0` is
+    /// byte-identical in the HW twin (remc1hw :22148-81).
+    fn state_is_damage_deaf(&self, model: u8, role: u8) -> bool {
+        !no_deaf_states() && matches!((model, role), (5, 0) | (9, 0) | (11, 0) | (12, 0))
+    }
+
     fn m2_chase_prework(&mut self, i: usize, ctx: &MobCtx) {
         let v1 = self.ent[i].f26;
         if v1 != 0 {
@@ -3403,7 +3438,15 @@ impl Gen {
         // (:21330-81): apply pending damage, dispatch death/aggro.
         // Families 8/12/13/14 mark the attacker instead of chasing
         // (:25057-63 — the "under attack" memory, wizard-AI track).
-        match self.inbox(i) {
+        //
+        // ...except it does NOT open every live state handler, and a
+        // state without it is DAMAGE-DEAF (see `state_is_damage_deaf`).
+        let intake = if self.state_is_damage_deaf(model, role) {
+            Inbox::Quiet
+        } else {
+            self.inbox(i)
+        };
+        match intake {
             Inbox::Dead => {
                 if role == 3 {
                     // Pack-member death (:21746): the leader retargets
@@ -3538,6 +3581,27 @@ impl Gen {
                 if model == 0 && matches!(role, 1..=3) {
                     self.flyer_bob(i);
                 }
+                // ...and m5's REGEN is a wrapper trailer too, so it
+                // survives the freeze exactly like the bob: retail's
+                // sub_1BF60 (:22959-65) and sub_1C110 (:22976-82) call
+                // the shared handler and THEN run
+                // `if act < max { act += max >> 7 }` unconditionally —
+                // the abort happens inside sub_1A120, below them. This
+                // is the banked HIT-ABORT RESTRUCTURE's item 4 ("a hit
+                // skips the CORE; wrapper pre-work and TRAILERS still
+                // run"), and it proves the port's blanket return
+                // OVER-aborts. mc1l32 t=23132: 16 crabs in state 32
+                // take the blast ring's 800 and retail freezes their
+                // movement exactly as the port does, yet every one of
+                // them still lands its regen — retail sits above the
+                // port by precisely `max_life >> 7` (39 / 78 / 117 for
+                // max 5000 / 10000 / 15000).
+                // Scoped to the HIT arm on purpose: the death arm's
+                // trailer would credit a corpse, and no corpus row
+                // exercises it.
+                if model == 5 && matches!(role, 1 | 2) {
+                    self.m5_regen(i);
+                }
                 return;
             }
             Inbox::Quiet => {}
@@ -3591,6 +3655,54 @@ impl Gen {
             (2, 0) => {
                 self.mob_idle(i, base);
                 self.m2_lunge_arm(i, base, false);
+            }
+            // THE VULTURE IS THE ONLY CREATURE THAT MOVES WHILE IDLE.
+            // Its wrapper sub_1B160 (:22222-46) calls the shared idle
+            // and then `sub_196E0` — the mover — as a wrapper TRAILER,
+            // then re-aims. Ten idle wrappers exist and this is the
+            // only one that moves: the other nine (bases 0/12/18/24/
+            // 36/42/48/60/96) are 3-5 line bodies with no mover at
+            // all. It is also the only one that MAKES SENSE, m1 being
+            // a glider that cannot hover. remc1hw :20779-801 is
+            // byte-identical, so this is two witnesses, not one.
+            //
+            // mc1l32 t=23132 slot 28 caught it: retail stepped the
+            // bird 98 units — exactly its own `f126` — along
+            // `f30 = 1288` with ZERO LCG draws, while the port left it
+            // bit-identical. (The paired `target_yaw` row on slot 31
+            // is the downstream knock-on: `f52 = 28`, so its
+            // bearing-to-leader moved only because the leader did.)
+            // The shared idle `sub_19B10` :21311-419 ends at the pack
+            // scan with no mover, so `mob_idle` was never the culprit.
+            //
+            // ⚠ The mover sits in the WRAPPER, textually after
+            // `sub_19B10` returns, so retail runs it on a HIT tick too
+            // — the same trailer-survives-the-freeze shape the m5
+            // regen row proves. Left out of the hit arm deliberately:
+            // no corpus row exercises it, and the arm's existing m0
+            // bob has the same known gap on the promote-and-return
+            // paths. Banked in the ledger.
+            (1, 0) => {
+                self.mob_idle(i, base);
+                self.creature_move(i);
+                // :22226 — the retarget runs only if the pack scan
+                // did not promote, and only on the think tick.
+                let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26;
+                if self.ent[i].tick70 == base && (self.ent[i].f63 as i16) % v26 == 0 {
+                    let t = self.ent[i].f146 as usize;
+                    // :22232 — a target whose record went class 0 is
+                    // dropped and the bird falls back to wander. The
+                    // f146 = 0 case lands here too: slot 0 is the
+                    // sentinel and reads class 0.
+                    if t < self.ent.len() && self.ent[t].class64 != 0 {
+                        let (ax, ay) = (self.ent[i].x, self.ent[i].y);
+                        let (bx, by) = (self.ent[t].x, self.ent[t].y);
+                        self.ent[i].f34 = Self::angle_between(ax, ay, bx, by);
+                    } else {
+                        self.ent[i].f146 = 0;
+                        self.ent[i].tick70 = base + 1;
+                    }
+                }
             }
             (_, 0) => self.mob_idle(i, base),
 

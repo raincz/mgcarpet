@@ -1,6 +1,6 @@
 //! The conformance fixture SUITE (docs/CONFORMANCE.md): pairs of
 //! retail states that pin a FIXED retail law, one per file, replayed
-//! as an automated expected-status test.
+//! on every `cargo test`.
 //!
 //! A fixture is a COPY, not a reference: its `.mgcr` holds the three
 //! tick records it needs (`t-1 .. t+1`) and nothing else, so it
@@ -14,12 +14,21 @@
 //! recording a pair came from is provenance (`Fixture::source`), not
 //! identity — a fixture belongs to a LEVEL.
 //!
-//! The manifest carries each pair's expected status and its diff
-//! SIGNATURE (the slot- and value-free set of (kind, class, model,
-//! field) atoms), so the suite detects three events: a conforming pair
-//! regressing, an expected-failing pair flipping to pass (progress —
-//! acknowledge with `--promote`), and a pair failing DIFFERENTLY than
-//! recorded (drift).
+//! **EXISTENCE IS THE ASSERTION.** A fixture means "this law works,
+//! keep it working" and nothing else, so there is no status field to
+//! read: a fixture either passes or it is a REGRESSION, and retracting
+//! one is `git rm`. That collapsed a whole machine — expected statuses,
+//! diff signatures and their hashes, `--promote`/`--demote`, and the
+//! FIXED/DRIFT verdicts — into two outcomes. It is only honest because
+//! the corpus earned it: every pending fixture was either fixed or
+//! deleted first (2026-08-16b), so the status field had become a
+//! constant and the machinery was reading a value that never varied.
+//!
+//! What the manifest still buys, and why it is not just a directory
+//! listing: a DECLARED LIST catches two things `ls` cannot, and both
+//! fired in practice — a file present but undeclared (orphaned by a
+//! rename or a half-finished cut) and a file declared but missing.
+//! Both are hard errors, reported BY LAW NAME.
 
 use crate::Args;
 use crate::verify::{self, PairDiff};
@@ -29,43 +38,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
-#[serde(rename_all = "lowercase")]
-pub enum Status {
-    /// Regression guard: the pair conformed when extracted and must
-    /// stay green.
-    Conforming,
-    /// A known-failing port lead (ledger-tracked): expected to fail
-    /// with the recorded signature until the law is fixed.
-    Open,
-    /// A capture-domain limitation (terrain closure, input latency):
-    /// expected to fail; not a port bug. Kept for drift tracking and
-    /// for the day the closure gap itself is fixed.
-    Capture,
-}
-
 #[derive(Serialize, Deserialize)]
 pub struct Fixture {
     pub t: u64,
-    pub status: Status,
-    /// FNV-1a hash of the atom set (empty for conforming pairs).
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub sig: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub atoms: Vec<String>,
-    /// The signature this fixture carried while it was an expected
-    /// failure, kept across `--promote`. A promoted fixture conforms,
-    /// so its live `sig` must be empty — but without a record of what
-    /// it USED to prove it becomes byte-indistinguishable from a
-    /// `--sample-every` conforming pair, and `carry_curation.py` (which
-    /// bridges an old manifest onto a fresh extract BY SIGNATURE) drops
-    /// it silently at the next re-extract, without even listing it as
-    /// vanished. The receipt a fix earns is exactly what the tooling
-    /// was throwing away.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub won_sig: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub won_atoms: Vec<String>,
     /// The evidence file inside the manifest's `dir` — an ordinary
     /// `.mgcr` holding this pair's three lines and nothing else. Named
     /// for the LAW it pins and nothing else, so a failure reports a
@@ -122,10 +97,13 @@ pub struct Manifest {
 /// The slot- and value-free signature of a divergent pair: sorted,
 /// deduped atoms — `rng`, `missing:c,m`, `extra:c,m`,
 /// `field:c,m:name` (entity fields, class/model from the retail obs)
-/// and `field:name` (wizard/player scalars). Stable across runs and
-/// across small positional drifts; changes when the STORY of the
-/// failure changes. `classes` = the retail obs slot → (class, model)
-/// map (family-neutral).
+/// and `field:name` (wizard/player scalars). It used to be a COMPARED
+/// value (hashed into the manifest, to tell an expected failure from a
+/// drifted one); with expected failures gone it survives purely as the
+/// REGRESSION MESSAGE, which is the job it was always best at — it
+/// names what diverged without pinning slots or numbers that shift
+/// harmlessly. `classes` = the retail obs slot → (class, model) map
+/// (family-neutral).
 pub(crate) fn signature(pd: &PairDiff, classes: &BTreeMap<u16, (u8, u8)>) -> Vec<String> {
     let mut atoms: Vec<String> = Vec::new();
     if pd.rng_want != pd.rng_got {
@@ -156,19 +134,6 @@ fn class_map_mc1(retail: &ObsMc1) -> BTreeMap<u16, (u8, u8)> {
         .iter()
         .map(|e| (e.slot, (e.class, e.model)))
         .collect()
-}
-
-pub(crate) fn sig_hash(atoms: &[String]) -> String {
-    // FNV-1a 64 — deliberately hand-rolled: std's DefaultHasher is
-    // not stable across toolchains and the hash is a committed value.
-    let mut h: u64 = 0xcbf29ce484222325;
-    for a in atoms {
-        for b in a.as_bytes().iter().chain(b"|") {
-            h ^= *b as u64;
-            h = h.wrapping_mul(0x100000001b3);
-        }
-    }
-    format!("{h:016x}")
 }
 
 /// Rebuild the world before EVERY graded pair (`MGC_FIXTURE_ISOLATE`).
@@ -244,6 +209,29 @@ fn for_each_pair(
         // verify::fire_bits_mc1.
         let cmd = verify::fire_bits_mc1(&st);
         if let Some((pt, pst, pcmd)) = prev.take() {
+            // THE EQUIP/DEMOLISH RECOVERY LANE. Only FIRE rides the raw
+            // input channel; equips and demolish are rebuilt FROM THE
+            // PAIR (a recorded hand change across it replays as the
+            // equip command, the dw==48 word as the demolish) — see the
+            // twin in `verify::run`. The suite MUST reconstruct input
+            // exactly like verify-deltas or its verdicts diverge from
+            // the triage run that recorded them; the MC2 loop below
+            // says so in as many words and does it. This MC1 loop did
+            // not, so the port's hands never changed under the suite
+            // and every equip-lane pair failed on a `wizard0.hand_*`
+            // row the triage run cannot reproduce — three fixtures
+            // (`hand-resolution`, both `equip-cast-input-reconstruction`
+            // exemplars) were filed as port leads by a harness gap, and
+            // `castle-z-equip-recon` carried a phantom second atom.
+            let pcmd = {
+                let rec = mgc_formats::recover::recover_pair_mc1(&pst, &st, tick.input.as_ref());
+                PlayerCommand {
+                    equip_left: rec.equip_left.map(mgc_sim::mc1::spells::SpellId),
+                    equip_right: rec.equip_right.map(mgc_sim::mc1::spells::SpellId),
+                    demolish: rec.demolish,
+                    ..pcmd
+                }
+            };
             let wanted = select.is_none_or(|s| s.contains(&pt));
             if tick.t == pt + 1 && wanted {
                 let obs: ObsMc1 = match &tick.obs {
@@ -379,11 +367,22 @@ fn for_each_pair_mc2(
 // ---------------------------------------------------------------- extract
 
 /// `extract <rec.mgcr> --out <manifest.json>`: run the full pass,
-/// dedup failing pairs by signature keeping the MINIMAL exemplar
-/// (fewest atoms, then earliest), sample conforming pairs as the
-/// regression corpus, and write the manifest. Everything failing is
-/// written `open` — reclassifying to `capture` (and the notes) is the
-/// triage's job, by hand or scripted against the ledger.
+/// sample the CONFORMING pairs into a candidate manifest, and REPORT
+/// the failing ones — deduped by signature, minimal exemplar first
+/// (fewest atoms, then earliest) — to stdout for the ledger.
+///
+/// Failing pairs are no longer written as fixtures. They used to be,
+/// as `open`, and that is exactly how a corpus of 7,830 accumulated in
+/// which 96% carried no note and no status: an extract that files its
+/// own unexplained divergences as fixtures turns a triage queue into a
+/// test suite. A fixture asserts fixed work, so a failing pair belongs
+/// in docs/CONFORMANCE-FINDINGS.md (and, if it should be excused
+/// during triage, in `known-deviations.json`) until someone fixes the
+/// law — at which point it is cut in deliberately, by name.
+///
+/// The sampled conforming pairs are CANDIDATES, not a suite: they land
+/// unnamed, and `cut_fixture_files.py` + a human decide which ones pin
+/// a law worth a file.
 pub fn extract(path: &Path, args: &Args) -> i32 {
     let Some(out) = args.out.clone() else {
         eprintln!("extract: --out <manifest.json> required");
@@ -399,8 +398,8 @@ pub fn extract(path: &Path, args: &Args) -> i32 {
 }
 
 fn extract_inner(path: &Path, args: &Args, out: &Path) -> Result<(), String> {
-    // sig → (atom_count, t, atoms) — the best exemplar seen.
-    let mut best: BTreeMap<String, (usize, u64, Vec<String>)> = BTreeMap::new();
+    // atoms-joined → (atom_count, t) — the minimal exemplar per story.
+    let mut best: BTreeMap<String, (usize, u64)> = BTreeMap::new();
     let mut conforming: Vec<u64> = Vec::new();
     let (mut pairs, mut failing) = (0u64, 0u64);
     for_each_pair(
@@ -417,52 +416,27 @@ fn extract_inner(path: &Path, args: &Args, out: &Path) -> Result<(), String> {
             }
             failing += 1;
             let atoms = signature(&pd, classes);
-            let sig = sig_hash(&atoms);
             let n = atoms.len();
-            let e = best.entry(sig).or_insert((usize::MAX, 0, Vec::new()));
+            let e = best.entry(atoms.join(" ")).or_insert((usize::MAX, 0));
             if n < e.0 {
-                *e = (n, t, atoms);
+                *e = (n, t);
             }
             Ok(())
         },
     )?;
 
-    // Regression corpus: every Kth conforming pair.
+    // Candidate corpus: every Kth conforming pair, unnamed.
     let k = args.sample_every.max(1) as usize;
-    let mut fixtures: Vec<Fixture> = conforming
+    let fixtures: Vec<Fixture> = conforming
         .iter()
         .step_by(k)
         .map(|&t| Fixture {
             t,
-            status: Status::Conforming,
-            sig: String::new(),
-            atoms: Vec::new(),
-            won_sig: String::new(),
-            won_atoms: Vec::new(),
             file: String::new(),
             source: String::new(),
             note: String::new(),
         })
         .collect();
-
-    // Open exemplars: minimal repros first, capped.
-    let mut open: Vec<(&String, &(usize, u64, Vec<String>))> = best.iter().collect();
-    open.sort_by_key(|(_, (n, t, _))| (*n, *t));
-    let kept = open.len().min(args.max_open);
-    for (sig, (_, t, atoms)) in open.iter().take(args.max_open) {
-        fixtures.push(Fixture {
-            t: *t,
-            status: Status::Open,
-            sig: (*sig).clone(),
-            atoms: (*atoms).clone(),
-            won_sig: String::new(),
-            won_atoms: Vec::new(),
-            file: String::new(),
-            source: String::new(),
-            note: String::new(),
-        });
-    }
-    fixtures.sort_by_key(|f| f.t);
 
     // The recording path, relative to the manifest's directory.
     let rel = pathdiff(path, out.parent().unwrap_or(Path::new(".")));
@@ -478,13 +452,25 @@ fn extract_inner(path: &Path, args: &Args, out: &Path) -> Result<(), String> {
     write_manifest(out, &manifest)?;
     println!(
         "extracted {}: {pairs} pairs, {} conforming ({} sampled every {k}), \
-         {failing} failing across {} signatures ({kept} exemplars kept, cap {})",
+         {failing} failing across {} stories",
         out.display(),
         conforming.len(),
         conforming.len().div_ceil(k),
         best.len(),
-        args.max_open,
     );
+    // The triage queue — printed, never written as fixtures. Minimal
+    // exemplar first, so the shortest repro of each story leads.
+    if !best.is_empty() {
+        let mut stories: Vec<(&String, &(usize, u64))> = best.iter().collect();
+        stories.sort_by_key(|(_, (n, t))| (*n, *t));
+        println!(
+            "   failing stories (ledger these; NOT fixtures until fixed), \
+             minimal exemplar first:"
+        );
+        for (atoms, (_, t)) in stories {
+            println!("     t={t:<8} {atoms}");
+        }
+    }
     Ok(())
 }
 
@@ -533,38 +519,22 @@ fn read_manifest(path: &Path) -> Result<Manifest, String> {
 pub struct SuiteReport {
     pub ran: u64,
     pub ok: u64,
-    /// Conforming fixtures that now fail — the red signal.
+    /// Fixtures that now fail — the red signal, and the only one.
     pub regressions: Vec<u64>,
-    /// Regressions acknowledged by `--demote` (status → open).
-    pub demoted: Vec<u64>,
-    /// Open/capture fixtures that now PASS — progress, but red until
-    /// promoted so the manifest never silently rots.
-    pub fixed: Vec<u64>,
-    /// Expected-failing fixtures whose signature changed (warning).
-    pub drifted: Vec<u64>,
     /// Manifest pairs the stream never yielded (gap/torn/missing).
     pub skipped: Vec<u64>,
 }
 
-/// `fixtures <manifest.json>… [--promote]`: replay every manifest
-/// pair, enforce expected statuses. Exit 1 on regressions or
-/// unacknowledged fixes; `--promote` accepts fixes (status →
-/// conforming) and refreshes drifted signatures, rewriting the
-/// manifest.
+/// `fixtures <manifest.json>…`: replay every declared fixture. A
+/// fixture passes or it is a REGRESSION; exit 1 on any. Nothing here
+/// rewrites a manifest — the suite is a pure reader, so a test run can
+/// never launder a failure into a new expectation.
 pub fn run(paths: &[PathBuf], args: &Args) -> i32 {
     let mut code = 0;
     for p in paths {
         match run_one(p, args) {
             Ok(rep) => {
-                // Drift is NOT a warning. A changed signature means the
-                // pair now fails a different way than the manifest
-                // recorded, so the recorded expectation has stopped
-                // describing reality — under a subtle regression that
-                // is the only signal there is, and it used to print and
-                // exit 0. `--promote` is how you accept a new one.
-                if !rep.regressions.is_empty()
-                    || (!args.promote && (!rep.fixed.is_empty() || !rep.drifted.is_empty()))
-                {
+                if !rep.regressions.is_empty() {
                     code = code.max(1);
                 }
             }
@@ -578,16 +548,39 @@ pub fn run(paths: &[PathBuf], args: &Args) -> i32 {
 }
 
 pub fn run_one(manifest_path: &Path, args: &Args) -> Result<SuiteReport, String> {
-    let mut manifest = read_manifest(manifest_path)?;
+    let manifest = read_manifest(manifest_path)?;
     let base = manifest_path.parent().unwrap_or(Path::new("."));
     if manifest.dir.is_empty() {
-        return Err(format!(
-            "{}: manifest has no `dir` — it is an un-cut extract; run \
-             conformance/cut_fixture_files.py on it first (docs/CONFORMANCE.md)",
-            manifest_path.display()
-        ));
+        return Err("manifest has no `dir` — it is an un-cut extract; run \
+             conformance/cut_fixture_files.py on it first (docs/CONFORMANCE.md)"
+            .into());
     }
     let dir = base.join(&manifest.dir);
+    // THE DECLARED LIST IS THE POINT. With statuses gone the manifest
+    // is little more than a list of file names — but a list is exactly
+    // what a bare directory cannot be checked against, and both
+    // directions have caught real mistakes: an UNDECLARED file (two
+    // orphans survived a rename, silently testing nothing) and a
+    // DECLARED file that is missing (a fixture deleted without its
+    // entry, which would otherwise just shrink the suite in silence).
+    // Both are hard errors, named.
+    let declared: std::collections::BTreeSet<&str> =
+        manifest.fixtures.iter().map(|f| f.file.as_str()).collect();
+    if let Ok(rd) = std::fs::read_dir(&dir) {
+        let mut orphans: Vec<String> = rd
+            .filter_map(|e| Some(e.ok()?.file_name().to_string_lossy().into_owned()))
+            .filter(|n| n.ends_with(".mgcr") && !declared.contains(n.as_str()))
+            .collect();
+        if !orphans.is_empty() {
+            orphans.sort();
+            return Err(format!(
+                "{} evidence file(s) on disk but not declared — a suite \
+                 tests what the manifest LISTS, so these are running nothing: {}",
+                orphans.len(),
+                orphans.join(", ")
+            ));
+        }
+    }
     // ONE FILE, ONE PAIR, ONE WORLD. The bundle runner built a single
     // world and ticked every selected pair on it, so a verdict could
     // depend on how many unrelated pairs ran first — measured on
@@ -601,16 +594,14 @@ pub fn run_one(manifest_path: &Path, args: &Args) -> Result<SuiteReport, String>
     for f in &manifest.fixtures {
         if f.file.is_empty() {
             return Err(format!(
-                "{}: fixture t={} has no `file` — re-cut the manifest",
-                manifest_path.display(),
+                "fixture t={} has no `file` — re-cut the manifest",
                 f.t
             ));
         }
         let path = dir.join(&f.file);
         if !path.exists() {
             return Err(format!(
-                "{}: fixture t={} ({}) is missing its evidence file {}",
-                manifest_path.display(),
+                "fixture t={} ({}) is missing its evidence file {}",
                 f.t,
                 f.law(),
                 path.display()
@@ -637,99 +628,29 @@ pub fn run_one(manifest_path: &Path, args: &Args) -> Result<SuiteReport, String>
     }
 
     let mut rep = SuiteReport::default();
-    let mut changed = false;
-    for f in &mut manifest.fixtures {
+    for f in &manifest.fixtures {
         let Some(atoms) = results.get(&f.t) else {
             rep.skipped.push(f.t);
             continue;
         };
         rep.ran += 1;
-        let law = f.law().to_string();
-        let pass = atoms.is_empty();
-        match (f.status, pass) {
-            (Status::Conforming, true) => rep.ok += 1,
-            (Status::Conforming, false) => {
-                // --demote: the deliberate twin of --promote, for when
-                // a NEW comparison lane reveals a frozen-conforming
-                // pair was never truly conforming — acknowledge it as
-                // the open lead it always was, with attribution.
-                if let Some(note) = &args.demote {
-                    f.status = Status::Open;
-                    f.sig = sig_hash(atoms);
-                    f.atoms = atoms.clone();
-                    if f.note.is_empty() {
-                        f.note = note.clone();
-                    } else {
-                        f.note = format!("{}; {note}", f.note);
-                    }
-                    changed = true;
-                    rep.demoted.push(f.t);
-                    println!("  DEMOTED {law} (t={}): open, {}", f.t, atoms.join(" "));
-                } else {
-                    rep.regressions.push(f.t);
-                    println!(
-                        "  REGRESSION {law} (t={}): was conforming, now {}",
-                        f.t,
-                        atoms.join(" ")
-                    );
-                }
-            }
-            (_, true) => {
-                rep.fixed.push(f.t);
-                if args.promote {
-                    f.status = Status::Conforming;
-                    // Move, never drop: `won_sig`/`won_atoms` are this
-                    // fixture's receipt, and the only thing that keeps
-                    // it distinguishable from sampled ballast once it
-                    // conforms.
-                    f.won_sig = std::mem::take(&mut f.sig);
-                    f.won_atoms = std::mem::take(&mut f.atoms);
-                    changed = true;
-                    println!("  PROMOTED {law} (t={}): now conforming", f.t);
-                } else {
-                    println!(
-                        "  FIXED {law} (t={}): expected {:?} failure, now conforming — \
-                         re-run with --promote to accept",
-                        f.t, f.status
-                    );
-                }
-            }
-            (_, false) => {
-                let sig = sig_hash(atoms);
-                if sig == f.sig {
-                    rep.ok += 1;
-                } else {
-                    rep.drifted.push(f.t);
-                    println!(
-                        "  drift {law} (t={}, {:?}): {} → {}",
-                        f.t,
-                        f.status,
-                        f.atoms.join(" "),
-                        atoms.join(" ")
-                    );
-                    if args.promote {
-                        f.sig = sig;
-                        f.atoms = atoms.clone();
-                        changed = true;
-                    }
-                }
-            }
+        if atoms.is_empty() {
+            rep.ok += 1;
+        } else {
+            rep.regressions.push(f.t);
+            // The law is the headline; the atoms say what moved. There
+            // is nothing to compare them against any more, and that is
+            // the point — a fixture exists because its law WORKS, so
+            // any divergence at all is the regression.
+            println!("  REGRESSION {} (t={}): {}", f.law(), f.t, atoms.join(" "));
         }
     }
-    if changed {
-        write_manifest(manifest_path, &manifest)?;
-        println!("  manifest rewritten: {}", manifest_path.display());
-    }
     println!(
-        "== {}: {} fixtures ran, {} as expected, {} regressions, {} demoted, \
-         {} fixed, {} drifted, {} not reached",
+        "== {}: {} fixtures ran, {} pass, {} regressions, {} not reached",
         manifest_path.display(),
         rep.ran,
         rep.ok,
         rep.regressions.len(),
-        rep.demoted.len(),
-        rep.fixed.len(),
-        rep.drifted.len(),
         rep.skipped.len()
     );
     Ok(rep)
