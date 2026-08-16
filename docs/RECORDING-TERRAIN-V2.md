@@ -98,7 +98,7 @@ Original plan below for the remaining steps' context.
    against the measured planes on the new corpus — agreement certifies
    the inference; disagreement is a dig (either the reconstruct or the
    edit law).
-3. **`freeze_fixtures.py` embeds each fixture's terrain state** (base +
+3. **`cut_fixture_files.py` embeds each fixture's terrain state** (base +
    accumulated delta at the fixture tick, or a materialized plane) so
    suites stay self-contained and selected-pair execution stays O(pair).
 4. **Roster re-triage** once the first v2 take grades: every terrain

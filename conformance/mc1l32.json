@@ -1,259 +1,28 @@
 {
-  "recording": "fixtures/mc1l32-fixtures.mgcr",
-  "input_delay": 0,
+  "dir": "fixtures/mc1l32",
   "pin_pose": "n1",
   "fixtures": [
     {
-      "t": 0,
-      "status": "conforming"
-    },
-    {
-      "t": 10,
-      "status": "conforming"
-    },
-    {
-      "t": 20,
-      "status": "conforming"
-    },
-    {
-      "t": 30,
-      "status": "conforming"
-    },
-    {
-      "t": 40,
-      "status": "conforming"
-    },
-    {
-      "t": 50,
-      "status": "conforming"
-    },
-    {
-      "t": 60,
-      "status": "conforming"
-    },
-    {
-      "t": 70,
-      "status": "conforming"
-    },
-    {
-      "t": 80,
+      "t": 817,
       "status": "open",
-      "sig": "93d5bf3ba92e36db",
+      "sig": "0df81e3a71dc2119",
       "atoms": [
-        "missing:12,3"
+        "field:10,0:rand"
       ],
-      "note": "[carried from bee-height take] class-12 ecology churn: retail respawns statics, port does not (l32 known lane, castle-latch session leads)"
+      "note": "(10,0) ent-rand lane (see t=465)",
+      "file": "10-0-ent-rand-lane.mgcr",
+      "source": "mc1l32"
     },
     {
-      "t": 81,
+      "t": 886,
       "status": "open",
-      "sig": "93cbbd3ba925def0",
+      "sig": "b6f54402d020e196",
       "atoms": [
-        "missing:12,0"
+        "field:10,0:z"
       ],
-      "note": "[carried from bee-height take] class-12 ecology churn (see t=124)"
-    },
-    {
-      "t": 82,
-      "status": "conforming"
-    },
-    {
-      "t": 92,
-      "status": "conforming"
-    },
-    {
-      "t": 102,
-      "status": "conforming"
-    },
-    {
-      "t": 112,
-      "status": "conforming"
-    },
-    {
-      "t": 122,
-      "status": "conforming"
-    },
-    {
-      "t": 127,
-      "status": "capture",
-      "sig": "a1a1758349b40a12",
-      "atoms": [
-        "field:wizard0.hand_right"
-      ],
-      "note": "[carried from bee-height take] equip/cast input reconstruction (RECORDING.md raw-input +/-1 caveat): wizard0.hand_right"
-    },
-    {
-      "t": 129,
-      "status": "conforming",
-      "note": "[carried from bee-height take] (9,1) projectile lane: extra-in-port; f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 134,
-      "status": "conforming"
-    },
-    {
-      "t": 145,
-      "status": "conforming"
-    },
-    {
-      "t": 148,
-      "status": "conforming",
-      "note": "[carried from bee-height take] (9,1) flags lane; f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 152,
-      "status": "conforming",
-      "note": "[carried from bee-height take] (10,12)+(9,1) flags lane; f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 156,
-      "status": "conforming",
-      "note": "[carried from bee-height take] (10,39) balloon flags + (9,1) flags; f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 182,
-      "status": "conforming",
-      "note": "[carried from bee-height take] (10,39) balloon flags bit 0x20000000 (l32 known balloon family)"
-    },
-    {
-      "t": 183,
-      "status": "conforming"
-    },
-    {
-      "t": 194,
-      "status": "conforming"
-    },
-    {
-      "t": 204,
-      "status": "conforming"
-    },
-    {
-      "t": 214,
-      "status": "conforming"
-    },
-    {
-      "t": 222,
-      "status": "open",
-      "sig": "516247606ff62f95",
-      "atoms": [
-        "missing:12,16"
-      ],
-      "note": "[carried from bee-height take] class-12 ecology churn (see t=124)"
-    },
-    {
-      "t": 225,
-      "status": "conforming"
-    },
-    {
-      "t": 235,
-      "status": "conforming"
-    },
-    {
-      "t": 245,
-      "status": "conforming"
-    },
-    {
-      "t": 256,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 262,
-      "status": "conforming",
-      "note": "[carried from bee-height take] (10,12) flags lane; f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 273,
-      "status": "conforming"
-    },
-    {
-      "t": 289,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 304,
-      "status": "conforming"
-    },
-    {
-      "t": 315,
-      "status": "conforming"
-    },
-    {
-      "t": 325,
-      "status": "conforming"
-    },
-    {
-      "t": 335,
-      "status": "conforming"
-    },
-    {
-      "t": 345,
-      "status": "conforming"
-    },
-    {
-      "t": 355,
-      "status": "conforming"
-    },
-    {
-      "t": 365,
-      "status": "conforming"
-    },
-    {
-      "t": 375,
-      "status": "conforming"
-    },
-    {
-      "t": 385,
-      "status": "conforming"
-    },
-    {
-      "t": 395,
-      "status": "conforming"
-    },
-    {
-      "t": 405,
-      "status": "conforming"
-    },
-    {
-      "t": 412,
-      "status": "capture",
-      "sig": "91c5d9b7855c33bf",
-      "atoms": [
-        "field:wizard0.hand_left"
-      ],
-      "note": "[carried from bee-height take] equip/cast input reconstruction: wizard0.hand_left"
-    },
-    {
-      "t": 414,
-      "status": "conforming",
-      "note": "[carried from bee-height take] bee z-law FIXED; residual: (9,0) extra; f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 417,
-      "status": "conforming"
-    },
-    {
-      "t": 427,
-      "status": "conforming"
-    },
-    {
-      "t": 437,
-      "status": "conforming"
-    },
-    {
-      "t": 447,
-      "status": "conforming"
-    },
-    {
-      "t": 459,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 465,
-      "status": "conforming",
-      "note": "(10,0) fire z lane - the terrain-datum class rides grounded fires (bee-session cause A ledger entry)"
+      "note": "(10,0) fire z + (9,0) extra (meteor churn)",
+      "file": "10-0-fire-z-9-0-extra-meteor-churn.mgcr",
+      "source": "mc1l32"
     },
     {
       "t": 467,
@@ -263,1455 +32,128 @@
         "field:10,0:rand",
         "field:10,0:z"
       ],
-      "note": "(10,0) fire z + ent-rand knock-on (see t=465)"
+      "note": "(10,0) fire z + ent-rand knock-on (see t=465)",
+      "file": "10-0-fire-z-ent-rand-knock-on.mgcr",
+      "source": "mc1l32"
     },
     {
-      "t": 491,
+      "t": 465,
       "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
+      "note": "(10,0) fire z lane - the terrain-datum class rides grounded fires (bee-session cause A ledger entry)",
+      "file": "10-0-fire-z-lane-the-terrain-datum-class-rides-g.mgcr",
+      "source": "mc1l32"
     },
     {
-      "t": 504,
-      "status": "conforming"
-    },
-    {
-      "t": 517,
-      "status": "conforming"
-    },
-    {
-      "t": 529,
+      "t": 152,
       "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
+      "note": "[carried from bee-height take] (10,12)+(9,1) flags lane; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze",
+      "file": "10-12-9-1-flags-lane.mgcr",
+      "source": "mc1l32"
     },
     {
-      "t": 541,
+      "t": 262,
       "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
+      "note": "[carried from bee-height take] (10,12) flags lane; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze",
+      "file": "10-12-flags-lane.mgcr",
+      "source": "mc1l32"
     },
     {
-      "t": 553,
-      "status": "conforming"
-    },
-    {
-      "t": 566,
-      "status": "conforming"
-    },
-    {
-      "t": 577,
-      "status": "conforming"
-    },
-    {
-      "t": 589,
+      "t": 156,
       "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
+      "note": "[carried from bee-height take] (10,39) balloon flags + (9,1) flags; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze",
+      "file": "10-39-balloon-flags-9-1-flags.mgcr",
+      "source": "mc1l32"
     },
     {
-      "t": 601,
-      "status": "conforming"
-    },
-    {
-      "t": 613,
-      "status": "conforming"
-    },
-    {
-      "t": 624,
-      "status": "conforming"
-    },
-    {
-      "t": 636,
-      "status": "conforming"
-    },
-    {
-      "t": 648,
-      "status": "conforming"
-    },
-    {
-      "t": 659,
-      "status": "conforming"
-    },
-    {
-      "t": 671,
-      "status": "conforming"
-    },
-    {
-      "t": 684,
+      "t": 182,
       "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
+      "note": "[carried from bee-height take] (10,39) balloon flags bit 0x20000000 (l32 known balloon family)",
+      "file": "10-39-balloon-flags-bit-0x20000000-l32-known-bal.mgcr",
+      "source": "mc1l32"
     },
     {
-      "t": 696,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 708,
-      "status": "conforming"
-    },
-    {
-      "t": 720,
-      "status": "conforming"
-    },
-    {
-      "t": 732,
-      "status": "conforming"
-    },
-    {
-      "t": 744,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 756,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 768,
-      "status": "conforming"
-    },
-    {
-      "t": 786,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 814,
-      "status": "conforming"
-    },
-    {
-      "t": 817,
+      "t": 2061,
       "status": "open",
-      "sig": "0df81e3a71dc2119",
+      "sig": "9ffb399f1ec9ade8",
       "atoms": [
-        "field:10,0:rand"
+        "field:10,0:z",
+        "field:5,9:z"
       ],
-      "note": "(10,0) ent-rand lane (see t=465)"
+      "note": "(5,9)+(10,0) z lanes",
+      "file": "5-9-10-0-z-lanes.mgcr",
+      "source": "mc1l32-bee-height"
     },
     {
-      "t": 828,
-      "status": "conforming"
-    },
-    {
-      "t": 851,
-      "status": "conforming"
-    },
-    {
-      "t": 865,
-      "status": "conforming"
-    },
-    {
-      "t": 878,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 886,
+      "t": 2109,
       "status": "open",
-      "sig": "b6f54402d020e196",
+      "sig": "f843085c2c2ad988",
       "atoms": [
-        "field:10,0:z"
+        "field:10,39:z",
+        "field:5,9:z"
       ],
-      "note": "(10,0) fire z + (9,0) extra (meteor churn)"
+      "note": "(5,9)+(10,39) z lanes",
+      "file": "5-9-10-39-z-lanes.mgcr",
+      "source": "mc1l32-bee-height"
     },
     {
-      "t": 912,
-      "status": "conforming"
+      "t": 2032,
+      "status": "open",
+      "sig": "29ce76473e8a58f5",
+      "atoms": [
+        "field:5,9:chase",
+        "field:5,9:f26",
+        "field:5,9:life"
+      ],
+      "note": "(5,9) m9 life 1000-vs-600 + chase: regen/lane undug",
+      "file": "5-9-m9-life-1000-vs-600-chase-regen-lane-undug.mgcr",
+      "source": "mc1l32-bee-height"
     },
     {
-      "t": 922,
-      "status": "conforming"
+      "t": 2040,
+      "status": "open",
+      "sig": "f85c18d0c5de95a3",
+      "atoms": [
+        "field:5,9:f26",
+        "field:5,9:life"
+      ],
+      "note": "(5,9) m9 life lane (see t=2032)",
+      "file": "5-9-m9-life-lane.mgcr",
+      "source": "mc1l32-bee-height"
     },
     {
-      "t": 932,
+      "t": 870,
       "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
+      "note": "(9,0) extra-in-port; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze",
+      "file": "9-0-extra-in-port.mgcr",
+      "source": "mc1l32-bee-height"
     },
     {
-      "t": 944,
+      "t": 1392,
       "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
+      "note": "(9,0) flags lane",
+      "file": "9-0-flags-lane.mgcr",
+      "source": "mc1l32-bee-height"
     },
     {
-      "t": 957,
-      "status": "conforming"
-    },
-    {
-      "t": 970,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 983,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 997,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1009,
-      "status": "conforming"
-    },
-    {
-      "t": 1021,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1033,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1045,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1057,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1069,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1082,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1095,
-      "status": "conforming"
-    },
-    {
-      "t": 1106,
-      "status": "conforming"
-    },
-    {
-      "t": 1118,
-      "status": "conforming"
-    },
-    {
-      "t": 1130,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1142,
-      "status": "conforming"
-    },
-    {
-      "t": 1153,
-      "status": "conforming"
-    },
-    {
-      "t": 1165,
-      "status": "conforming"
-    },
-    {
-      "t": 1178,
-      "status": "conforming"
-    },
-    {
-      "t": 1190,
-      "status": "conforming"
-    },
-    {
-      "t": 1202,
-      "status": "conforming"
-    },
-    {
-      "t": 1214,
-      "status": "conforming"
-    },
-    {
-      "t": 1225,
-      "status": "conforming"
-    },
-    {
-      "t": 1237,
-      "status": "conforming"
-    },
-    {
-      "t": 1248,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1260,
-      "status": "conforming"
-    },
-    {
-      "t": 1272,
-      "status": "conforming"
-    },
-    {
-      "t": 1285,
-      "status": "conforming"
-    },
-    {
-      "t": 1297,
-      "status": "conforming"
-    },
-    {
-      "t": 1309,
-      "status": "conforming"
-    },
-    {
-      "t": 1321,
-      "status": "conforming"
-    },
-    {
-      "t": 1333,
-      "status": "conforming"
-    },
-    {
-      "t": 1344,
-      "status": "conforming"
-    },
-    {
-      "t": 1356,
-      "status": "conforming"
-    },
-    {
-      "t": 1368,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1380,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1393,
-      "status": "conforming"
-    },
-    {
-      "t": 1404,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1416,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1428,
-      "status": "conforming"
-    },
-    {
-      "t": 1440,
-      "status": "conforming"
-    },
-    {
-      "t": 1451,
-      "status": "conforming"
-    },
-    {
-      "t": 1463,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1475,
-      "status": "conforming"
-    },
-    {
-      "t": 1488,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1501,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1513,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1525,
-      "status": "conforming"
-    },
-    {
-      "t": 1537,
-      "status": "conforming"
-    },
-    {
-      "t": 1548,
-      "status": "conforming"
-    },
-    {
-      "t": 1560,
-      "status": "conforming"
-    },
-    {
-      "t": 1572,
-      "status": "conforming"
-    },
-    {
-      "t": 1584,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1596,
-      "status": "conforming"
-    },
-    {
-      "t": 1620,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1692,
-      "status": "conforming"
-    },
-    {
-      "t": 1715,
-      "status": "conforming"
-    },
-    {
-      "t": 1725,
-      "status": "conforming"
-    },
-    {
-      "t": 1736,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1795,
-      "status": "conforming"
-    },
-    {
-      "t": 1807,
-      "status": "conforming"
-    },
-    {
-      "t": 1819,
-      "status": "conforming"
-    },
-    {
-      "t": 1831,
-      "status": "conforming"
-    },
-    {
-      "t": 1843,
-      "status": "conforming"
-    },
-    {
-      "t": 1855,
-      "status": "conforming"
-    },
-    {
-      "t": 1866,
-      "status": "conforming"
-    },
-    {
-      "t": 1876,
-      "status": "conforming"
-    },
-    {
-      "t": 1886,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1899,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1912,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 1959,
-      "status": "conforming"
-    },
-    {
-      "t": 1972,
-      "status": "conforming"
-    },
-    {
-      "t": 1982,
-      "status": "conforming"
-    },
-    {
-      "t": 1993,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2005,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2015,
-      "status": "conforming"
-    },
-    {
-      "t": 2025,
-      "status": "conforming"
-    },
-    {
-      "t": 2035,
-      "status": "conforming"
-    },
-    {
-      "t": 2045,
-      "status": "conforming"
-    },
-    {
-      "t": 2055,
-      "status": "conforming"
-    },
-    {
-      "t": 2066,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2089,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2112,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2135,
-      "status": "conforming"
-    },
-    {
-      "t": 2147,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2198,
-      "status": "conforming"
-    },
-    {
-      "t": 2210,
-      "status": "conforming"
-    },
-    {
-      "t": 2247,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2259,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2272,
-      "status": "conforming"
-    },
-    {
-      "t": 2284,
-      "status": "conforming"
-    },
-    {
-      "t": 2295,
-      "status": "conforming"
-    },
-    {
-      "t": 2307,
-      "status": "conforming"
-    },
-    {
-      "t": 2318,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2330,
-      "status": "conforming"
-    },
-    {
-      "t": 2342,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2353,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2368,
-      "status": "conforming"
-    },
-    {
-      "t": 2390,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2425,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2459,
-      "status": "conforming"
-    },
-    {
-      "t": 2490,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2515,
-      "status": "conforming"
-    },
-    {
-      "t": 2527,
-      "status": "conforming"
-    },
-    {
-      "t": 2543,
-      "status": "conforming"
-    },
-    {
-      "t": 2555,
-      "status": "conforming"
-    },
-    {
-      "t": 2595,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2625,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2637,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2649,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2704,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2716,
-      "status": "conforming"
-    },
-    {
-      "t": 2762,
-      "status": "conforming"
-    },
-    {
-      "t": 2801,
-      "status": "conforming"
-    },
-    {
-      "t": 2812,
-      "status": "conforming"
-    },
-    {
-      "t": 2822,
-      "status": "conforming"
-    },
-    {
-      "t": 2832,
-      "status": "conforming"
-    },
-    {
-      "t": 2842,
-      "status": "conforming"
-    },
-    {
-      "t": 2852,
-      "status": "conforming"
-    },
-    {
-      "t": 2862,
-      "status": "conforming"
-    },
-    {
-      "t": 2872,
-      "status": "conforming"
-    },
-    {
-      "t": 2882,
-      "status": "conforming"
-    },
-    {
-      "t": 2892,
-      "status": "conforming"
-    },
-    {
-      "t": 2904,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 2931,
-      "status": "conforming"
-    },
-    {
-      "t": 2957,
-      "status": "conforming"
-    },
-    {
-      "t": 2969,
-      "status": "conforming"
-    },
-    {
-      "t": 2983,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3004,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3032,
-      "status": "conforming"
-    },
-    {
-      "t": 3045,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3066,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3078,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3100,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3123,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3135,
-      "status": "conforming"
-    },
-    {
-      "t": 3147,
-      "status": "conforming"
-    },
-    {
-      "t": 3175,
-      "status": "conforming"
-    },
-    {
-      "t": 3187,
-      "status": "conforming"
-    },
-    {
-      "t": 3212,
-      "status": "conforming"
-    },
-    {
-      "t": 3224,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3236,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3248,
-      "status": "conforming"
-    },
-    {
-      "t": 3258,
-      "status": "conforming"
-    },
-    {
-      "t": 3268,
-      "status": "conforming"
-    },
-    {
-      "t": 3278,
-      "status": "conforming"
-    },
-    {
-      "t": 3288,
-      "status": "conforming"
-    },
-    {
-      "t": 3312,
-      "status": "conforming"
-    },
-    {
-      "t": 3325,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3339,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3352,
-      "status": "conforming"
-    },
-    {
-      "t": 3363,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3393,
-      "status": "conforming"
-    },
-    {
-      "t": 3411,
-      "status": "conforming"
-    },
-    {
-      "t": 3422,
-      "status": "conforming"
-    },
-    {
-      "t": 3434,
-      "status": "conforming"
-    },
-    {
-      "t": 3446,
-      "status": "conforming"
-    },
-    {
-      "t": 3457,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3512,
-      "status": "conforming"
-    },
-    {
-      "t": 3546,
-      "status": "conforming"
-    },
-    {
-      "t": 3558,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3570,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3584,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3599,
-      "status": "conforming"
-    },
-    {
-      "t": 3611,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3623,
-      "status": "conforming"
-    },
-    {
-      "t": 3635,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3652,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3663,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3676,
-      "status": "conforming"
-    },
-    {
-      "t": 3689,
-      "status": "conforming"
-    },
-    {
-      "t": 3701,
-      "status": "conforming"
-    },
-    {
-      "t": 3713,
-      "status": "conforming"
-    },
-    {
-      "t": 3735,
-      "status": "conforming"
-    },
-    {
-      "t": 3747,
-      "status": "conforming"
-    },
-    {
-      "t": 3760,
-      "status": "conforming"
-    },
-    {
-      "t": 3771,
-      "status": "conforming",
-      "note": "meteor-storm pool churn: (9,0)+(10,0) extra-in-port (l32-full intake, ledger); f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3772,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3804,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3816,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3842,
-      "status": "conforming"
-    },
-    {
-      "t": 3855,
-      "status": "conforming"
-    },
-    {
-      "t": 3866,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3902,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3954,
-      "status": "conforming"
-    },
-    {
-      "t": 3965,
-      "status": "conforming"
-    },
-    {
-      "t": 3977,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 3988,
-      "status": "conforming"
-    },
-    {
-      "t": 3999,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4012,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4026,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4048,
-      "status": "conforming"
-    },
-    {
-      "t": 4058,
-      "status": "conforming"
-    },
-    {
-      "t": 4068,
-      "status": "conforming"
-    },
-    {
-      "t": 4078,
-      "status": "conforming"
-    },
-    {
-      "t": 4088,
-      "status": "conforming"
-    },
-    {
-      "t": 4098,
-      "status": "conforming"
-    },
-    {
-      "t": 4111,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4175,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4197,
-      "status": "conforming"
-    },
-    {
-      "t": 4208,
-      "status": "conforming"
-    },
-    {
-      "t": 4220,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4232,
-      "status": "conforming"
-    },
-    {
-      "t": 4244,
-      "status": "conforming"
-    },
-    {
-      "t": 4254,
-      "status": "conforming"
-    },
-    {
-      "t": 4288,
-      "status": "conforming"
-    },
-    {
-      "t": 4300,
-      "status": "conforming"
-    },
-    {
-      "t": 4313,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4326,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4347,
-      "status": "conforming"
-    },
-    {
-      "t": 4368,
-      "status": "conforming"
-    },
-    {
-      "t": 4380,
-      "status": "conforming"
-    },
-    {
-      "t": 4393,
-      "status": "conforming"
-    },
-    {
-      "t": 4406,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4418,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4431,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4443,
-      "status": "conforming"
-    },
-    {
-      "t": 4455,
-      "status": "conforming"
-    },
-    {
-      "t": 4467,
-      "status": "conforming"
-    },
-    {
-      "t": 4479,
-      "status": "conforming"
-    },
-    {
-      "t": 4491,
-      "status": "conforming"
-    },
-    {
-      "t": 4503,
-      "status": "conforming"
-    },
-    {
-      "t": 4514,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4527,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4539,
-      "status": "conforming"
-    },
-    {
-      "t": 4550,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4564,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4575,
-      "status": "conforming"
-    },
-    {
-      "t": 4587,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4600,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4613,
-      "status": "conforming"
-    },
-    {
-      "t": 4624,
-      "status": "conforming"
-    },
-    {
-      "t": 4637,
-      "status": "conforming"
-    },
-    {
-      "t": 4649,
-      "status": "conforming"
-    },
-    {
-      "t": 4660,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4693,
-      "status": "conforming"
-    },
-    {
-      "t": 4715,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4728,
-      "status": "conforming"
-    },
-    {
-      "t": 4756,
-      "status": "conforming"
-    },
-    {
-      "t": 4769,
-      "status": "conforming"
-    },
-    {
-      "t": 4807,
-      "status": "conforming"
-    },
-    {
-      "t": 4818,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 4862,
-      "status": "conforming"
-    },
-    {
-      "t": 4875,
-      "status": "conforming"
-    },
-    {
-      "t": 4888,
-      "status": "conforming"
-    },
-    {
-      "t": 4940,
+      "t": 148,
       "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
+      "note": "[carried from bee-height take] (9,1) flags lane; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze",
+      "file": "9-1-flags-lane.mgcr",
+      "source": "mc1l32"
     },
     {
-      "t": 4956,
+      "t": 129,
       "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 5093,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 5117,
-      "status": "conforming"
-    },
-    {
-      "t": 5136,
-      "status": "conforming"
-    },
-    {
-      "t": 5147,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 5159,
-      "status": "conforming"
-    },
-    {
-      "t": 5172,
-      "status": "conforming",
-      "note": "f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 5183,
-      "status": "conforming"
-    },
-    {
-      "t": 5195,
-      "status": "conforming"
-    },
-    {
-      "t": 5205,
-      "status": "conforming"
-    },
-    {
-      "t": 5215,
-      "status": "conforming"
-    },
-    {
-      "t": 5225,
-      "status": "conforming"
-    },
-    {
-      "t": 5235,
-      "status": "conforming"
-    },
-    {
-      "t": 5245,
-      "status": "conforming"
-    },
-    {
-      "t": 5255,
-      "status": "conforming"
-    },
-    {
-      "t": 5265,
-      "status": "conforming"
-    },
-    {
-      "t": 5275,
-      "status": "conforming"
-    },
-    {
-      "t": 5285,
-      "status": "conforming"
-    },
-    {
-      "t": 5295,
-      "status": "conforming"
-    },
-    {
-      "t": 5305,
-      "status": "conforming"
-    },
-    {
-      "t": 5315,
-      "status": "conforming"
-    },
-    {
-      "t": 5325,
-      "status": "conforming"
-    },
-    {
-      "t": 5335,
-      "status": "conforming"
-    },
-    {
-      "t": 5345,
-      "status": "conforming"
-    },
-    {
-      "t": 5355,
-      "status": "conforming"
-    },
-    {
-      "t": 5365,
-      "status": "conforming"
-    },
-    {
-      "t": 5375,
-      "status": "conforming"
-    },
-    {
-      "t": 5385,
-      "status": "conforming"
-    },
-    {
-      "t": 5395,
-      "status": "conforming"
-    },
-    {
-      "t": 5405,
-      "status": "conforming"
-    },
-    {
-      "t": 5415,
-      "status": "conforming"
-    },
-    {
-      "t": 5425,
-      "status": "conforming"
+      "note": "[carried from bee-height take] (9,1) projectile lane: extra-in-port; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze",
+      "file": "9-1-projectile-lane-extra-in-port.mgcr",
+      "source": "mc1l32"
     },
     {
       "t": 5432,
       "status": "conforming",
-      "note": "(9,10) castle-ball extra-in-port - castle-latch session leads family (painter ctor fields); f26/charge raw-lane surfacing — lanes not compared at freeze"
-    },
-    {
-      "t": 5437,
-      "status": "conforming"
-    },
-    {
-      "t": 5447,
-      "status": "conforming"
-    },
-    {
-      "t": 5457,
-      "status": "conforming"
-    },
-    {
-      "t": 5467,
-      "status": "conforming"
-    },
-    {
-      "t": 5473,
-      "status": "conforming",
-      "note": "cast-reconstruction mana ((3,0)+player.mana pair) - raw-input +/-1 caveat, kept open pending an mc1 roster rule"
-    },
-    {
-      "t": 5502,
-      "status": "open",
-      "sig": "8163248d28644622",
-      "atoms": [
-        "field:3,2:z"
-      ],
-      "note": "CASTLE (3,2) z - the banked castle z+64 lead (castle-latch session verify residuals)"
-    },
-    {
-      "t": 5503,
-      "status": "open",
-      "sig": "0ed6bd85e74a39e8",
-      "atoms": [
-        "field:3,2:z",
-        "field:3,3:z"
-      ],
-      "note": "castle (3,2)+(3,3) z (see t=5502)"
-    },
-    {
-      "t": 5600,
-      "status": "open",
-      "sig": "bb17b103ebc746a4",
-      "atoms": [
-        "field:3,2:z",
-        "field:wizard0.hand_left"
-      ],
-      "note": "castle z + equip recon (see t=5502)"
-    },
-    {
-      "t": 5602,
-      "status": "open",
-      "sig": "8163248d28644622",
-      "atoms": [
-        "field:3,2:z"
-      ],
-      "note": "castle z + (9,0) extra (see t=5502)"
-    },
-    {
-      "t": 5981,
-      "status": "open",
-      "sig": "8163248d28644622",
-      "atoms": [
-        "field:3,2:z"
-      ],
-      "note": "castle z + (10,12) flags (see t=5502)"
+      "note": "(9,10) castle-ball extra-in-port - castle-latch session leads family (painter ctor fields); f26/charge raw-lane surfacing \u2014 lanes not compared at freeze",
+      "file": "9-10-castle-ball-extra-in-port-castle-latch-sess.mgcr",
+      "source": "mc1l32"
     },
     {
       "t": 23132,
@@ -1741,7 +183,187 @@
         "field:5,9:z",
         "field:9,1:z"
       ],
-      "note": "(9,9) story SETTLED 2026-08-09: the family = zigzag-lightning one-frame beam SEGMENTS (m5 multishot volleys near the dug castle). Two laws FIXED from the corpus (segment max_life mirrors the slot-order act_life 0/-1, not the NewEvent 300; state-14 kill is POST-decrement, dying segments read -2) - life/max_life rows -97%. Residue = geometry displacement (missing/extra bursts + x/y/z) driven by pristine-plane vs dug retail terrain in tiles x16-31/y176-223: terrain-datum family (bee-session cause A), frozen pending a terrain-channel l32 take. Not a port bug. Re-pinned 2026-08-09: the (9,1) life/max_life atoms cleared by the possess-lob ctor life fix (10, sub_39A90, not the fireball 21)."
+      "note": "(9,9) story SETTLED 2026-08-09: the family = zigzag-lightning one-frame beam SEGMENTS (m5 multishot volleys near the dug castle). Two laws FIXED from the corpus (segment max_life mirrors the slot-order act_life 0/-1, not the NewEvent 300; state-14 kill is POST-decrement, dying segments read -2) - life/max_life rows -97%. Residue = geometry displacement (missing/extra bursts + x/y/z) driven by pristine-plane vs dug retail terrain in tiles x16-31/y176-223: terrain-datum family (bee-session cause A), frozen pending a terrain-channel l32 take. Not a port bug. Re-pinned 2026-08-09: the (9,1) life/max_life atoms cleared by the possess-lob ctor life fix (10, sub_39A90, not the fireball 21).",
+      "file": "9-9-story-settled-2026-08-09-the-family-zigzag-l.mgcr",
+      "source": "mc1l32"
+    },
+    {
+      "t": 414,
+      "status": "conforming",
+      "note": "[carried from bee-height take] bee z-law FIXED; residual: (9,0) extra; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze",
+      "file": "bee-z-law-fixed-residual-9-0-extra.mgcr",
+      "source": "mc1l32"
+    },
+    {
+      "t": 981,
+      "status": "conforming",
+      "note": "bee z-law FIXED; residual: (9,0) flags; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze",
+      "file": "bee-z-law-fixed-residual-9-0-flags.mgcr",
+      "source": "mc1l32-bee-height"
+    },
+    {
+      "t": 991,
+      "status": "conforming",
+      "note": "bee z-law FIXED; residual: (9,0) pitch; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze",
+      "file": "bee-z-law-fixed-residual-9-0-pitch.mgcr",
+      "source": "mc1l32-bee-height"
+    },
+    {
+      "t": 951,
+      "status": "conforming",
+      "note": "BEE Z-LAW regression guard - was the take's story: retail sub_1B3C0 z-nudge sign(z-target.z)*v_14, FIXED 2026-08-08 (bee_chase vertical aim + promotion lunge-arm)",
+      "file": "bee-z-law-regression-guard-was-the-take-s-story.mgcr",
+      "source": "mc1l32-bee-height"
+    },
+    {
+      "t": 1181,
+      "status": "conforming",
+      "note": "bee z-law (see t=951); the bee-speed atom closed 2026-08-11 with the chase-exit trailers (death-tick restore)",
+      "file": "bee-z-law-the-bee-speed-atom-closed-2026-08-11-w.mgcr",
+      "source": "mc1l32-bee-height"
+    },
+    {
+      "t": 5473,
+      "status": "conforming",
+      "note": "cast-reconstruction mana ((3,0)+player.mana pair) - raw-input +/-1 caveat, kept open pending an mc1 roster rule",
+      "file": "cast-reconstruction-mana-3-0-player-mana-pair-ra.mgcr",
+      "source": "mc1l32"
+    },
+    {
+      "t": 5503,
+      "status": "open",
+      "sig": "0ed6bd85e74a39e8",
+      "atoms": [
+        "field:3,2:z",
+        "field:3,3:z"
+      ],
+      "note": "castle (3,2)+(3,3) z (see t=5502)",
+      "file": "castle-3-2-3-3-z.mgcr",
+      "source": "mc1l32"
+    },
+    {
+      "t": 5502,
+      "status": "open",
+      "sig": "8163248d28644622",
+      "atoms": [
+        "field:3,2:z"
+      ],
+      "note": "CASTLE (3,2) z - the banked castle z+64 lead (castle-latch session verify residuals)",
+      "file": "castle-3-2-z-the-banked-castle-z-64-lead-castle.mgcr",
+      "source": "mc1l32"
+    },
+    {
+      "t": 5981,
+      "status": "open",
+      "sig": "8163248d28644622",
+      "atoms": [
+        "field:3,2:z"
+      ],
+      "note": "castle z + (10,12) flags (see t=5502)",
+      "file": "castle-z-10-12-flags.mgcr",
+      "source": "mc1l32"
+    },
+    {
+      "t": 5602,
+      "status": "open",
+      "sig": "8163248d28644622",
+      "atoms": [
+        "field:3,2:z"
+      ],
+      "note": "castle z + (9,0) extra (see t=5502)",
+      "file": "castle-z-9-0-extra.mgcr",
+      "source": "mc1l32"
+    },
+    {
+      "t": 5600,
+      "status": "open",
+      "sig": "bb17b103ebc746a4",
+      "atoms": [
+        "field:3,2:z",
+        "field:wizard0.hand_left"
+      ],
+      "note": "castle z + equip recon (see t=5502)",
+      "file": "castle-z-equip-recon.mgcr",
+      "source": "mc1l32"
+    },
+    {
+      "t": 80,
+      "status": "open",
+      "sig": "93d5bf3ba92e36db",
+      "atoms": [
+        "missing:12,3"
+      ],
+      "note": "[carried from bee-height take] class-12 ecology churn: retail respawns statics, port does not (l32 known lane, castle-latch session leads)",
+      "file": "class-12-ecology-churn-retail-respawns-statics-p.mgcr",
+      "source": "mc1l32"
+    },
+    {
+      "t": 81,
+      "status": "open",
+      "sig": "93cbbd3ba925def0",
+      "atoms": [
+        "missing:12,0"
+      ],
+      "note": "[carried from bee-height take] class-12 ecology churn (see t=124)",
+      "file": "class-12-ecology-churn.mgcr",
+      "source": "mc1l32"
+    },
+    {
+      "t": 127,
+      "status": "capture",
+      "sig": "a1a1758349b40a12",
+      "atoms": [
+        "field:wizard0.hand_right"
+      ],
+      "note": "[carried from bee-height take] equip/cast input reconstruction (RECORDING.md raw-input +/-1 caveat): wizard0.hand_right",
+      "file": "equip-cast-input-reconstruction-recording-md-raw.mgcr",
+      "source": "mc1l32"
+    },
+    {
+      "t": 412,
+      "status": "capture",
+      "sig": "91c5d9b7855c33bf",
+      "atoms": [
+        "field:wizard0.hand_left"
+      ],
+      "note": "[carried from bee-height take] equip/cast input reconstruction: wizard0.hand_left",
+      "file": "equip-cast-input-reconstruction-wizard0-hand-lef.mgcr",
+      "source": "mc1l32"
+    },
+    {
+      "t": 3284,
+      "status": "open",
+      "sig": "c0b46eeddf25270c",
+      "atoms": [
+        "field:10,0:z",
+        "field:10,39:z",
+        "field:5,3:heading",
+        "field:5,3:pitch",
+        "field:5,3:x",
+        "field:5,3:y",
+        "field:5,3:z"
+      ],
+      "note": "HIT-ABORT law (cause B): retail skips the handler CORE on ANY hit; port moves anyway. BANKED restructure - full audited spec in ledger bee-session entry (blanket abort ruled WRONG; trailers/pre-work survive)",
+      "file": "hit-abort-law-cause-b-retail-skips-the-handler-c.mgcr",
+      "source": "mc1l32-bee-height"
+    },
+    {
+      "t": 2126,
+      "status": "open",
+      "sig": "ab9e1b1de5436f36",
+      "atoms": [
+        "field:10,39:z"
+      ],
+      "note": "human pose residual + (10,39) balloon z-resnap (l32 known lane)",
+      "file": "human-pose-residual-10-39-balloon-z-resnap-l32-k.mgcr",
+      "source": "mc1l32-bee-height"
+    },
+    {
+      "t": 3771,
+      "status": "conforming",
+      "note": "meteor-storm pool churn: (9,0)+(10,0) extra-in-port (l32-full intake, ledger); f26/charge raw-lane surfacing \u2014 lanes not compared at freeze",
+      "file": "meteor-storm-pool-churn-9-0-10-0-extra-in-port-l.mgcr",
+      "source": "mc1l32"
     },
     {
       "t": 39412,
@@ -1765,7 +387,9 @@
         "field:5,15:z",
         "field:5,1:z"
       ],
-      "note": "SPAWN TRIGGER story SETTLED 2026-08-09: import_ent translated class-11 id24 (a DISPOSITION id) through the human-slot map - l32's dis 14 == human slot 14 -> PLAYER_TARGET 65535, so the fire spawned nothing (and obs untr() masked the id). Fixed in conformance.rs; the pair now spawns the full dis-14 set (30x(5,3) chains + 21x(5,4) + the (11,9) breadcrumb = 532 slots) with residue = free-list slot-desync + the terrain-datum z family. Still open only for those known classes. Ledger l32-full intake + settle entry."
+      "note": "SPAWN TRIGGER story SETTLED 2026-08-09: import_ent translated class-11 id24 (a DISPOSITION id) through the human-slot map - l32's dis 14 == human slot 14 -> PLAYER_TARGET 65535, so the fire spawned nothing (and obs untr() masked the id). Fixed in conformance.rs; the pair now spawns the full dis-14 set (30x(5,3) chains + 21x(5,4) + the (11,9) breadcrumb = 532 slots) with residue = free-list slot-desync + the terrain-datum z family. Still open only for those known classes. Ledger l32-full intake + settle entry.",
+      "file": "spawn-trigger-story-settled-2026-08-09-import-en.mgcr",
+      "source": "mc1l32"
     },
     {
       "t": 39509,
@@ -1834,66 +458,25 @@
         "missing:10,1",
         "missing:10,39"
       ],
-      "note": "STUCK EXPLOSION - PLAYER-RULED 2026-08-08: do NOT reproduce the retail wedge; the port's one-tick kill is the kept behavior (DEVIATIONS 'the stuck explosion', roster mc1l32-stuck-explosion-wedge). Expected to fail forever by design."
+      "note": "STUCK EXPLOSION - PLAYER-RULED 2026-08-08: do NOT reproduce the retail wedge; the port's one-tick kill is the kept behavior (DEVIATIONS 'the stuck explosion', roster mc1l32-stuck-explosion-wedge). Expected to fail forever by design.",
+      "file": "stuck-explosion-player-ruled-2026-08-08-do-not-r.mgcr",
+      "source": "mc1l32"
     },
     {
-      "t": 39511,
+      "t": 3028,
       "status": "open",
-      "sig": "be835126aa50c413",
+      "sig": "47b36376603d976b",
       "atoms": [
-        "field:10,0:flags",
-        "field:10,0:heading",
-        "field:10,0:id",
-        "field:10,0:life",
-        "field:10,0:mana",
-        "field:10,0:max_life",
-        "field:10,0:model",
-        "field:10,0:rand",
-        "field:10,0:sclass",
-        "field:10,0:smodel",
-        "field:10,0:speed",
-        "field:10,0:x",
-        "field:10,0:y",
-        "field:10,0:z",
-        "field:10,34:z",
-        "field:10,39:flags",
-        "field:10,39:heading",
-        "field:10,39:id",
-        "field:10,39:life",
-        "field:10,39:mana",
-        "field:10,39:max_life",
-        "field:10,39:model",
-        "field:10,39:rand",
-        "field:10,39:sclass",
-        "field:10,39:smodel",
-        "field:10,39:speed",
-        "field:10,39:x",
-        "field:10,39:y",
         "field:10,39:z",
-        "field:12,0:z",
-        "field:12,14:z",
-        "field:12,1:z",
-        "field:12,2:z",
-        "field:12,3:z",
-        "field:12,4:z",
-        "field:2,1:z",
-        "field:2,2:z",
-        "field:2,3:z",
-        "field:3,2:z",
-        "field:5,15:heading",
-        "field:5,15:rand",
-        "field:5,15:x",
-        "field:5,15:y",
-        "field:5,15:z",
-        "field:5,1:heading",
-        "field:5,1:life",
-        "field:5,1:x",
-        "field:5,1:y",
-        "field:5,1:z",
-        "missing:10,0",
-        "missing:10,39"
+        "field:5,3:heading",
+        "field:5,3:pitch",
+        "field:5,3:x",
+        "field:5,3:y",
+        "field:5,3:z"
       ],
-      "note": "STUCK EXPLOSION - PLAYER-RULED 2026-08-08: do NOT reproduce the retail wedge; the port's one-tick kill is the kept behavior (DEVIATIONS 'the stuck explosion', roster mc1l32-stuck-explosion-wedge). Expected to fail forever by design."
+      "note": "TERRAIN-DATUM corner (cause A, ledger bee-session entry): port dig floor pins at height 196 vs retail 189; carries (10,39)/(10,0)/(5,3)/(5,9) z lanes; needs v2 terrain-channel re-record to attribute",
+      "file": "terrain-datum-corner-cause-a-ledger-bee-session.mgcr",
+      "source": "mc1l32-bee-height"
     }
   ]
 }

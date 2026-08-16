@@ -1,5 +1,17 @@
-# Conformance fixture bundles: small frozen .mgcr pair windows
-# (docs/CONFORMANCE.md "Freeze") — committed via git-lfs so the
-# suite is self-contained. Fullsize recordings never enter git
-# (/recordings is ignored).
-conformance/fixtures/*.mgcr filter=lfs diff=lfs merge=lfs -text
+# Conformance fixture evidence: one small .mgcr per fixture
+# (docs/CONFORMANCE.md), committed via git-lfs so the suite travels
+# with the repo. The nested glob matches the per-take directories
+# (conformance/fixtures/<take>/t<tick>-<law>.mgcr).
+#
+# What changed vs the old one-bundle-per-take shape is the WRITE
+# PATTERN, not the storage: a bundle was re-frozen whenever its fixture
+# set changed, minting a fresh permanent 14-43 MB object every time (18
+# versions, 178 MB, for 10 live bundles). Per-fixture files are
+# write-once — the evidence never changes after it is cut, and the
+# mutable verdict (status/sig/note) lives in the manifest TEXT — so
+# appending costs one ~20 KB blob and nothing is ever rewritten. These
+# are zstd frames, which never delta-compress in a packfile, so keeping
+# them out of it is the right call as the corpus grows.
+#
+# Fullsize recordings still never enter git (/recordings is ignored).
+conformance/fixtures/**/*.mgcr filter=lfs diff=lfs merge=lfs -text
