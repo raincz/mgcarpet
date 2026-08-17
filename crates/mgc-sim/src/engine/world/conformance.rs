@@ -825,6 +825,21 @@ impl World {
             .collect()
     }
 
+    /// The port's free list, bottom-to-top (`new_event` pops the END) —
+    /// the WORLD-level counterpart of [`Self::raw_shadow_mc1`].
+    ///
+    /// It is the widest ungraded lane in the harness: the recording
+    /// carries the stack per tick, [`Self::retail_import_mc1`] installs
+    /// it every pair, and the obs schema never compares it. So a port
+    /// that pushes a freed slot at the wrong moment — or frees a
+    /// different NUMBER of slots — reads CLEAN in pair mode forever and
+    /// only bites a free run, where it surfaces as balanced
+    /// same-`(class, model)` missing/extra rows once the two allocators
+    /// hand out different slots for the same spawn.
+    pub fn free_stack_mc1(&self) -> &[u16] {
+        &self.g.free
+    }
+
     pub fn obs_project_mc1(&self, pin: &PinnedMc1) -> ObsMc1 {
         let untr = |v: u16| if v == PLAYER_TARGET { pin.slot } else { v };
         let mut entities: Vec<EntObsMc1> = Vec::new();

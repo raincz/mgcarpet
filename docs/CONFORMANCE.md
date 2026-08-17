@@ -557,6 +557,40 @@ post-divergence traffic. A recording `t` gap re-anchors a fresh
 segment (a capture artifact, not a resync); `--start <t>` anchors
 late; `--csv` emits the verify-deltas TSV shape.
 
+### `--segmented` — the segmented free run
+
+The plain mode names only the FIRST break and runs wild after it, so
+one early defect hides the whole rest of the take. `--segmented` drops
+the "never correct" clause: a true incremental deviation re-anchors the
+free state from the recording exactly the way a capture gap already
+does, and the take reads as a sequence of MAXIMAL CONTINUOUS SEGMENTS.
+
+**Certification is ONE segment end to end.** The number that matters is
+therefore resets in EXCESS of the gap-forced ones — a take with capture
+gaps structurally cannot certify, and that is a property of the
+RECORDING, not of the port. The summary prints
+`segments / gap-forced / DEVIATION-forced` and collapses the reset
+ticks into runs, because a wrong law usually fails on a RUN of adjacent
+ticks (one carcass, one respawn, one clash): triage the CLUSTER count,
+not the reset count.
+
+Every reset tick names itself as a fixture candidate, which is what
+THE REVERSION PROBE (`tools/conform-rig`) was built to do the hard way
+— that probe stays useful for mining laws that landed before this
+instrument existed, and stops being needed for new work.
+
+⭐ **Attribution falls out of running it beside `verify-deltas`.** At a
+break tick `t`, the pair diff `D1(t)` DIRTY means the error is LOCAL to
+`t`; `D1(t)` CLEAN means it was INHERITED from earlier in the segment
+through a field the obs schema does not grade — the first detector this
+project has for the `+70`/`+52` obs blind spots.
+
+⚠ **A reset restores entity state from the recording but TERRAIN from
+the measured channel**, so a format-1 take (no terrain channel) resets
+to PRISTINE planes and re-breaks immediately; the mode prints a warning
+and the reset count is a capture artifact. mc1l32 is such a take
+(42,925 "resets" — meaningless until it is re-recorded with terrain).
+
 `--pose-only` is the tier-2 chain: the FLIGHT state chains while the
 world context re-imports per pair — it isolates the mover +
 input-recovery chain from world fidelity. World-driven pose domains

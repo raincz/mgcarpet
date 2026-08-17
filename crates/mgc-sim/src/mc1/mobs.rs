@@ -3575,30 +3575,41 @@ impl Gen {
     /// sub_68C70 uses the same 2D distance, corroborated by the
     /// synchronized remc1 body).
     ///
-    /// MANA BALLS ride the same pass (retail's bucket walk has NO
-    /// class gate — sub_54F80 maintains every live bucket entity):
-    /// a settled ball within the same 24-tile radius of the HUMAN
-    /// (:64352 reads the single local-player index; rivals never
-    /// wake balls) re-arms +58 = 16 (:64361), so near-wizard mana
-    /// rolls downhill in a 16-of-17-tick duty cycle — "the mana
-    /// runs away when approached" is retail law. Corpus: mc1hwl0
-    /// full-take scan, 7,571 re-arm events, all writing exactly 16,
-    /// per-slot period exactly 17, hard cutoff at 24.0 tiles.
-    /// (Whether other bucket classes also wake is open; the port
-    /// scopes the pass to the corpus-proven rows.) +58 is a raw
-    /// BYTE in retail — the import widens i8 (a fresh ball's 0x80
-    /// arrives −128), so the countdown masks.
+    /// MANA BALLS ride the same pass on their own list: a ball within
+    /// the same 24-tile radius of the HUMAN (:64352 reads the single
+    /// local-player index; rivals never wake balls) re-arms +58 = 16
+    /// (:64361), so near-wizard mana rolls downhill in a 16-of-17-tick
+    /// duty cycle — "the mana runs away when approached" is retail
+    /// law. Corpus: mc1hwl0 full-take scan, 7,571 re-arm events, all
+    /// writing exactly 16, per-slot period exactly 17, hard cutoff at
+    /// 24.0 tiles. +58 is a raw BYTE in retail — the import widens i8
+    /// (a fresh ball's 0x80 arrives −128), so the countdown masks.
+    ///
+    /// ⭐ MEMBERSHIP IS THE CHAIN BUILD, NOT A GUARD INSIDE THE PASS.
+    /// The tick head `sub_41780_41AC0` rebuilds the awake chains every
+    /// tick (:52246-320) and then calls `sub_54F00_55430` (:64266) —
+    /// its ONLY call site (:52325). A class-5 creature joins its model
+    /// bucket (`str_36382x[+65]`, :52266) only while `act_life >= 0 &&
+    /// +70 != 120`, so the walker's dead arm (:64283-84, `+58 = -6`)
+    /// is UNREACHABLE: retail never stamps a dead creature, it simply
+    /// stops walking it, and +58 FREEZES at its last live countdown.
+    /// (The port used to stamp the byte -6 as 250 here, which the raw
+    /// shadow saw as ~1,000 rows/take of `retail 2-12, port 250` — and
+    /// a creature that died asleep froze at 0 in retail while the port
+    /// read back a nonzero counter through every `f58 != 0` gate.)
+    /// The ball list is built separately and keyed on the MODEL, not
+    /// the state: class 10 with `+65` in 39..=40 (:52287-96 →
+    /// `var_u32_36462[1]`), walked at :64288-93 with NO life gate.
+    /// The port used to scope balls to `+70 == 41`, the SETTLED state
+    /// — a rolling ball is 42 and retail counts it down all the same
+    /// (raw shadow: 275 mc1l42 rows of `retail 249, port 250`, a fresh
+    /// ball's allocator -6 that only retail was decrementing).
     pub(crate) fn mob_awake_pass(&mut self, ctx: &MobCtx) {
         for i in 1..self.ent.len() {
             let e = &self.ent[i];
-            let creature = e.class64 == 5 && e.tick70 != 120;
-            let ball = e.class64 == 10 && e.tick70 == 41;
+            let creature = e.class64 == 5 && e.act_life >= 0 && e.tick70 != 120;
+            let ball = e.class64 == 10 && matches!(e.model65, 39 | 40);
             if !creature && !ball {
-                continue;
-            }
-            if e.act_life < 0 {
-                self.ent[i].f58 = 250;
-                self.ent[i].f59 = 0;
                 continue;
             }
             let v = (e.f58 & 0xFF) as u8;

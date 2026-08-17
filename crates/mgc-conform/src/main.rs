@@ -97,6 +97,16 @@ fn usage() -> ! {
                              isolates mover + input recovery from world\n\
                              fidelity; world-driven pose domains reseed\n\
                              silently and are counted as gates\n\
+           --segmented       SEGMENTED free run: re-anchor the free\n\
+                             state from the recording at every true\n\
+                             deviation (the way a capture gap already\n\
+                             does), so the take reads as maximal\n\
+                             continuous segments instead of one horizon\n\
+                             plus noise. Certification is ONE segment\n\
+                             end to end; the number that matters is\n\
+                             resets in EXCESS of the gap-forced ones,\n\
+                             and every reset tick names itself as a\n\
+                             fixture candidate\n\
            --start <t>       anchor the replay at tick t instead of the\n\
                              first record"
     );
@@ -143,6 +153,12 @@ pub struct Args {
     /// replay: tier-2 chain (flight chained, world re-imported per
     /// pair) instead of the full free-running world.
     pub pose_only: bool,
+    /// replay: SEGMENTED free run — re-anchor the free state from the
+    /// recording at every true deviation instead of running wild after
+    /// the first one, so the take reads as maximal continuous segments.
+    /// Certification is ONE segment end to end; the number that matters
+    /// is resets in EXCESS of the gap-forced ones.
+    pub segmented: bool,
 }
 
 fn parse_args() -> Args {
@@ -166,6 +182,7 @@ fn parse_args() -> Args {
         no_terrain: false,
         no_pose_lane: false,
         pose_only: false,
+        segmented: false,
         input_delay: 0,
         start: None,
     };
@@ -196,6 +213,7 @@ fn parse_args() -> Args {
             "--no-terrain" => a.no_terrain = true,
             "--no-pose-lane" => a.no_pose_lane = true,
             "--pose-only" => a.pose_only = true,
+            "--segmented" => a.segmented = true,
             "--out" => a.out = Some(it.next().map(PathBuf::from).unwrap_or_else(|| usage())),
             "--baseline" => {
                 a.baseline = Some(it.next().map(PathBuf::from).unwrap_or_else(|| usage()))

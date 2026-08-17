@@ -313,6 +313,42 @@ fn mc1_mover_input(mb: u32, stick: (i16, i16)) -> Mc1Input {
 
 // ---------------------------------------------------------- aggregation
 
+/// (Re-)anchor the free run on the recording at `t`: pristine planes,
+/// the recorded closure imported, the measured image installed OVER
+/// the import (the importer's terrain-replay pass reconstructs
+/// state-derived edits for measurement-less runs and would
+/// DOUBLE-APPLY them on already-measured planes), the fire latch
+/// re-armed and the flight chain re-seeded.
+///
+/// The gap path and `--segmented`'s deviation reset are the SAME
+/// operation — that is the whole content of the segmented design: a
+/// detected deviation re-anchors exactly the way a capture gap
+/// already did.
+fn anchor_mc1(
+    world: &mut World,
+    pristine: &mgc_sim::engine::features::Planes,
+    timg: &Option<mgc_formats::mgcr::TerrainImage>,
+    st: &RetailMc1,
+    t: u64,
+) -> Result<(Chain, u16, usize), String> {
+    world.restore_planes(pristine);
+    let report = world
+        .retail_import_mc1(st)
+        .map_err(|e| format!("t={t}: import: {e}"))?;
+    if let Some((h, ty, ceil, an)) = measured_planes(timg) {
+        world
+            .install_measured_terrain(h, ty, ceil, an)
+            .map_err(|e| format!("t={t}: terrain: {e}"))?;
+    }
+    let (fl, fr) = recover::mc1_fire(st.wizards[st.local_player as usize].move_bits);
+    world.set_prev_fire(fl, fr);
+    Ok((
+        Chain::seed_mc1(st, report.human_slot),
+        report.human_slot,
+        report.active,
+    ))
+}
+
 /// A recorded boundary's verdict, folded per segment. The headline is
 /// the HORIZON — graded boundaries bit-exact from the anchor before
 /// the first divergence; after it, traffic is tallied but the run
@@ -333,6 +369,23 @@ struct Segment {
     missing: u64,
     extra: u64,
     field_rows: u64,
+    /// Why this segment had to open. The FIRST segment and every one
+    /// behind a capture gap are free; a `Deviation` is a port failure
+    /// and the only kind that counts against certification.
+    opened_by: SegOpen,
+}
+
+/// What forced a segment to open — the certification arithmetic.
+#[derive(Default, Clone, Copy, PartialEq, Eq)]
+enum SegOpen {
+    /// The take's first anchor.
+    #[default]
+    Seed,
+    /// A hole in the capture: the recording could not be paired across
+    /// it, so the reset is a property of the RECORDING, not the port.
+    Gap,
+    /// A true incremental deviation (`--segmented` only).
+    Deviation,
 }
 
 #[derive(Default)]
@@ -350,16 +403,18 @@ impl RStats {
         self.segs.last_mut().expect("segment open")
     }
 
-    fn open(&mut self, t0: u64) {
+    fn open(&mut self, t0: u64, opened_by: SegOpen) {
         self.segs.push(Segment {
             t0,
             end: t0,
+            opened_by,
             ..Segment::default()
         });
     }
 
     /// Fold one graded boundary. `pose` rows are (lane, want, got);
-    /// `pd` is the world diff at the boundary.
+    /// `pd` is the world diff at the boundary. Returns whether the
+    /// boundary was CLEAN — `--segmented` re-anchors on a false.
     fn grade(
         &mut self,
         t: u64,
@@ -367,7 +422,7 @@ impl RStats {
         pd: &PairDiff,
         args: &Args,
         dump: bool,
-    ) {
+    ) -> bool {
         let seg = self.segs.last_mut().expect("segment open");
         seg.graded += 1;
         let clean = pose.is_empty() && pd.clean();
@@ -410,16 +465,89 @@ impl RStats {
                 print!("{}", pd.render(t, usize::MAX));
             }
         }
+        clean
     }
 
     fn render(&self, mode: &str) -> String {
         let mut out = String::new();
         let _ = writeln!(out, "   mode: {mode}");
+        // THE CERTIFICATION LINE (segmented runs). A take certifies
+        // when it free-runs as ONE segment, so the figure that matters
+        // is resets the PORT forced — gap resets are the capture's
+        // property and can never be driven to zero by fixing the port.
+        let devs: Vec<u64> = self
+            .segs
+            .iter()
+            .filter(|s| s.opened_by == SegOpen::Deviation)
+            .map(|s| s.t0)
+            .collect();
+        if !devs.is_empty() || self.segs.iter().any(|s| s.opened_by == SegOpen::Gap) {
+            let gaps = self
+                .segs
+                .iter()
+                .filter(|s| s.opened_by == SegOpen::Gap)
+                .count();
+            let _ = writeln!(
+                out,
+                "   segments: {} total, {} gap-forced, {} DEVIATION-forced (excess resets: {})",
+                self.segs.len(),
+                gaps,
+                devs.len(),
+                devs.len()
+            );
+            if !devs.is_empty() {
+                // Every reset tick is a self-naming fixture candidate,
+                // but a wrong law usually fails on a RUN of adjacent
+                // ticks (one carcass, one respawn, one clash) — so
+                // collapse the runs and let the cluster count, not the
+                // reset count, be what the reader triages.
+                let mut runs: Vec<(u64, u64)> = Vec::new();
+                for &t in &devs {
+                    match runs.last_mut() {
+                        Some(r) if t <= r.1 + 1 => r.1 = t,
+                        _ => runs.push((t, t)),
+                    }
+                }
+                let shown: Vec<String> = runs
+                    .iter()
+                    .take(24)
+                    .map(|(a, b)| {
+                        if a == b {
+                            a.to_string()
+                        } else {
+                            format!("{a}-{b}({})", b - a + 1)
+                        }
+                    })
+                    .collect();
+                let _ = writeln!(
+                    out,
+                    "   reset clusters (fixture candidates): {} in {} run(s): {}{}",
+                    devs.len(),
+                    runs.len(),
+                    shown.join(", "),
+                    if runs.len() > shown.len() {
+                        format!(", … (+{} more)", runs.len() - shown.len())
+                    } else {
+                        String::new()
+                    }
+                );
+            }
+        }
         for (i, seg) in self.segs.iter().enumerate() {
             let _ = writeln!(
                 out,
-                "   segment {i}: t={}..{} — {} stepped, {} graded ({} capture-skipped), {} clean",
-                seg.t0, seg.end, seg.stepped, seg.graded, seg.ungraded, seg.clean
+                "   segment {i} [{}]: t={}..{} — {} stepped, {} graded ({} capture-skipped), {} clean",
+                match seg.opened_by {
+                    SegOpen::Seed => "seed",
+                    SegOpen::Gap => "gap",
+                    SegOpen::Deviation => "reset",
+                },
+                seg.t0,
+                seg.end,
+                seg.stepped,
+                seg.graded,
+                seg.ungraded,
+                seg.clean
             );
             match seg.horizon {
                 Some(h) => {
@@ -616,6 +744,10 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     #[allow(clippy::type_complexity)]
     let mut celltrace_last: Vec<Option<((u8, u8, u8), (u8, u8, u8))>> =
         vec![None; celltrace.as_ref().map_or(0, |(c, _, _)| c.len())];
+    // `--segmented`: the boundary grade sets this, and the re-anchor
+    // runs after the tick body so the break's own diagnostics (traces,
+    // CSV) still see the DIVERGED state that produced them.
+    let mut reset_at: Option<u64> = None;
     while let Some(r) = rec.next_tick() {
         let tick = r?;
         // The terrain image tracks the take continuously (self-healing
@@ -639,39 +771,41 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
         };
         let anchor = !matches!((&st_prev, &chain), (Some((pt, _)), Some(_)) if tick.t == pt + 1);
         if anchor {
-            // (Re-)anchor: restore planes to the measured image at
-            // this record, import the closure, seed the chain. The
-            // ONLY moments recording state touches the sim.
-            world.restore_planes(&pristine);
-            let report = world
-                .retail_import_mc1(&st)
-                .map_err(|e| format!("t={}: import: {e}", tick.t))?;
-            // Measured planes AFTER the import: the importer's
-            // terrain-replay pass reconstructs state-derived edits for
-            // measurement-less runs — on already-measured planes it
-            // DOUBLE-APPLIES them (the pose channel's proven order,
-            // verify_mc2.rs pose-lane re-install).
-            if let Some((h, ty, ceil, an)) = measured_planes(&timg) {
-                world
-                    .install_measured_terrain(h, ty, ceil, an)
-                    .map_err(|e| format!("t={}: terrain: {e}", tick.t))?;
-            }
-            let (fl, fr) = recover::mc1_fire(st.wizards[st.local_player as usize].move_bits);
-            world.set_prev_fire(fl, fr);
-            chain = Some((Chain::seed_mc1(&st, report.human_slot), report.human_slot));
-            stats.open(tick.t);
+            // The ONLY moments recording state touches the sim: the
+            // take's seed, and a capture gap (never a deviation —
+            // that reset lives at the boundary grade, below).
+            let (ch, human_slot, active) = anchor_mc1(&mut world, &pristine, &timg, &st, tick.t)?;
+            chain = Some((ch, human_slot));
+            stats.open(
+                tick.t,
+                if stats.segs.is_empty() {
+                    SegOpen::Seed
+                } else {
+                    SegOpen::Gap
+                },
+            );
             if !printed_import {
                 printed_import = true;
+                let measured = measured_planes(&timg).is_some();
                 println!(
-                    "   import: {} active entities, human slot {}, terrain {}",
-                    report.active,
-                    report.human_slot,
-                    if measured_planes(&timg).is_some() {
-                        "MEASURED"
-                    } else {
-                        "pristine"
-                    }
+                    "   import: {active} active entities, human slot {human_slot}, terrain {}",
+                    if measured { "MEASURED" } else { "pristine" }
                 );
+                // ⚠ A re-anchor restores the ENTITY state from the
+                // recording but the TERRAIN from the measured channel —
+                // and a format-1 take has none, so the reset drops the
+                // port's own terraforming back to pristine planes and
+                // the next tick breaks on ground it no longer shares.
+                // Excess resets are then a property of the CAPTURE, and
+                // the count means nothing. Such a take wants a v2
+                // re-record, not a dig.
+                if args.segmented && !measured {
+                    println!(
+                        "   ⚠ --segmented WITHOUT a measured terrain channel: every reset \
+                         restores PRISTINE planes, so the reset count is a capture artifact, \
+                         not a port score (re-record this take with terrain)"
+                    );
+                }
             }
             st_prev = Some((tick.t, st));
             continue;
@@ -990,12 +1124,26 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         && stats.seg().horizon.is_none()
                         && !(pose.is_empty() && pd.clean()));
                 emit_replay_csv(&mut csv, pt, &pose, &pd)?;
-                stats.grade(tick.t, &pose, &pd, args, dump);
+                let boundary_clean = stats.grade(tick.t, &pose, &pd, args, dump);
+                // ---- THE SEGMENTED DOCTRINE ----
+                // A true incremental deviation closes the segment and
+                // re-anchors, exactly the way a capture gap does. The
+                // run keeps MEASURING past the first break instead of
+                // running wild, and every reset tick names itself as a
+                // fixture candidate.
+                if args.segmented && !boundary_clean {
+                    reset_at = Some(tick.t);
+                }
             } else {
                 stats.seg().ungraded += 1;
             }
         }
         stats.seg().end = tick.t;
+        if let Some(t) = reset_at.take() {
+            let (ch, human_slot, _) = anchor_mc1(&mut world, &pristine, &timg, &st, t)?;
+            chain = Some((ch, human_slot));
+            stats.open(t, SegOpen::Deviation);
+        }
         st_prev = Some((tick.t, st));
         if let Some(limit) = args.limit {
             if stats.segs.iter().map(|s| s.stepped).sum::<u64>() >= limit {
@@ -1163,7 +1311,14 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 Chain::seed_mc2(&st, report.human_slot, row),
                 report.human_slot,
             ));
-            stats.open(tick.t);
+            stats.open(
+                tick.t,
+                if stats.segs.is_empty() {
+                    SegOpen::Seed
+                } else {
+                    SegOpen::Gap
+                },
+            );
             if !printed_import {
                 printed_import = true;
                 println!(

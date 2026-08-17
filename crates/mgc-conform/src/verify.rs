@@ -143,6 +143,12 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     // reports, and it must not move the UNEXPLAINED headline.
     let raw_shadow = std::env::var_os("MGC_RAW_SHADOW").is_some();
     let mut shadow: BTreeMap<(u8, u8, &'static str), (u64, String)> = BTreeMap::new();
+    // The WORLD-level shadow lane: the free stack. Same blind spot,
+    // one size up — the recording carries it per tick, the importer
+    // installs it every pair, nothing grades it, and a wrong push/pop
+    // order only ever shows in a free run, as balanced same-(class,
+    // model) missing/extra rows once the allocators part ways.
+    let mut free_lane: (u64, u64, String) = (0, 0, String::new());
     let mut printed_import = false;
     // The measured-terrain accumulator (format-2 channel): a pair
     // (pt → t) must run on terrain AT pt, so each record's block is
@@ -442,6 +448,50 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                                 }
                             }
                         }
+                        // The free stack, against the projection the
+                        // importer ITSELF would install from state@N+1
+                        // — same filter, so any difference is the
+                        // port's own allocator order, never the
+                        // importer's census. A fallback pair started
+                        // from a scanned list, not retail's, so it has
+                        // nothing to say and is skipped.
+                        if report.stack_fallback.is_none() {
+                            let pool = st.ents.len();
+                            let want: Vec<u16> = st
+                                .free_stack
+                                .iter()
+                                .copied()
+                                .filter(|&s| {
+                                    (s as usize) < pool
+                                        && s != report.human_slot
+                                        && st.ents[s as usize].class64 == 0
+                                })
+                                .collect();
+                            let got = world.free_stack_mc1();
+                            free_lane.1 += 1;
+                            if want != got {
+                                free_lane.0 += 1;
+                                if free_lane.2.is_empty() {
+                                    // Depth from the TOP is what
+                                    // matters: the next spawn pops the
+                                    // end, so depth 0 diverging is a
+                                    // slot handed out wrong THIS tick.
+                                    let depth = want
+                                        .iter()
+                                        .rev()
+                                        .zip(got.iter().rev())
+                                        .position(|(a, b)| a != b);
+                                    free_lane.2 = format!(
+                                        "t={pt} len retail {} port {}, top retail {:?} port {:?}, first top-diff depth {}",
+                                        want.len(),
+                                        got.len(),
+                                        want.last(),
+                                        got.last(),
+                                        depth.map_or("none (prefix)".into(), |d| d.to_string()),
+                                    );
+                                }
+                            }
+                        }
                     }
                     stats.absorb_rng(pst.rand, obs.rng, port.rng);
                     stats.absorb_phase(&pst, obs, &port, report.human_slot);
@@ -582,6 +632,16 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 }
             }
         }
+        println!(
+            "    free stack: {} / {} pairs mismatched{}",
+            free_lane.0,
+            free_lane.1,
+            if free_lane.2.is_empty() {
+                String::new()
+            } else {
+                format!("  e.g. {}", free_lane.2)
+            }
+        );
     }
     Ok(stats.clean_pairs == stats.pairs)
 }

@@ -14047,3 +14047,108 @@ widens it to i16 while its own decrements wrap as u8, so retail's -6 and
 the port's 250 are the SAME byte. Unmasked, that artifact alone reported
 62,535 mismatches where 1,322 are real. (That the port loses the SIGN of a
 counter other code tests against zero is its own ungraded lead.)
+
+## 🏆 THE `+58` AWAKE COUNTER — CLOSED 2026-08-18: MEMBERSHIP IS THE CHAIN BUILD, AND THE DEAD ARM IS UNREACHABLE CODE
+
+The raw shadow's headline lane (1,322 mc1l42 rows, 331 on the bit-exact
+mc1l0) was TWO laws, both in `mob_awake_pass`, both about who is on the
+list rather than what the walker does.
+
+**1. The dead arm never runs in retail.** The tick head
+`sub_41780_41AC0` rebuilds the awake chains every tick (:52246-320) and
+then calls `sub_54F00_55430` (:64266) — its ONLY call site (:52325). A
+class-5 creature joins its model bucket (`str_36382x[+65]`) only while
+`act_life >= 0 && +70 != 120` (:52266). So the walker's `else` arm
+(:64283-84, `*(BYTE*)(j+58) = -6`) is UNREACHABLE: retail does not stamp
+a dead creature, it stops walking it, and `+58` FREEZES at its last live
+countdown. The port stamped the byte -6 as **250** and the shadow read
+back `retail 2-12, port 250` on ~1,000 rows/take. ⚠ It is not cosmetic:
+mc1l1 t=4309 slot 84 shows **retail 0**, i.e. a creature that died asleep
+— every `f58 != 0` gate in combat (target scans, damage intake, segment
+follow) read TRUE in the port where retail reads FALSE.
+
+**2. The ball list is keyed on the MODEL, not the state.** Class 10 with
+`+65` in 39..=40 (:52287-96 → `var_u32_36462[1]`), walked at :64288-93
+with NO life gate. The port scoped balls to `+70 == 41`, the SETTLED
+state — a rolling ball is 42, verified by `dump-state mc1l42 17344 109`
+(`model65: 40, f70: 42, f58: -6`) — so retail counted a fresh ball's
+allocator -6 down and the port did not: 275 rows of `retail 249,
+port 250`.
+
+RESULT (`--env MGC_RAW_SHADOW=1 verify-deltas`), `+58` **1,234 → 0**
+corpus-wide, with every graded headline byte-identical:
+
+| take | shadow before | after | pair UNEXPLAINED (unchanged) |
+| --- | --- | --- | --- |
+| mc1l42 | 1,322 | **22** | 1 field / 0 / 0, rng 0/30,878 |
+| mc1l0 | 331 | **16** | 0 / 0 / 0 |
+| mc1l1 | 662 | **34** | 1 / 0 / 2 |
+| mc1l2 | 244 | **12** | 3 / 0 / 0 |
+
+The residue is entirely the OTHER ungraded lane — `+70`, `(3,2) retail 4
+port 5` on every take. 80/80 fixtures, 421 unit tests, fmt clean.
+
+⚠ **IT DID NOT MOVE ANY FREE-RUN HORIZON** (mc1l42 still first-diverges
+at t=6624, mc1l2 at t=8283, mc1l0/l1 still bit-exact end-to-end). The
+banked note predicted exactly this and it is worth keeping as a rule:
+**an ungraded divergence is not automatically consequential**, and a
+lead that is kraken-specific and shaped like the symptom is still only a
+lead. Fix it because it is wrong, not because it will pay.
+
+## ⭐⭐ THE FREE STACK IS AN UNGRADED LANE TOO (new shadow row, 2026-08-18)
+
+Same blind spot, one size up: the recording carries the free/recycle
+stacks per tick (`mgcr.rs` :1857-58), `retail_import_mc1` installs them
+every pair (:449-468), and the obs schema never compares them — so a
+port that pushes a freed slot at the wrong moment reads CLEAN in pair
+mode forever and only bites a free run, as balanced same-`(class,
+model)` missing/extra once the two allocators part ways.
+
+`MGC_RAW_SHADOW=1` now diffs the port's post-tick free list against the
+projection the IMPORTER ITSELF would install from state@N+1 (same
+filter, so a difference is never the importer's census; fallback pairs
+are skipped). It is nearly clean, which is itself the finding:
+
+- mc1l0 **0** / 7,097 · mc1l1 **2** / 10,709 · mc1l2 **1** / 10,588 ·
+  mc1l42 **2** / 30,773.
+- mc1l2 t=8297 `top retail 19 port 59` predicts, one tick early, the
+  free run's own t=8298 reset (`(10,40)` ball to slot 65 vs 18).
+- ⚠ It is CLEAN at mc1l42 t=6624, so the kraken-clash break is not a
+  free-stack update bug.
+
+## ⭐⭐⭐ THE SEGMENTED FREE RUN — BUILT 2026-08-18 (`replay --segmented`)
+
+The banked architecture, landed. A true incremental deviation now
+re-anchors the free state the way a capture gap already did, so a take
+reads as maximal continuous segments and CERTIFICATION IS ONE SEGMENT.
+See docs/CONFORMANCE.md "§`--segmented`".
+
+It changes what mc1l42 IS. The plain mode said "horizon 6,624" and
+measured nothing after it; the segmented run measures all 30,878 ticks:
+
+| take | segments | gap-forced | **excess resets** | clusters |
+| --- | --- | --- | --- | --- |
+| mc1l0 | 1 | 0 | **0 — CERTIFIES** | — |
+| mc1l1 | 1 | 0 | **0 — CERTIFIES** | — |
+| mc1l2 | 4 | 0 | 3 | 3 (8283, 8290, 8298) |
+| mc1l42 | 114 | 0 | 113 | **22** |
+
+⭐ mc1l42's 113 resets are **22 events**, and 92 of them are ONE
+contiguous run at t=17307-17398 (the death/respawn — the same incident
+as the surviving graded row at t=17343). The rest: t=6624 alone; a
+9-reset burst in t=10669-10716; then 11 singles from t=20162 to 26563.
+That is a triage list, where before there was a wall.
+
+⭐ mc1l2 is the control that pays: pair mode calls it certified with 3
+UNEXPLAINED field rows, and the segmented run independently finds
+exactly 3 resets — **at the same three pairs** (8282, 8289, 8297), so
+all three are attributed LOCAL, and the 2,290 ticks after t=8298 are
+bit-exact. The incident is one entity: slot 287, a `(10,0)` that retail
+has acquiring the human (`chase=295, f26=1, f70=26`) and the port leaves
+at 0/0/0, with slot 286's `target_yaw` 2 units off seven ticks earlier.
+
+⚠ **THE ONE TRAP**: a reset restores entity state from the recording but
+TERRAIN from the measured channel, so a format-1 take resets to PRISTINE
+planes and re-breaks forever — mc1l32 reports 42,925 "resets" that mean
+nothing. The mode now prints a warning when the channel is absent. That
+take wants the v2 re-record it was already owed, not a dig.
