@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# Run a PRE-FIX mgc-conform against a recording — the reversion probe.
+#
+#     ./tools/conform-rig <rig> [--env K=V]… <mode> [args…]
+#     ./tools/conform-rig l1 verify-deltas /abs/path/recordings/mc1l1.mgcr --csv /abs/out.tsv
+#
+# `<rig>` selects a worktree built at the commit JUST BEFORE that
+# level's conformance-fix commit, so the divergences it reports are
+# exactly the ones the fix closed:
+#
+#     l0 → 3d99885 (dbb3f9b^, before "Sprint to mc1l0 full fidelity")
+#     l1 → dbb3f9b (39e6646^, before "mc1l1 sprint")
+#     l2 → 39e6646 (ba15c26^, before "mc1l2 parity")
+#
+# At HEAD these three levels are certified, so verify-deltas on them is
+# silent and cannot tell a load-bearing tick from ballast. The pre-fix
+# binary is the only instrument that can: every tick it calls divergent
+# is a tick where the landed laws actually do work.
+#
+# Same argv contract as tools/conform — toggles go through `--env K=V`
+# BEFORE the mode, never as a shell prefix, so the invocation keeps
+# matching the permission allowlist.
+#
+# ⚠ PASS RECORDING/OUTPUT PATHS AS ABSOLUTE PATHS. This cd's into the
+# rig worktree so that the default `--baked baked` resolves through the
+# rig's symlink back to the real baked tree.
+set -u
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+[ $# -ge 1 ] || {
+	echo "usage: tools/conform-rig <l0|l1|l2> [--env K=V]… <mode> [args…]" >&2
+	exit 2
+}
+rig="$1"
+shift
+root="$here/.claude/worktrees/rig-$rig"
+bin="$root/target/release/mgc-conform"
+[ -x "$bin" ] || {
+	echo "tools/conform-rig: no rig '$rig' at $bin" >&2
+	echo "  build it:  git worktree add --detach .claude/worktrees/rig-$rig <sha>" >&2
+	echo "             ln -sfn $here/baked .claude/worktrees/rig-$rig/baked" >&2
+	echo "             (cd .claude/worktrees/rig-$rig && cargo build --release -p mgc-conform)" >&2
+	exit 2
+}
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--env)
+		[ $# -ge 2 ] || {
+			echo "tools/conform-rig: --env needs K=V" >&2
+			exit 2
+		}
+		case "$2" in
+		*=*) export "${2?}" ;;
+		*)
+			echo "tools/conform-rig: --env wants K=V, got '$2'" >&2
+			exit 2
+			;;
+		esac
+		shift 2
+		;;
+	--env=*)
+		case "${1#--env=}" in
+		*=*) export "${1#--env=}" ;;
+		*)
+			echo "tools/conform-rig: --env wants K=V, got '${1#--env=}'" >&2
+			exit 2
+			;;
+		esac
+		shift
+		;;
+	*) break ;;
+	esac
+done
+cd "$root" || exit 2
+ulimit -v "${MGC_CONFORM_VMAX:-8000000}"
+exec "$bin" "$@"

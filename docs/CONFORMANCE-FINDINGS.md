@@ -8,11 +8,13 @@ Add new findings here as runs are triaged; move resolved ones to a
 `RESOLVED` section with the outcome.
 
 Enforcement lives in the FIXTURE SUITE (docs/CONFORMANCE.md,
-`conformance/*.json`): triaged pairs replay on every `cargo test` with
-expected statuses (`conforming`/`open`/`capture`); fixture notes cite
-the entries below. Fixing an entry flips its fixtures — promote them
-(`mgc-conform fixtures … --promote`) in the same change that moves the
-entry to Resolved.
+`conformance/*.json`): triaged pairs replay on every `cargo test`, and
+fixture notes cite the entries below. Since 2026-08-17 there are no
+statuses — **existence IS the assertion**: a fixture is cut only for
+work that is FIXED, it must pass, and `git rm` is the retraction. So
+resolving an entry here is what EARNS it a fixture, cut by name in the
+same change; an entry with no fixture is either still a lead or a law
+the pair lane cannot see (`+52`/`+70` — those get unit tests instead).
 
 Baseline corpus (2026-07-31 re-records on the MONOTONIC-frame-counter
 `*_REC.EXE` recorder — the tickpatch mailbox latches the per-frame
@@ -13101,3 +13103,126 @@ pending lead under, so the suite cannot become a backlog again.
 
 State: **25 fixtures, 2 manifests, all pass.** fmt clean, clippy at
 its 9-warning pre-existing baseline, `cargo test --workspace` green.
+
+## 🏆🏆🏆 THE CERTIFIED LEVELS MINED + THE HIT-ARM TRAILERS (2026-08-17)
+
+Two banked items, closed together. **25 → 65 fixtures, 2 → 6
+manifests, all pass**; three retail laws landed, two banked as
+untested, one banked note RETIRED as a false alarm.
+
+### THE INSTRUMENT: A REVERSION PROBE (this is the reusable part)
+
+mc1l0/l1/l2 are certified, so `verify-deltas` at HEAD is silent on
+them — it cannot tell a load-bearing tick from ballast, and picking
+fixture ticks by reading the ledger is exactly how the deleted
+7,830-fixture corpus was accumulated. Fix: build `mgc-conform` at each
+level's fix-commit PARENT and diff the two runs.
+
+    fixture candidate  =  divergent PRE-FIX  ∧  raw-clean at HEAD
+
+Left half = non-vacuity, right half = the fixed-work rule; both
+MEASURED. Tooling kept: **`tools/conform-rig <l0|l1|l2>`** (runs a
+pre-fix binary out of `.claude/worktrees/rig-*`, same `--env K=V` argv
+contract as `tools/conform`) and **`tools/fixture_candidates.py`**
+(diffs two `--csv` runs, groups ticks by SIGNATURE so one signature =
+one story, `--tick T` explains a single tick). Rigs: l0 = `3d99885`,
+l1 = `dbb3f9b`, l2 = `39e6646`.
+
+Measured: 2,018 / 1,125 / 7,822 candidate ticks collapsing onto
+**89 / 21 / 214 distinct stories**. The three per-commit "after" runs
+were byte-identical to HEAD, so attribution is exact.
+
+⚠⚠ **A rig sees only the laws its own commit landed.** A fixture
+pinning an OLDER campaign's law reads clean on both sides and scores
+vacuous. Measured on the pre-existing mc1l0 suite: `t=49` and `t=1364`
+both read clean, and `t=1364` (`mana-magnet…`) is named in the
+2026-08-12 ledger as a fixed+promoted receipt — an older law, outside
+the rig's range. **PLAYER-RULED: keep them, a passing fixture stays.**
+⚠ The rigs also cannot READ a cut fixture file (they predate the
+per-file cutter `aa70472`) — non-vacuity is established at the TAKE
+level, not by replaying the cut window under the reverted binary.
+
+### THE HIT-ARM TRAILERS — ONE LAW IN THREE COSTUMES
+
+**THE LAW**: every per-state handler is a WRAPPER around a shared CORE
+(`sub_19B10` idle, `sub_19D70` wander, `sub_1A120` chase, `sub_1A390`
+pack). The damage prologue lives INSIDE the core, and every one of its
+exits — the bare freeze, the class-3 retarget-and-promote, the lethal
+demotion — is a plain `return` back into the WRAPPER, whose PRE-WORK
+and TRAILERS therefore run on hit ticks regardless. The port had this
+half-right: it ran the trailers on the freeze path but `return`ed
+before them on the three promote paths.
+
+1. **m0's bob and m5's regen ride the PROMOTE path too.** Deleted the
+   `return` at the three wizard-attacker arms so all four paths reach
+   the trailer block. `sub_1B070/1B090/1B0E0` (:22172-90) all end
+   `sub_1B120(a1x);` unguarded. Measured: **mc1l5 t=5475** slot 271
+   (worm promoted by wizard 650's 400) retail f26 20 / z 3083 vs port
+   25 / 3058; **mc1l32 t=19430** slot 323 life 4658 vs 4619 (= exactly
+   `max_life >> 7`, the m5 regen on the wizard path).
+2. **m1's idle mover is a wrapper trailer.** `sub_1B160` :22228 is
+   `sub_19B10(a1x, 6); sub_196E0(a1x);` — the mover sits BELOW the
+   core, so a hit tick still steps the bird; only the re-aim after it
+   is gated on `+70 == 6`, which is what a promoting hit turns off. New
+   `Gen::m1_idle_trailer`, shared by the `(1,0)` arm and the Hit arm.
+   Measured: **mc1l32 t=31567** slot 28 — the vulture takes 1000 from
+   wizard 14 in state 6 and retail still steps it 178 units (its own
+   `+126`) and turns 1938 → 1960.
+3. **The kraken resets its dive clock on a wizard hit.** `sub_1C4F0`
+   :23192-94 writes `+26 = -10` beside the retarget on the non-lethal
+   class-3 branch. Measured: **mc1l42 t=6263** slot 183 retail −10 vs
+   port −57 — the pair's only unexplained row.
+
+**A/B, via the new `MGC_NO_HIT_TRAILERS=1`** (restores the blanket
+abort; the switch is the only thing that can detect a deliberately
+preserved retail bug, so the law gets one):
+
+| take | rows law-OFF | rows law-ON |
+|---|---|---|
+| mc1l42 | 90,364 | **83,495** (model-6 `f26` rows 226 → 0) |
+| mc1l5 | 35,738 | **29,097** (model-0 `f26`/`z` 2,580 → 995) |
+| mc1l32 | 1,870,947 | 1,870,662 (format-1 terrain wall dominates) |
+
+⚠ **ZERO blast radius on the certified three**: an exhaustive state
+scan of mc1l0/l1/l2 finds no m0 hit, no m1 role-0 hit, and no m5/m6/m15
+damage event at all, and their post-patch `--csv` runs are BYTE-
+IDENTICAL to the pre-patch ones. The restructure is golden-safe there
+by construction — which is also why the corpus evidence had to come
+from l5/l32/l42.
+
+### SETTLED WITHOUT A PATCH
+
+- **(5,3)/(12,3) pack-leader retarget — the banked note is right about
+  retail but there is NOTHING TO FIX**: the guarded branch is
+  unreachable for both models. `f52` has one writer that can set it
+  non-zero (`pack_scan`, reachable only from `mob_idle`/`mob_wander`)
+  and neither m5 nor m12 uses either — (5,0) is `tick70 = base + 1`,
+  (5,1) is `m5_wander`, (12,0) is `m12_build`, (12,1) is `m12_wander`.
+  Banked item RETIRED.
+- **UNTESTED, banked, NOT landed** — decompile is unambiguous but the
+  case fires in NONE of the eight MC1 takes (scanned for class-5
+  entities in states 90..93 carrying a mailbox or `act_life < 0`: zero
+  rows): m15 state-92 non-lethal fall-through (`sub_201D0` :25825-29
+  has no `v2 == 1` branch at all), and m15 state-91's same-owner
+  retaliation veto (`sub_1FF60` :25726-30 ANDs the class-3 test with an
+  identity test on `+24`). Also banked: m6's `+126 = 30` is retail's
+  FIRST statement (:23122, above the prologue) while the port writes it
+  below the intake match, so it is skipped on hit/death — real, but the
+  one measured tick already carried 30, so it produced no row.
+
+### VERIFICATION
+
+`MGC_REQUIRE_GOLDENS=1 cargo test --workspace --release --no-fail-fast`
+green, exit 0; **6 suites enforced, 65 fixtures, 0 regressions**, 0.3 s;
+`cargo fmt --all --check` clean. mc1l0/l1/l2 `--csv` byte-identical
+pre- vs post-patch.
+
+### ⭐ NEXT (player-set 2026-08-17)
+
+**mc1l42** — a full, skipless take the player prepared, carrying
+genuinely uncovered material: a genie that resists killing and buzzes
+around for half the level, an entire LAKE of krakens, griffins mostly
+killed by CRATER (the crater spell has no fixture at all), and
+**PLAYER DEATH — which has a known bug: monsters keep attacking the
+corpse**, producing bizarre situations. One fixture exists there so
+far (the kraken dive clock); the rest is an intake.

@@ -47,6 +47,18 @@ fn no_deaf_states() -> bool {
     *V.get_or_init(|| std::env::var_os("MGC_NO_DEAF_STATES").is_some())
 }
 
+/// `MGC_NO_HIT_TRAILERS=1` restores the pre-dig BLANKET hit abort: the
+/// wizard-attacker arms return before the wrapper trailers, m1's idle
+/// mover is skipped on a hit tick, and m6's chase dive-clock reset is
+/// dropped. Retail aborts the shared CORE only — every prologue exit
+/// is a plain return back into the per-model WRAPPER, whose tail then
+/// runs regardless. Kept so one binary can be A/B'd; read once, a
+/// whole-process arm.
+fn no_hit_trailers() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var_os("MGC_NO_HIT_TRAILERS").is_some())
+}
+
 /// Per-tick context the creature handlers need: the player's position
 /// in engine units (the wizard list of the original, reduced to the
 /// one human player until AI wizards land).
@@ -3075,6 +3087,34 @@ impl Gen {
         }
     }
 
+    /// m1's IDLE wrapper tail, sub_1B160 :22228-45 — the mover
+    /// `sub_196E0`, then the re-aim/drop. Both sit BELOW the shared
+    /// `sub_19B10`, so a hit or death tick still runs the mover; the
+    /// re-aim's `+70 == 6` gate is what turns IT off once the prologue
+    /// has promoted the bird, which is why the two need separating.
+    /// (`only_the_vulture_moves_while_idle`: ten wrappers call the
+    /// shared idle, exactly one also calls the mover.)
+    fn m1_idle_trailer(&mut self, i: usize, base: u8) {
+        self.creature_move(i);
+        // :22232 — the retarget runs only if the pack scan (or the
+        // damage prologue) did not promote, and only on the think tick.
+        let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26;
+        if self.ent[i].tick70 == base && (self.ent[i].f63 as i16) % v26 == 0 {
+            let t = self.ent[i].f146 as usize;
+            // :22235 — a target whose record went class 0 is dropped
+            // and the bird falls back to wander. The f146 = 0 case
+            // lands here too: slot 0 is the sentinel and reads class 0.
+            if t < self.ent.len() && self.ent[t].class64 != 0 {
+                let (ax, ay) = (self.ent[i].x, self.ent[i].y);
+                let (bx, by) = (self.ent[t].x, self.ent[t].y);
+                self.ent[i].f34 = Self::angle_between(ax, ay, bx, by);
+            } else {
+                self.ent[i].f146 = 0;
+                self.ent[i].tick70 = base + 1;
+            }
+        }
+    }
+
     /// Body segment state 120, sub_19550 (:21107): rigid follow —
     /// awake segments sit at distance +56 behind their leader along
     /// the exact bearing (position derived from the leader every
@@ -3539,12 +3579,32 @@ impl Gen {
                                 // the m7/m9 twins).
                                 self.chase_entry_trailer(i, model, role);
                             }
-                            return;
+                            // NO `return` — every arm here falls out to
+                            // the wrapper TRAILERS below. Retail's
+                            // prologue exits are plain returns back INTO
+                            // the wrapper, so a hit that PROMOTES the
+                            // creature still runs the tail its wrapper
+                            // holds (mc1l5 t=5475, mc1l32 t=19430).
+                            if no_hit_trailers() {
+                                return;
+                            }
                         }
                         2 => {
-                            // CHASE just retargets and returns (:21636).
+                            // CHASE just retargets (:21639-41) — except
+                            // the kraken, whose own chase handler resets
+                            // its dive clock on the wizard-hit branch
+                            // first: sub_1C4F0 :23192-94 writes
+                            // `+26 = -10` beside the retarget, ten ticks
+                            // of quiet before the next surface wake
+                            // (mc1l42 t=6263 slot 183: retail -10, port
+                            // -57 — the pair's only unexplained row).
+                            if model == 6 && !no_hit_trailers() {
+                                self.ent[i].f26 = -10;
+                            }
                             self.ent[i].f146 = src;
-                            return;
+                            if no_hit_trailers() {
+                                return;
+                            }
                         }
                         3 => {
                             // PACK: leader and member both retarget
@@ -3561,7 +3621,9 @@ impl Gen {
                             // shared sub_1A390 the same way (m4
                             // :22724-25, m7 :23362-64, m9 :24219-20).
                             self.chase_entry_trailer(i, model, role);
-                            return;
+                            if no_hit_trailers() {
+                                return;
+                            }
                         }
                         _ => {}
                     }
@@ -3576,10 +3638,34 @@ impl Gen {
                 // and retail's boundary shows position, heading and
                 // aim all frozen; the old wizard-only scoping let the
                 // port walk on). The wizard-attacker arms above are
-                // freezes too — every path returns without a move. The
-                // m0 wrappers still run their unconditional bob tail.
+                // freezes too — none of them moves.
+                //
+                // THE WRAPPER TRAILERS BELOW ARE NOT PART OF THAT
+                // FREEZE, and they run on EVERY path through this arm,
+                // the promote-and-retarget ones included: retail's
+                // prologue exits are plain returns out of the shared
+                // CORE (sub_19B10/19D70/1A120/1A390) back into the
+                // per-model WRAPPER, which then runs its tail whatever
+                // the core did. The m0 bob is the first of them
+                // (sub_1B070/1B090/1B0E0 :22172-90 all end
+                // `sub_1B120(a1x);` with no guard) — mc1l5 t=5475 slot
+                // 271, a worm promoted by wizard 650's 400, still bobs
+                // `z += +26` / `+26 -= 5` (retail f26 20 z 3083, port
+                // 25 / 3058).
                 if model == 0 && matches!(role, 1..=3) {
                     self.flyer_bob(i);
+                }
+                // m1's IDLE wrapper trails the shared idle with the
+                // MOVER (sub_1B160 :22228 — `sub_19B10(a1x, 6);
+                // sub_196E0(a1x);`), textually below the core exactly
+                // like the m0 bob, and the re-aim after it is gated on
+                // the bird still being idle so a promoting hit skips
+                // only the re-aim. mc1l32 t=31567 slot 28: the vulture
+                // takes 1000 from wizard 14 in state 6 and retail still
+                // steps it 178 units (its own +126) and turns
+                // 1938 → 1960 while the port left it bit-identical.
+                if (model, role) == (1, 0) && !no_hit_trailers() {
+                    self.m1_idle_trailer(i, base);
                 }
                 // ...and m5's REGEN is a wrapper trailer too, so it
                 // survives the freeze exactly like the bob: retail's
@@ -3595,7 +3681,9 @@ impl Gen {
                 // movement exactly as the port does, yet every one of
                 // them still lands its regen — retail sits above the
                 // port by precisely `max_life >> 7` (39 / 78 / 117 for
-                // max 5000 / 10000 / 15000).
+                // max 5000 / 10000 / 15000). It rides the WIZARD path
+                // too, now that that path falls through: mc1l32
+                // t=19430 slot 323, retail 4658 vs port 4619.
                 // Scoped to the HIT arm on purpose: the death arm's
                 // trailer would credit a corpse, and no corpus row
                 // exercises it.
@@ -3675,34 +3763,14 @@ impl Gen {
             // The shared idle `sub_19B10` :21311-419 ends at the pack
             // scan with no mover, so `mob_idle` was never the culprit.
             //
-            // ⚠ The mover sits in the WRAPPER, textually after
+            // The mover sits in the WRAPPER, textually after
             // `sub_19B10` returns, so retail runs it on a HIT tick too
-            // — the same trailer-survives-the-freeze shape the m5
-            // regen row proves. Left out of the hit arm deliberately:
-            // no corpus row exercises it, and the arm's existing m0
-            // bob has the same known gap on the promote-and-return
-            // paths. Banked in the ledger.
+            // — the same trailer-survives-the-freeze shape the m5 regen
+            // row proves. `m1_idle_trailer` is therefore shared with
+            // the `Inbox::Hit` arm (mc1l32 t=31567).
             (1, 0) => {
                 self.mob_idle(i, base);
-                self.creature_move(i);
-                // :22226 — the retarget runs only if the pack scan
-                // did not promote, and only on the think tick.
-                let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26;
-                if self.ent[i].tick70 == base && (self.ent[i].f63 as i16) % v26 == 0 {
-                    let t = self.ent[i].f146 as usize;
-                    // :22232 — a target whose record went class 0 is
-                    // dropped and the bird falls back to wander. The
-                    // f146 = 0 case lands here too: slot 0 is the
-                    // sentinel and reads class 0.
-                    if t < self.ent.len() && self.ent[t].class64 != 0 {
-                        let (ax, ay) = (self.ent[i].x, self.ent[i].y);
-                        let (bx, by) = (self.ent[t].x, self.ent[t].y);
-                        self.ent[i].f34 = Self::angle_between(ax, ay, bx, by);
-                    } else {
-                        self.ent[i].f146 = 0;
-                        self.ent[i].tick70 = base + 1;
-                    }
-                }
+                self.m1_idle_trailer(i, base);
             }
             (_, 0) => self.mob_idle(i, base),
 

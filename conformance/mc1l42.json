@@ -1,0 +1,12 @@
+{
+  "dir": "fixtures/mc1l42",
+  "pin_pose": "n1",
+  "fixtures": [
+    {
+      "t": 6274,
+      "file": "the-kraken-resets-its-dive-clock-on-a-wizard-hit.mgcr",
+      "source": "mc1l42",
+      "note": "THE KRAKEN RESETS ITS DIVE CLOCK ON A WIZARD HIT: m6's own chase handler writes `+26 = -10` beside the retarget on the non-lethal class-3 branch (sub_1C4F0 :23192-94), ten ticks of quiet before the next surface wake - the port retargeted and returned, leaving +26 wherever the dive had got to - ledger 2026-08-17."
+    }
+  ]
+}

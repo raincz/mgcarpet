@@ -1,0 +1,12 @@
+{
+  "dir": "fixtures/mc1l5",
+  "pin_pose": "n1",
+  "fixtures": [
+    {
+      "t": 5475,
+      "file": "the-m0-bob-survives-a-promoting-hit-the-wrapper.mgcr",
+      "source": "mc1l5",
+      "note": "THE m0 BOB SURVIVES A PROMOTING HIT: the wrapper trailer runs on EVERY hit path, the retarget-and-promote one included - sub_1B070/1B090/1B0E0 (:22172-90) all end `sub_1B120(a1x);` with no guard, so wizard 650's 400 promotes worm 271 and it still bobs (retail f26 20 z 3083, port 25 / 3058) - ledger 2026-08-17."
+    }
+  ]
+}

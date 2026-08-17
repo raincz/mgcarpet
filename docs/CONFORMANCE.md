@@ -200,17 +200,24 @@ from real data.
    candidates, the pairs that pin a law worth a file. The ledger is
    the argument; the manifest is only the enforcement.
 3. **Cut** — after curation:
-   `conformance/cut_fixture_files.py conformance/mc1l0.json` copies
-   each fixture's `t-1 .. t+1` window out of the take into its own
-   `conformance/fixtures/<level>/<law>.mgcr`, slugging the file
-   name from the note, and rewrites the manifest to carry `dir` plus a
-   `file` per fixture. Commit the files (git-lfs) with the manifest.
+   `conformance/cut_fixture_files.py conformance/mc1l0.json recordings/mc1l0.mgcr`
+   copies each fixture's `t-1 .. t+1` window out of the take into its
+   own `conformance/fixtures/<level>/<law>.mgcr`, slugging the file
+   name from the note. Commit the files (git-lfs) with the manifest.
    By default it cuts only fixtures whose note survives boilerplate
    stripping — `--all` overrides, `--dry-run` previews the names. It
    verifies line coverage itself: a window missing any of its three
    lines fails HERE rather than becoming a silently unreachable
-   fixture. The runner REFUSES a manifest with no `dir` (an un-cut
-   extract is not a suite).
+   fixture. It also SKIPS any law already pinned in the level dir, so
+   re-running it to append is safe.
+   ⚠ **The cutter does NOT write the manifest** — it only reads it.
+   `dir`, and each row's `file`, are yours to author, and `file` must
+   match the slug the cutter derived from that row's `note`. Run
+   `--dry-run` first, which prints exactly the names it will write.
+   The runner REFUSES a manifest with no `dir` (an un-cut extract is
+   not a suite), and both directions of the declared-vs-on-disk diff
+   are hard errors: an undeclared `.mgcr` in the dir tests nothing, and
+   a declared file that is absent fails by law name with exit 2.
 4. **Fix** — when a port fix closes a law, cut its exemplar in DELIBERATELY,
    by name, in the same change: the fixture is the fix's receipt. If the
    law cannot be fixture-guarded (see Sizing), write the unit test instead
@@ -229,6 +236,69 @@ from real data.
    the status machine — they had nothing left to carry.) Recording-side
    utilities (gap scan, level-transition boundary finder, conjoined-take
    cutter) live in `recordings/*.py`.
+
+## The reversion probe: mining a certified level
+
+A certified level is a measurement problem of its own. Once mc1l0 is
+bit-exact end-to-end, `verify-deltas` on it is nearly silent — which
+means a HEAD run cannot tell a load-bearing tick from ballast, and
+every tick looks equally worth pinning. Picking fixture ticks by
+reading the ledger and guessing is precisely how a corpus reaches
+7,830 fixtures that catch nothing.
+
+The instrument that *can* tell is a binary built at the commit JUST
+BEFORE that level's fix commit. Every pair it calls divergent is a
+pair where the landed laws actually do work:
+
+    fixture candidate  =  divergent PRE-FIX  ∧  raw-clean at HEAD
+
+The left conjunct is non-vacuity — revert the laws and the fixture goes
+red. The right is the fixed-work rule. Both are measured, neither is
+guessed. Two tools implement it:
+
+- **`tools/conform-rig <rig> [--env K=V]… <mode> …`** runs a pre-fix
+  `mgc-conform` out of a detached worktree under
+  `.claude/worktrees/rig-<rig>/`, same argv contract as `tools/conform`.
+  Its usage text names each rig's commit and how to build a new one.
+  ⚠ It `cd`s into the rig so the default `--baked baked` resolves
+  through a symlink back to the real bake — so pass recordings and
+  `--csv` destinations as ABSOLUTE paths.
+- **`tools/fixture_candidates.py <prefix.tsv> <head.tsv>`** diffs the
+  two `--csv` runs and ranks the candidates. It groups ticks by
+  SIGNATURE — the slot- and value-free atom set, mirroring
+  `fixtures::signature` — because one signature is one story: the
+  group's minimal tick is the exemplar worth cutting and the rest is
+  duplicate coverage. `--tick T` explains a single tick (non-vacuous?
+  green at HEAD? which rows?), which is the form to reach for when the
+  ledger names a tick and you want to know what pinning it would prove.
+
+Both sides ignore `pose` rows, because `PairDiff::clean()` tests only
+rng/missing/extra/fields: a pose row neither fails a fixture nor proves
+one non-vacuous. Rows carrying a `rule` tag (a known-deviation or
+roster attribution) are NOT ignored — a tagged row still fails
+`clean()`, so it is still valid non-vacuity evidence.
+
+Measured on the three certified MC1 levels, this collapses the search
+by three orders of magnitude — 2,018 / 1,125 / 7,822 candidate ticks
+onto 89 / 21 / 214 distinct stories, of which the ledger can name a
+few dozen. ⚠ A candidate is only a candidate: the suite runs each
+fixture in ISOLATION, on its own freshly built world, which is a
+stricter test than the full-take run. A tick that is clean in the HEAD
+sweep can still fail once cut, and the doctrine there is to delete it,
+not to nurse it.
+
+⚠⚠ **A rig sees only the laws its own commit landed.** The probe
+answers "is this tick non-vacuous *for this commit*", NOT "does this
+fixture guard anything at all". A fixture pinning a law fixed in an
+EARLIER campaign is clean on both sides and scores as vacuous, because
+the rig already contains that law. Measured on the pre-existing mc1l0
+suite: 2 of its 4 fixtures read clean under the `l0` rig, and one of
+them (`mana-magnet-10-54-lifecycle-ball-pull`) pins a real fix from a
+different level's campaign — **player-ruled 2026-08-17 to KEEP, on the
+rule that a passing fixture stays.** So never read "clean pre-fix" as
+a delete signal on its own: it is a delete signal only for a fixture
+CUT FROM THAT COMMIT, where it means the tick never exercised the law
+its note claims.
 
 ## Rules
 
@@ -277,10 +347,24 @@ from real data.
 
 | manifest | take | fixtures |
 |---|---|---|
-| `conformance/mc1l0.json` | mc1l0 — certified bit-exact end-to-end (0..7097) | 4 |
+| `conformance/mc1l0.json` | mc1l0 — certified bit-exact end-to-end (0..7097) | 18 |
+| `conformance/mc1l1.json` | mc1l1 — certified bit-exact (0..10709) | 10 |
+| `conformance/mc1l2.json` | mc1l2 — certified faithful free replay (0..8282) | 14 |
+| `conformance/mc1l5.json` | mc1l5 — hit-arm trailer receipt | 1 |
 | `conformance/mc1l32.json` | mc1l32 + the retired bee-height cut | 21 |
+| `conformance/mc1l42.json` | mc1l42 — hit-arm trailer receipt | 1 |
 
-43 fixtures, 1.6 MB, **0.2 s**. For scale, the corpus this replaced
+65 fixtures, 6.0 MB, **0.3 s**. The three certified MC1 levels were
+mined in one pass (2026-08-17) by the reversion probe above; every
+fixture cut there is measured non-vacuous against its level's own
+pre-fix binary. ⚠ Their files are ~120-180 KB each rather than
+mc1l32's ~13 KB, because these takes are FORMAT 2 and each fixture
+carries a materialized terrain base (~350 KB uncompressed). That is
+the price of the terrain channel, and it is the same channel that
+makes the level minable at all — mc1l32's format-1 pairs cannot be cut
+green at any size.
+
+For scale, the corpus this replaced
 was 7,830 fixtures across 10 takes in 158 MB of bundles taking ~40 s —
 about 83% of the whole workspace test time. Seven takes were removed
 outright (mc1hwl0, mc1l5, mc2l0, mc2l3, mc2l4, mc2l24, mc2l30): 6,783
@@ -289,8 +373,10 @@ manifests remain in git history (`git show <rev>:conformance/mc2l3.json`)
 and their takes remain in `recordings/`, so re-cutting one is a command,
 not an archaeology project.
 
-mc1l1 and mc1l2 are certified bit-exact and have never been extracted;
-they are owed a replay track plus their campaigns' named law exemplars.
+mc1l1 and mc1l2 now carry their campaigns' named law exemplars; all
+three certified levels are still owed a REPLAY TRACK (the broad net —
+see Sizing), which remains undecided between retail-obs checkpoints and
+a self-pinned hash chain.
 
 The known-deviation roster
 

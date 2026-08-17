@@ -12,19 +12,103 @@
       "t": 51,
       "file": "cast-impact-input-latency-ledger-entry-4.mgcr",
       "source": "mc1l0",
-      "note": "cast/impact input latency (ledger entry 4); f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
+      "note": "cast/impact input latency (ledger entry 4); f26/charge raw-lane surfacing — lanes not compared at freeze"
     },
     {
       "t": 604,
       "file": "the-severed-ball-chain-the-9-1-lob-reusing-colle.mgcr",
       "source": "mc1l0",
-      "note": "THE SEVERED BALL CHAIN: the (9,1) lob reusing collected ball 642's slot scans only the tick-head chain prefix (chase 104, not the closer-scoring 714 above the cut) \u2014 ledger 2026-08-14."
+      "note": "THE SEVERED BALL CHAIN: the (9,1) lob reusing collected ball 642's slot scans only the tick-head chain prefix (chase 104, not the closer-scoring 714 above the cut) — ledger 2026-08-14."
     },
     {
       "t": 1364,
       "file": "mana-magnet-10-54-lifecycle-ball-pull-untriaged.mgcr",
       "source": "mc1l0",
-      "note": "mana magnet (10,54) lifecycle + ball pull \u2014 untriaged"
+      "note": "mana magnet (10,54) lifecycle + ball pull — untriaged"
+    },
+    {
+      "t": 76,
+      "file": "the-acquire-entry-clamp-sub-54520-clamps-the-cal.mgcr",
+      "source": "mc1l0",
+      "note": "THE ACQUIRE ENTRY CLAMP: sub_54520 clamps the caller's +26 to 16 AT ENTRY (:63975-76), before the model switch, so the possess lob's ctor stamp of 200 is cut on the acquire tick — ledger 2026-08-13 (l0-MVP session, item 2)."
+    },
+    {
+      "t": 559,
+      "file": "the-castle-lockout-is-a-latch-sub-46d20-55949-pi.mgcr",
+      "source": "mc1l0",
+      "note": "THE CASTLE LOCKOUT IS A LATCH: sub_46D20 (:55949) pins the owner's Create-Castle token +48=100 on every blast-shake countdown tick and releases only on the castle machine's own transitions — not a per-tick recomputed predicate — ledger 2026-08-13 (dig 2)."
+    },
+    {
+      "t": 560,
+      "file": "the-castle-ball-eats-the-charge-meter-the-castle.mgcr",
+      "source": "mc1l0",
+      "note": "THE CASTLE BALL EATS THE CHARGE METER: the castle-ball spawner stamps the caster's charge meter into the ball's +26 and zeroes the wizard's meter in the same breath (:65910-11) — ledger 2026-08-13 (dig 2, bonus consumer)."
+    },
+    {
+      "t": 572,
+      "file": "the-corpse-drop-f34-mirror-is-retired-sub-27690.mgcr",
+      "source": "mc1l0",
+      "note": "THE CORPSE-DROP f34 MIRROR IS RETIRED: sub_27690 (:29663-92) writes +30/+126/+46 and zeroes +150/+152 but NEVER touches +34, so a house-demolition corpse mana ball is born target_yaw 0 — ledger 2026-08-13."
+    },
+    {
+      "t": 573,
+      "file": "the-scorch-disc-law-a-fire-s-scorch-is-sub-40d30.mgcr",
+      "source": "mc1l0",
+      "note": "THE SCORCH DISC LAW: a fire's scorch is sub_40D30 ring 0 = THREE cells with no zero-delta early-out (:51621-89), so even a zero-depth dig latches angle|=1 and makes the fire gate refuse every later re-scorch of those cells — ledger 2026-08-14."
+    },
+    {
+      "t": 2340,
+      "file": "the-fire-s-pre-dig-ground-sub-24f60-takes-one-gr.mgcr",
+      "source": "mc1l0",
+      "note": "THE FIRE'S PRE-DIG GROUND: sub_24F60 takes ONE ground sample right after the life test (:28073) and feeds it to both the scorch gate and the z rule, so a fire that digs its own cell still gates and clamps against the PRE-dig ground — ledger 2026-08-14."
+    },
+    {
+      "t": 1165,
+      "file": "the-leveler-s-field-home-the-10-41-ground-levele.mgcr",
+      "source": "mc1l0",
+      "note": "THE LEVELER'S FIELD HOME: the (10,41) ground leveler's \"current\" rung lives at retail +48, not +28; the generic importer's mis-home stepped the castle mound +160/tick where retail sinks it -64 — ledger 2026-08-15 (second session, law 1)."
+    },
+    {
+      "t": 2216,
+      "file": "the-corpse-aimed-chase-exit-sub-1a120-s-shared-c.mgcr",
+      "source": "mc1l0",
+      "note": "THE CORPSE-AIMED CHASE EXIT: sub_1A120's shared chase re-bears +34 on the (+63&3)==0 cadence at :21656 BEFORE the target-lost test at :21658 and dereferences +146 unchecked, so the exit tick still aims at the dead target — ledger 2026-08-15."
+    },
+    {
+      "t": 2371,
+      "file": "the-pair-import-rebuilds-tile-chains-in-recorded.mgcr",
+      "source": "mc1l0",
+      "note": "THE PAIR IMPORT REBUILDS TILE CHAINS IN RECORDED ORDER: sub_11D10 walks the truncation-keyed per-cell next20 chain and returns the FIRST full overlap, so the importer must relink each chain by walking the recorded next20/prev22 rather than head-inserting by ascending slot — ledger 2026-08-15."
+    },
+    {
+      "t": 2557,
+      "file": "the-guard-vote-weight-table-at-1ff40-sub-20480-r.mgcr",
+      "source": "mc1l0",
+      "note": "THE GUARD VOTE WEIGHT TABLE AT 1FF40: sub_20480 reads its 4-entry weight table through a CODE label; the CARPET.EXE bytes (file 0x38738) are [7000, 7000, 10, 7000], so the reversal caps at 11 and a guard almost never turns around on a free pad — ledger 2026-08-15."
+    },
+    {
+      "t": 2811,
+      "file": "the-signed-area-window-centre-carpet-exe-loads-t.mgcr",
+      "source": "mc1l0",
+      "note": "THE SIGNED AREA-WINDOW CENTRE: CARPET.EXE loads the ch0 area-window coordinate movsx, so (pos-128)/256 truncates TOWARD ZERO — the one-tile-back bias holds only below 0x8000 — which is why the slot-465 tree does NOT take the fire's broadcast and ignites 62 ticks later — ledger 2026-08-15."
+    },
+    {
+      "t": 2812,
+      "file": "a-soft-disabled-ball-still-runs-its-final-dispat.mgcr",
+      "source": "mc1l0",
+      "note": "A SOFT-DISABLED BALL STILL RUNS ITS FINAL DISPATCH: the castle absorb banks the ball with flags|=0x400 ALONE (:56022-36) and MC1's dispatch loop gates on class alone (:52351-53), so the absorbed ball still runs one more tick — ledger 2026-08-14 (evening, law 2)."
+    },
+    {
+      "t": 3855,
+      "file": "the-footprint-sweep-soft-kills-scenery-sub-40e20.mgcr",
+      "source": "mc1l0",
+      "note": "THE FOOTPRINT SWEEP SOFT-KILLS SCENERY: sub_40E20's class-2 arm kills swept scenery through sub_41E80 = flags|=0x400 (:51747), a one-snapshot corpse reaped at the next tick top, never an immediate free — the castle level-4 commit's 39 trees — ledger 2026-08-13."
+    },
+    {
+      "t": 5026,
+      "file": "a-villager-s-hit-tick-freezes-the-walker-the-m12.mgcr",
+      "source": "mc1l0",
+      "note": "A VILLAGER'S HIT TICK FREEZES THE WALKER: the m12/13/14 damage prologue puts the movement core and the wander draws in the ELSE of the damage test (m12 :25057-67), so on the tick the damage lands the settler only marks its attacker — ledger 2026-08-15 (end-to-end, law 5)."
     }
   ]
 }

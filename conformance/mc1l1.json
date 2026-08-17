@@ -1,0 +1,66 @@
+{
+  "dir": "fixtures/mc1l1",
+  "pin_pose": "n1",
+  "fixtures": [
+    {
+      "t": 47,
+      "file": "the-f132-signed-32-bit-mana-mailbox-carpet-132-i.mgcr",
+      "source": "mc1l1",
+      "note": "THE f132 SIGNED 32-BIT MANA MAILBOX: carpet +132 is retail's signed 32-bit pending mana delta, so a recorded debit applies -50 instead of +65486 and the pool is never clamped onto the census ceiling - ledger 2026-08-15e (mc1l1 intake, law 1)."
+    },
+    {
+      "t": 343,
+      "file": "the-disposition-fire-stack-rebuild-every-disposi.mgcr",
+      "source": "mc1l1",
+      "note": "THE DISPOSITION-FIRE STACK REBUILD: every disposition fire re-ranks both allocator stacks by the descending 999->1 pool scan (sub_37220 at sub_37440's top :43960) so fire payloads allocate ascending from the lowest free slot - retail parks the chained (11,1) in slot 41 where the port put a puff - ledger 2026-08-15f."
+    },
+    {
+      "t": 358,
+      "file": "the-10-14-mana-scatter-puff-ctor-tick-level-001.mgcr",
+      "source": "mc1l1",
+      "note": "THE (10,14) MANA-SCATTER PUFF CTOR+TICK: level 001 authors (10,14) THING records behind trigger dispositions, so the ctor (sub_3AB40 :46860, life rand%33+28, rise rand%53+51) and the state-13 riser tick (sub_258A0 :28489) own the puff's life/flags/z - ledger 2026-08-15e."
+    },
+    {
+      "t": 3143,
+      "file": "the-placed-jar-z-servo-retail-s-class-12-tick-fa.mgcr",
+      "source": "mc1l1",
+      "note": "THE PLACED-JAR z-SERVO: retail's class-12 tick falls -128/tick toward ground and clamps up instantly (sub_55A40 :64765-70), so a jar tracks terrain moved under it by a scorch or worm episode instead of holding a frozen z - ledger 2026-08-15e."
+    },
+    {
+      "t": 1924,
+      "file": "the-movsx-signed-separation-box-the-pack-separat.mgcr",
+      "source": "mc1l1",
+      "note": "THE MOVSX-SIGNED SEPARATION BOX: the pack separation box test (:21796) sign-extends EACH coordinate before a 32-bit subtract, so a pair straddling the signed midline 0x8000 reads ~65k apart and never separates - ledger 2026-08-15f."
+    },
+    {
+      "t": 3809,
+      "file": "the-m0-death-tick-bob-the-m0-wrappers-sub-1b070.mgcr",
+      "source": "mc1l1",
+      "note": "THE m0 DEATH-TICK BOB: the m0 wrappers (sub_1B070/1B090/1B0E0) run the z-bob sub_1B120 as an UNCONDITIONAL tail, so the tick the damage prologue demotes a worm to the death state still rises - ledger 2026-08-15f."
+    },
+    {
+      "t": 4129,
+      "file": "tick-top-chain-membership-for-the-muzzle-acquire.mgcr",
+      "source": "mc1l1",
+      "note": "TICK-TOP CHAIN MEMBERSHIP FOR THE MUZZLE ACQUIRE: the projectile acquire walks the per-model chains whose membership is the tick-top rebuild (heads at wizext-file 36382+4*model), so a segment promoted mid-tick stays invisible and fireball 427 flies straight - ledger 2026-08-15f."
+    },
+    {
+      "t": 5449,
+      "file": "the-universal-hit-freeze-the-shared-creature-pro.mgcr",
+      "source": "mc1l1",
+      "note": "THE UNIVERSAL HIT FREEZE: the shared creature prologues freeze EVERY creature's hit tick (idle/chase/pack all return out of the v4 arm), so vulture 200 takes a fire hit mid-pack and holds position, heading and aim - ledger 2026-08-15f."
+    },
+    {
+      "t": 8748,
+      "file": "the-speed-token-jar-side-countdown-the-accelerat.mgcr",
+      "source": "mc1l1",
+      "note": "THE SPEED-TOKEN JAR-SIDE COUNTDOWN: the Accelerate token drives the placed jar's +48 countdown itself (sub_56380 :65131), pinned at full on every held re-arm and draining 1/tick after release - the port ran one tick behind - ledger 2026-08-16."
+    },
+    {
+      "t": 3082,
+      "file": "the-trigger-pre-move-probe-pose-the-class-11-fir.mgcr",
+      "source": "mc1l1",
+      "note": "THE TRIGGER PRE-MOVE PROBE POSE: the class-11 fire probe (sub_5A090 :67632, every 8th f63 tick) reads the carpet's PREVIOUS-frame pose, so the worm-ambush disposition fires here and not one probe window early - ledger 2026-08-15e."
+    }
+  ]
+}
