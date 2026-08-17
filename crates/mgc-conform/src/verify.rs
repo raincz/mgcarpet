@@ -20,6 +20,34 @@ use mgc_sim::mc1::rivals::RivalConfig;
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
 
+/// THE POSE PAIR — pair mode's carpet phase, and now the DEFAULT.
+/// Drive the walk from the record's pose PAIR (state@N below the
+/// carpet slot, state@N+1 above) rather than one pinned sample:
+/// retail's `sub_455D0` runs at the carpet's OWN walk slot, so a
+/// single sample is the wrong phase for half the pool on every tick.
+/// `tick_flight` has always encoded this for the free replay; pair
+/// mode pinned one sample and the `pose-phase` tag existed only to
+/// absorb the difference.
+///
+/// The tag was hiding a coupling no single sample can reproduce, not
+/// mere noise. mc1l42 t=65: the genie at slot 101 (BELOW the carpet at
+/// 331) mints its steal seeker bearing on the PRE-move carpet — 309 —
+/// and the newborn at slot 356 (ABOVE it) refreshes `+34` on the
+/// POST-move carpet — 321, exactly retail's record — then eases one
+/// turn-cap step, landing on retail's `+30` = 320. Neither pin can
+/// emit 320, which is why `retail − port@pin-n` was EXACTLY ±11 (one
+/// turn cap) in 201 of 201 (9,8) heading rows and 16 of 16 (10,25)
+/// ones. Whole take: 54,457 CSV rows → 330, raw 1,209 → 276, and the
+/// 53,157 `pose-phase` rows → 26.
+///
+/// `MGC_NO_POSE_PAIR=1` restores the old single-sample walk (the A/B
+/// arm; `--pin-pose` then chooses which sample, as before). Under the
+/// pair, `--pin-pose` steers only the alt probe.
+pub(crate) fn pose_pair() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var_os("MGC_NO_POSE_PAIR").is_none())
+}
+
 /// A pinned-pose choice: which record's carpet drives the tick.
 #[derive(PartialEq)]
 enum PinPose {
@@ -62,9 +90,13 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     }
     let level = rec.header.level.ok_or("recording has no level number")?;
     println!(
-        "== verify-deltas {} (game {game}, level {level}, pin-pose {})",
+        "== verify-deltas {} (game {game}, level {level}, pose {})",
         path.display(),
-        args.pin_pose
+        if pose_pair() {
+            "PAIR (n below the carpet slot, n1 above)".to_string()
+        } else {
+            format!("pinned {}", args.pin_pose)
+        }
     );
 
     let (mut world, pristine) = build_world(&args.baked, &game, level)?;
@@ -85,12 +117,32 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     };
     let roster = load_roster(args)?;
     let take = take_stem(path);
+    // The pose-phase pass gets its OWN world. `retail_import_mc1`
+    // does not reset every cross-pair latch (the law `isolate_worlds`
+    // was written for), so an alt run left its residue on the graded
+    // world and the NEXT pair inherited it: under `MGC_POSE_PAIR` that
+    // manufactured exactly 40 phantom (5,8) rows (t=20161-2, 26007-9,
+    // 26251-2, 26273) which vanish under `--no-pose-alt`. The tag is
+    // allowed to be computed on a drifting world — a mistag costs a
+    // label; a contaminated graded tick costs a false port lead.
+    let mut alt_world = (!args.no_pose_alt)
+        .then(|| build_world(&args.baked, &game, level).map(|(w, _)| w))
+        .transpose()?;
 
     // Stream pairs.
     let mut prev: Option<(u64, RetailMc1, PlayerCommand)> = None;
     let mut prev_cmd = PlayerCommand::default();
     let mut stats = Stats::default();
     let mut pose_chan = crate::pose_lane::PoseLane::default();
+    // THE RAW SHADOW (`MGC_RAW_SHADOW=1`): tally per-(class, model,
+    // field) mismatches on the lanes the obs does NOT carry — `+70`,
+    // `+71`, `+58`. See `World::raw_shadow_mc1`: the importer restores
+    // all three every pair, so a handler that reads one correctly and
+    // WRITES it wrong is invisible to the graded diff and only ever
+    // bites a free run. Off by default — it grades nothing, it only
+    // reports, and it must not move the UNEXPLAINED headline.
+    let raw_shadow = std::env::var_os("MGC_RAW_SHADOW").is_some();
+    let mut shadow: BTreeMap<(u8, u8, &'static str), (u64, String)> = BTreeMap::new();
     let mut printed_import = false;
     // The measured-terrain accumulator (format-2 channel): a pair
     // (pt → t) must run on terrain AT pt, so each record's block is
@@ -160,6 +212,15 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     equip_left: rec.equip_left.map(mgc_sim::mc1::spells::SpellId),
                     equip_right: rec.equip_right.map(mgc_sim::mc1::spells::SpellId),
                     demolish: rec.demolish,
+                    // The SPACE lane (`recover::respawn_key`). Without
+                    // it the imported corpse can never leave
+                    // `LifeState::Dead` and the respawn tick — the one
+                    // pair that re-mints the spell tokens at the
+                    // castle — is unreachable (mc1l42 t=17397). The
+                    // sim's own Dead gate filters a SPACE held in any
+                    // other state, so the ±1-tick dating caveat costs
+                    // nothing on a live wizard.
+                    respawn: rec.respawn,
                     ..pcmd
                 }
             };
@@ -229,9 +290,26 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         PinPose::N => &pst.ents[report.human_slot as usize],
                         PinPose::N1 => &st.ents[report.human_slot as usize],
                     };
-                    let pose = carpet_pose(pose_src);
+                    // The POSE PAIR (`MGC_POSE_PAIR=1`): retail's
+                    // carpet moves MID-WALK, so no single sample is
+                    // right for the whole pass — feed the walk BOTH
+                    // recorded endpoints and let the carpet slot swap
+                    // them, `tick_flight`'s own phasing. `--pin-pose`
+                    // then only steers the alt pass; the projection
+                    // pin stays on N+1 (the recorded observation IS
+                    // the settled pose).
+                    let pose = carpet_pose(if pose_pair() {
+                        &st.ents[report.human_slot as usize]
+                    } else {
+                        pose_src
+                    });
                     world.arm_midtick_ground_snapshot();
-                    world.tick(pose, pcmd);
+                    if pose_pair() {
+                        let pre = carpet_pose(&pst.ents[report.human_slot as usize]);
+                        world.tick_pose_pair(pre, pose, pcmd);
+                    } else {
+                        world.tick(pose, pcmd);
+                    }
                     // The POSE CHANNEL: shadow-step the faithful
                     // mover and diff the human's own motion column at
                     // N+1. Its GROUND probes run on a per-cell
@@ -324,6 +402,47 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         pose,
                     };
                     let port = world.obs_project_mc1(&pin);
+                    if raw_shadow {
+                        for g in world.raw_shadow_mc1() {
+                            if g.slot == report.human_slot {
+                                continue;
+                            }
+                            let Some(w) = st.ents.get(g.slot as usize) else {
+                                continue;
+                            };
+                            // Only compare a slot the recording agrees
+                            // is the SAME entity — a slot-desync would
+                            // otherwise report every field on it.
+                            if w.class64 != g.class || w.model65 != g.model {
+                                continue;
+                            }
+                            for (name, a, b) in [
+                                ("f70", w.f70 as i64, g.f70 as i64),
+                                ("f71", w.f71 as i64, g.f71 as i64),
+                                // ⚠ COMPARE THE BYTE, NOT THE NUMBER.
+                                // The recording's `+58` is signed and
+                                // the port widens it to i16, but the
+                                // port's own decrements wrap as u8 — so
+                                // retail's -6 and the port's 250 are
+                                // the SAME byte and only the sign
+                                // interpretation differs. Masking keeps
+                                // this lane honest; the sign question
+                                // is its own (ungraded) lead.
+                                ("f58", w.f58 as i64 & 0xFF, g.f58 as i64 & 0xFF),
+                            ] {
+                                if a != b {
+                                    let e = shadow
+                                        .entry((g.class, g.model, name))
+                                        .or_insert((0, String::new()));
+                                    e.0 += 1;
+                                    if e.1.is_empty() {
+                                        e.1 =
+                                            format!("t={pt} slot {}: retail {a} port {b}", g.slot);
+                                    }
+                                }
+                            }
+                        }
+                    }
                     stats.absorb_rng(pst.rand, obs.rng, port.rng);
                     stats.absorb_phase(&pst, obs, &port, report.human_slot);
                     let mut pd = compare(obs, &port, report.human_slot);
@@ -360,12 +479,16 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     // The pose-phase pass: re-run the pair under the
                     // other pose sample; rows clean there are capture
                     // (retail's mixed within-tick pose), not leads.
-                    if !args.no_pose_alt
-                        && !pd.clean()
-                        && let Some(tg) = tags.as_mut()
+                    // Deliberately SINGLE-pinned even under
+                    // `MGC_POSE_PAIR` — it is the phase oracle, so it
+                    // must stay the opposite-endpoint probe the tag's
+                    // meaning is defined against (and an identical
+                    // re-run would tag nothing anyway).
+                    if !pd.clean()
+                        && let (Some(tg), Some(aw)) = (tags.as_mut(), alt_world.as_mut())
                     {
                         let (alt, _, _) = exec_pair(
-                            &mut world,
+                            aw,
                             &pristine,
                             measured_planes(&timg),
                             &pst,
@@ -373,7 +496,11 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                             obs,
                             pcmd,
                             prev_cmd,
-                            !matches!(pin_pose, PinPose::N1),
+                            if matches!(pin_pose, PinPose::N1) {
+                                PairPose::PinN
+                            } else {
+                                PairPose::PinN1
+                            },
                         )
                         .map_err(|e| format!("t={pt}: pose-alt: {e}"))?;
                         pose_reclassify(tg, &pd, &alt);
@@ -441,6 +568,21 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     }
     print!("{}", stats.render(args, roster.as_ref()));
     print!("{}", pose_chan.render());
+    if raw_shadow {
+        let total: u64 = shadow.values().map(|v| v.0).sum();
+        println!("  RAW SHADOW (ungraded lanes +70/+71/+58): {total} mismatches");
+        for ((c, m), ()) in shadow
+            .keys()
+            .map(|(c, m, _)| ((*c, *m), ()))
+            .collect::<std::collections::BTreeSet<_>>()
+        {
+            for name in ["f70", "f71", "f58"] {
+                if let Some((n, ex)) = shadow.get(&(c, m, name)) {
+                    println!("    ({c:>3},{m:>3}) {name}: {n}  e.g. {ex}");
+                }
+            }
+        }
+    }
     Ok(stats.clean_pairs == stats.pairs)
 }
 
@@ -816,6 +958,19 @@ fn midwalk_ground(mut snap: Vec<u8>, h0: &[u8], post: &[u8], h1: &[u8]) -> Vec<u
     snap
 }
 
+/// Which carpet pose(s) drive one pair tick.
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum PairPose {
+    /// One pinned sample: the pre-tick pose (state@N).
+    PinN,
+    /// One pinned sample: the post-tick pose (state@N+1).
+    PinN1,
+    /// BOTH, swapped at the carpet's walk slot (`MGC_POSE_PAIR=1`) —
+    /// retail's mid-walk `sub_455D0` phase. The projection pin still
+    /// rides N+1 either way.
+    Pair,
+}
+
 /// One fixture-grade pair, executed on a prepared world: restore
 /// pristine planes (overlaying the MEASURED height/type images when
 /// the recording carries the terrain channel), import state@N, tick
@@ -832,7 +987,7 @@ pub(crate) fn exec_pair(
     obs: &ObsMc1,
     cmd: PlayerCommand,
     prev_cmd: PlayerCommand,
-    pin_n1: bool,
+    phase: PairPose,
 ) -> Result<(PairDiff, ObsMc1, u16), String> {
     world.restore_planes(pristine);
     if let Some((h, ty, ceil, an)) = measured {
@@ -853,13 +1008,18 @@ pub(crate) fn exec_pair(
         .retail_import_mc1(pst)
         .map_err(|e| format!("import: {e}"))?;
     world.set_prev_fire(prev_cmd.fire_left, prev_cmd.fire_right);
-    let pose_src = if pin_n1 {
-        &st.ents[report.human_slot as usize]
-    } else {
+    let pose_src = if matches!(phase, PairPose::PinN) {
         &pst.ents[report.human_slot as usize]
+    } else {
+        &st.ents[report.human_slot as usize]
     };
     let pose = carpet_pose(pose_src);
-    world.tick(pose, cmd);
+    if matches!(phase, PairPose::Pair) {
+        let pre = carpet_pose(&pst.ents[report.human_slot as usize]);
+        world.tick_pose_pair(pre, pose, cmd);
+    } else {
+        world.tick(pose, cmd);
+    }
     let pin = PinnedMc1 {
         slot: report.human_slot,
         local: pst.local_player,

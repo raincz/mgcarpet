@@ -29,6 +29,17 @@ use crate::mc1::tables::{COS, SIN};
 /// chases a class-3 pool entity; our player lives outside the pool).
 pub(crate) const PLAYER_TARGET: u16 = 0xFFFF;
 
+/// The `+146` a class-10 explosion child carries when its probe found
+/// NOBODY. Retail's stamp is an unguarded pointer difference
+/// (`(v17 - v21) / 164`, :63428), so a null probe records
+/// `(0 - entBase) / 164` as a word — a CARPET.EXE link-time constant,
+/// the same in every retail instance. Measured off the recording (all
+/// 542 mc1l42 (10,23) miss rows and its 13 (10,11) crater rows), never
+/// derived. ⚠ PER BINARY: HIDDEN.EXE links its pool elsewhere and its
+/// value is unmeasured, so [`Gen::proj_explode`] emits this for base
+/// MC1 only.
+pub(crate) const MC1_MISS_STAMP: u16 = 64608;
+
 /// `MGC_NO_TURN_TIE=1` restores the pre-dig wrapped-delta turn sign
 /// (`(tgt − cur) & 0x7FF <= 1024`), which turns the WRONG way on the
 /// exact 180° tie — see [`Gen::turn_sign`]. Kept so one binary can be
@@ -957,8 +968,17 @@ impl Gen {
         let mut best: Option<u16> = None;
         let mut best_d2 = i32::MAX;
 
-        // The human wizard (bucket[0]'s out-of-pool member).
-        if !self.player_invisible
+        // The human wizard (bucket[0]'s out-of-pool member). The
+        // rebuild gate applies to him like any other class-3 body:
+        // a wizard whose `actLife` has gone negative is NOT in
+        // bucket[0] (:52254), so from the fatal hit onward no scan
+        // can acquire him — retail's creatures lose the corpse the
+        // tick it dies, they do not mob it. Our human lives outside
+        // the pool, so the liveness rides the ctx (`pdead` covers
+        // both the death fall and the dead hold, which is exactly
+        // `actLife < 0`).
+        if !ctx.pdead
+            && !self.player_invisible
             && owner != PLAYER_TARGET
             && (!wanted_only || self.player_aggro > 0)
         {
@@ -1106,8 +1126,17 @@ impl Gen {
         // The position is a RAW struct read with no validity test
         // (:21657 dereferences +146 before anything looks at the
         // target's life) — a dead target's coordinates still steer.
+        // The lost test reads the TARGET ENTITY with no special case
+        // for the human (:21658 dereferences +146 whoever it names),
+        // so a wizard who has just taken his fatal hit fails
+        // `+12 < 0` on the very next chase tick and the creature
+        // drops back to WANDER. Ours is out of the pool, so `pdead`
+        // stands in for his `actLife < 0` — without it every chaser
+        // stayed latched onto the corpse through the death fall, the
+        // dead hold and the respawn (the reported "monsters keep
+        // attacking the body" bug).
         let (tx, ty, tz, tf66, tf67, lost) = if tgt == PLAYER_TARGET {
-            (ctx.px, ctx.py, ctx.pz, 0xFFu8, 0xFFu8, false)
+            (ctx.px, ctx.py, ctx.pz, 0xFFu8, 0xFFu8, ctx.pdead)
         } else {
             let t = tgt as usize;
             // Port guard: retail would read the scratch slot / raw
@@ -1175,20 +1204,6 @@ impl Gen {
                 self.snd(42, i);
             }
         }
-        // m6's spit burst (:23243-66): while +71 > 0, one lightning
-        // beam per tick, filter copied from the target's own fields,
-        // beam row [6] (:23259 — inert in flight, no homing).
-        if model == 6 && self.ent[i].f71 > 0 {
-            self.ent[i].f71 -= 1;
-            let (x, y, z, owner, f84) = {
-                let e = &self.ent[i];
-                (e.x, e.y, e.z, e.id24, e.f84)
-            };
-            if let Some(p) = self.spawn_zigzag(x, y, z) {
-                self.arm_projectile(p, owner, tf66, tf67, tgt, tx, ty, tz, 800, 23, f84 as i16);
-                self.ent[p].row156 = 6;
-            }
-        }
         let e = &self.ent[i];
         let row = &BEHAVIOR[e.row156 as usize];
         if (e.f63 as i16) % row.v_26 == 0 {
@@ -1210,6 +1225,10 @@ impl Gen {
             }
             if Self::isqrt(sq as u32) >= v28 {
                 self.ent[i].tick70 = base + 1;
+                // LABEL_30 (:23239) is a RETURN out of the handler, not
+                // a fall-through: the drop-out tick never reaches the
+                // spit block below.
+                return false;
             } else if model == 6 {
                 // Kraken: growl + arm the 5-bolt spit (:23240-42).
                 // Sound 37 sits BEHIND the range gate — an out-of-range
@@ -1218,6 +1237,25 @@ impl Gen {
                 self.ent[i].f71 = 5;
             } else {
                 return self.attack_thunk(i, model, tgt, tx, ty, tz, tf66, tf67);
+            }
+        }
+        // m6's spit burst (:23243-66): while +71 > 0, one lightning
+        // beam per tick, filter copied from the target's own fields,
+        // beam row [6] (:23259 — inert in flight, no homing).
+        // THE ARM AND THE FIRST BOLT SHARE A TICK: retail's burst block
+        // sits BELOW the cadence gate that writes +71 = 5 (:23241), so
+        // the growl tick immediately spends one charge (5 → 4) and lays
+        // a beam. The port used to test +71 first, which cost the burst
+        // its opening bolt on every single cadence tick.
+        if model == 6 && self.ent[i].f71 > 0 {
+            self.ent[i].f71 -= 1;
+            let (x, y, z, owner, f84) = {
+                let e = &self.ent[i];
+                (e.x, e.y, e.z, e.id24, e.f84)
+            };
+            if let Some(p) = self.spawn_zigzag(x, y, z) {
+                self.arm_projectile(p, owner, tf66, tf67, tgt, tx, ty, tz, 800, 23, f84 as i16);
+                self.ent[p].row156 = 6;
             }
         }
         false
@@ -1364,20 +1402,35 @@ impl Gen {
         }
     }
 
-    /// m8's CHASE sub_1CE30 (:23546): restore full speed while the
-    /// cooldown runs, re-set the DEFLECTION bit EVERY tick (:23552 —
-    /// the only creature that raises it, and nothing ever clears it:
-    /// fireballs/meteors bounce off an attacking griffon for good;
-    /// beams — lightning — never full-deflect, which is why lightning
-    /// stays the counter), then the shared chase with the 4000-damage
-    /// beam thunk, plus the screech throttle (sound 38) every v_26
-    /// (:23563-65). The provoking hit lands BEFORE the first chase
-    /// tick sets the bit (the first meteor connects).
-    fn griffon_chase(&mut self, i: usize, base: u8, ctx: &MobCtx) {
+    /// m8's CHASE PRE-WORK (sub_1CE30 :23550-52): restore full speed
+    /// while the cooldown runs, then re-set the DEFLECTION bit. Both
+    /// statements sit ABOVE the `sub_1A120` call (:23553), i.e. above
+    /// the shared damage prologue, so a griffon that takes a hit on a
+    /// chase tick STILL ratchets its speed back to +128 and STILL
+    /// re-raises 0x8000 — the abort happens inside the core, below
+    /// them. Hoisted into `creature_tick` for exactly that reason
+    /// (the m2 pre-work's twin); mc1l42 t=20162 is the proof: seven
+    /// griffons in state 50 eat the crater's 240 and retail shows
+    /// every one at flags 0x800C / +126 40 while the port's blanket
+    /// hit-abort left them 0x000C / 60.
+    fn griffon_chase_prework(&mut self, i: usize) {
         if self.ent[i].f26 != 0 {
             self.ent[i].f126 = self.ent[i].f128;
         }
         self.ent[i].flags |= 0x8000;
+    }
+
+    /// m8's CHASE sub_1CE30 (:23546): the pre-work above (already run
+    /// in `creature_tick`, above the intake) — the speed restore and
+    /// the DEFLECTION bit re-set EVERY tick (:23552 — the only
+    /// creature that raises it, and only the rival Rebound token ever
+    /// clears it: fireballs/meteors bounce off an attacking griffon
+    /// for good; beams — lightning — never full-deflect, which is why
+    /// lightning stays the counter), then the shared chase with the
+    /// 4000-damage beam thunk, plus the screech throttle (sound 38)
+    /// every v_26 (:23563-65). The provoking hit lands BEFORE the
+    /// first chase tick sets the bit (the first meteor connects).
+    fn griffon_chase(&mut self, i: usize, base: u8, ctx: &MobCtx) {
         self.mob_chase(i, base, ctx);
         let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26.max(1);
         if (self.ent[i].f63 as i16) % v26 == 0 {
@@ -1498,22 +1551,38 @@ impl Gen {
     // ---- model 11, the genie (states 66-71, :24317-24770) ------------------
 
     /// m11 IDLE sub_1DE40 (:24317) — the blink cycle. While +26 runs
-    /// it counts down; on expiry (sound 21) the phase bit (+16
-    /// byte[0] bit 0; ours flags 0x2000) picks the exit: SET → drop
-    /// the target and TELEPORT by a per-axis LCG offset
-    /// ((rand % 0x3C) << 8) + 12800 (toroidal map) into WANDER;
-    /// CLEAR → straight into CHASE with the target intact. At +26 ==
-    /// 0 it lays the 12-puff (10,1) sparkle ring on a 3x4 grid of
-    /// 40-unit cells, re-arms +26 = 1 and toggles the phase — ring,
-    /// then blink, alternating.
+    /// it counts down; on expiry (sound 21) the phase bit picks the
+    /// exit: SET → drop the target AND its pending ch0 mail and
+    /// TELEPORT by a per-axis LCG offset ((rand % 0x3C) << 8) + 12800
+    /// (toroidal map) into WANDER; CLEAR → straight into CHASE with
+    /// the target intact. At +26 == 0 it lays the 12-puff (10,1)
+    /// sparkle ring on a 3x4 grid of 40-unit cells, re-arms +26 = 1
+    /// and toggles the phase — ring, then blink, alternating.
+    ///
+    /// **THE PHASE BIT IS +16 byte[0] BIT 0** (`& 1` at :24336, `^ 1`
+    /// at :24383), not the port-local 0x2000 that used to stand in for
+    /// it. The bit is RECORDED, so the stand-in cost the port the
+    /// whole cycle under import: retail's genie carries the phase in
+    /// bit 0, an imported record never has 0x2000, and the port's
+    /// genie therefore read CLEAR forever — it took the chase exit on
+    /// every expiry and NEVER blinked. mc1l42 slot 101 shows it as a
+    /// matched pair: flags want 13 got 8204 on the toggle tick, then
+    /// x/y/rand on the next (retail teleports whole tiles away, the
+    /// port stands still). ⚠ `World`'s class-5 draw gate reads the
+    /// same bit as INVISIBLE (an MC2-corpus reading); MC1's genie is
+    /// phased-out for half its life by this law, not hidden.
     fn genie_idle(&mut self, i: usize, base: u8) {
         let v1 = self.ent[i].f26;
         if v1 != 0 {
             self.ent[i].f26 = v1 - 1;
             if v1 == 1 {
                 self.snd(21, i);
-                if self.ent[i].flags & 0x2000 != 0 {
+                if self.ent[i].flags & 1 != 0 {
                     self.ent[i].f146 = 0;
+                    // :24339 — the blink also drops the pending ch0
+                    // damage SOURCE, so a hit landed this tick never
+                    // reaches the chase-state mail read.
+                    self.ent[i].mail[0].1 = 0;
                     let d1 = self.ent_rand(i);
                     let d2 = self.ent_rand(i);
                     let (x, y, z) = {
@@ -1544,7 +1613,7 @@ impl Gen {
                 }
             }
             self.ent[i].f26 = 1;
-            self.ent[i].flags ^= 0x2000;
+            self.ent[i].flags ^= 1; // :24383 — byte[0] ^= 1
         }
     }
 
@@ -1708,25 +1777,48 @@ impl Gen {
     /// 11) every 8*v_26; else the 3000-payload steal seeker (the
     /// attack thunk; the +26 counter the original bumps per window is
     /// vestigial — both decompiled branches spawn identically).
-    /// Deviation noted: the original falls through to the attack
-    /// block even after blinking home, firing one stray seeker with
-    /// the CLEARED target slot (a null-target quirk); we return.
+    ///
+    /// THE BLINK HOME IS NOT A RETURN. `sub_1E720` (:24724) is a plain
+    /// call in both the dead-target arm (:24643-44) and the break-off
+    /// arm (:24649); only the RANGE drop-out returns (:24658). So a
+    /// genie that breaks off still falls into the every-v_26 block and
+    /// fires ONE PARTING SEEKER, and because the target pointer `v9`
+    /// was taken once at :24633 — before `sub_1E720` zeroed +146 —
+    /// that seeker is aimed at the target it just abandoned. The
+    /// signature is +26: `sub_1E720` writes 0 and the `+26++` at
+    /// :24666 leaves 1. mc1l42 t=2133 and t=14481, slot 101: retail
+    /// hands back +26 = 1 with a (9,8) seeker chasing 331; the port
+    /// returned early and left +26 = 0 with no shot. (This RETIRES the
+    /// "we return" deviation that used to sit on this comment — it was
+    /// a ruling on a GRADED lane.)
     fn genie_chase(&mut self, i: usize, base: u8, ctx: &MobCtx) {
         self.creature_move(i);
         if self.ent[i].act_life < 0 {
             return;
         }
         let tgt = self.ent[i].f146;
+        // `v9` (:24633) is resolved ONCE, ahead of every branch, and
+        // every later read — the re-bear, the range drop-out, the
+        // seeker's launch bearing — goes through it. A +146 of 0 lands
+        // on the scratch record and a freed slot keeps its stale
+        // coordinates; retail tests only `+12 >= 0 && !(+17&4) &&
+        // +64` (:24636) and treats a failure as a dead target, not as
+        // a reason to leave the handler.
         let (tx, ty, tz, tdead) = if tgt == PLAYER_TARGET {
             (ctx.px, ctx.py, ctx.pz, false)
         } else {
             let t = tgt as usize;
-            if t == 0 || t >= self.ent.len() || self.ent[t].class64 == 0 {
+            if t >= self.ent.len() {
                 self.genie_home(i, base);
-                return;
+                return; // port guard: retail would read raw memory
             }
             let c = &self.ent[t];
-            (c.x, c.y, c.z, c.act_life < 0 || c.flags & 0x400 != 0)
+            (
+                c.x,
+                c.y,
+                c.z,
+                c.act_life < 0 || c.flags & 0x400 != 0 || c.class64 == 0,
+            )
         };
         if self.ent[i].act_life >= (self.ent[i].max_life >> 1) as i32 {
             if !tdead {
@@ -1737,11 +1829,9 @@ impl Gen {
             } else {
                 self.genie_eat_ball(i);
                 self.genie_home(i, base);
-                return;
             }
         } else {
             self.genie_home(i, base);
-            return;
         }
         let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26.max(1);
         if (self.ent[i].f63 as i16) % v26 == 0 {
@@ -1756,7 +1846,21 @@ impl Gen {
                 self.snd(11, i);
             }
             self.ent[i].f26 += 1;
-            self.attack_thunk(i, 11, tgt, tx, ty, tz, 0, 0);
+            // ⭐ THE PARTING SHOT IS BORN UNTARGETED. :24697 stamps the
+            // seeker's +146 from the caster's LIVE +146 — which the
+            // break-off arms above have just had `sub_1E720` zero
+            // (:24724) — while the launch BEARING still rides the
+            // stale `v9` resolved at :24633. So a genie that breaks
+            // off looses a seeker that carries no target and must
+            // acquire in its own first `sub_530C0` tick (the
+            // acquire-or-track fork, :63071-84), which is what leaves
+            // retail's newborn reading flags 6 (bit 1 latched), +26 16
+            // (sub_54520's entry clamp) and +30 == +34. Passing the
+            // stale `tgt` here handed it a target it never had and
+            // suppressed the acquire entirely — mc1l42 t=2133 slot 378
+            // and t=14481 slot 991, and the free replay's t=2134 wall.
+            let live_target = self.ent[i].f146;
+            self.attack_thunk(i, 11, live_target, tx, ty, tz, 0, 0);
         }
     }
 
@@ -2006,7 +2110,9 @@ impl Gen {
     }
 
     /// m4 IDLE, state 25 (sub_1B5D0 :22436): the movement core, the
-    /// unarmed-look / filter restore, then the wander jitter and every
+    /// unarmed-look / filter restore, then — every v_26, and only when
+    /// +146 is EMPTY (the anchor arm below eats the tick otherwise) —
+    /// the wander jitter and every
     /// 4·v_26 a TWO-rung acquisition ladder — (1) a wizard on the
     /// village wanted list (+528 ≠ 0, the hostility gate) within aggro
     /// range, (2) the nearest burrower (m9), NO gate — villagers fight
@@ -2049,15 +2155,59 @@ impl Gen {
         }
         let row = &BEHAVIOR[self.ent[i].row156 as usize];
         let (v26, r) = (row.v_26, row.v_28 as i32);
-        if (self.ent[i].f63 as i16) % v26 == 0 {
-            // Wander re-heading (:22572-79, identical to `mob_wander`):
-            // d1 picks the sign via % 157, d2's low byte + 85 the size.
-            let d1 = self.ent_rand(i);
-            let d2 = self.ent_rand(i);
-            let mag = ((d2 & 0xFF) + 85) as i32;
-            let sign = if d1 % 157 >= 79 { 1 } else { -1 };
-            self.ent[i].f34 = ((self.ent[i].f34 as i32 + sign * mag) & 0x7FF) as u16;
+        if (self.ent[i].f63 as i16) % v26 != 0 {
+            return;
         }
+        // THE +146 ANCHOR ARM (:22546-68), the whole every-v_26 block's
+        // FIRST test and an `if/else` over the jitter — not a step
+        // beside it. A militiaman carrying ANY target consumes the tick
+        // here: a house (class 10 / model 45) is walked toward while the
+        // 3-D distance stays above 0x1000 and absorbed below it
+        // (:22551-63), and anything else — the stale wizard a chase left
+        // behind — is simply CLEARED (:22567). Either way there is no
+        // yaw jitter, no acquisition ladder and no pair-up scan on that
+        // tick. The clear is the reachable half: the shared chase's
+        // range/lost exits drop a militiaman back to 25 with +146 still
+        // naming his wizard, and the very next multiple of v_26 spends
+        // itself forgetting him. mc1l42 t=471 slot 204 (and t=564/981):
+        // retail zeroes +146 = 331, never draws and holds heading 38,
+        // while the port jittered, re-acquired the human and armed.
+        // The walk-in half stays unreachable — nothing in the port or
+        // the original ever puts a house in an m4's +146 (see the
+        // pair-up note below) — but it is retail's code, verbatim.
+        let anchor = self.ent[i].f146;
+        if anchor != 0 {
+            let house = (anchor as usize) < self.ent.len()
+                && self.ent[anchor as usize].class64 == 10
+                && self.ent[anchor as usize].model65 == 45;
+            if !house {
+                self.ent[i].f146 = 0;
+                return;
+            }
+            let (e, h) = (&self.ent[i], &self.ent[anchor as usize]);
+            let dz = h.z.wrapping_sub(e.z) as i32;
+            let d = Self::isqrt(
+                Self::dist2_sq(e.x, e.y, h.x, h.y).wrapping_add(dz.wrapping_mul(dz)) as u32,
+            );
+            if d > 0x1000 {
+                let (e, h) = (&self.ent[i], &self.ent[anchor as usize]);
+                self.ent[i].f34 = Self::angle_between(e.x, e.y, h.x, h.y);
+            } else {
+                // The silent walk-in: state 0x1C is m4's DEATH slot, and
+                // +26 = 1 is the absorb flag `mob_death` reads.
+                self.ent[i].tick70 = base + 4;
+                self.ent[i].f26 = 1;
+                self.ent[anchor as usize].f26 = self.ent[anchor as usize].f26.wrapping_add(1);
+            }
+            return;
+        }
+        // Wander re-heading (:22572-79, identical to `mob_wander`):
+        // d1 picks the sign via % 157, d2's low byte + 85 the size.
+        let d1 = self.ent_rand(i);
+        let d2 = self.ent_rand(i);
+        let mag = ((d2 & 0xFF) + 85) as i32;
+        let sign = if d1 % 157 >= 79 { 1 } else { -1 };
+        self.ent[i].f34 = ((self.ent[i].f34 as i32 + sign * mag) & 0x7FF) as u16;
         if (self.ent[i].f63 as i16) % (4 * v26) != 0 {
             return;
         }
@@ -2627,13 +2777,19 @@ impl Gen {
             }
             // sub_1E380 (:24554): m11's 3000-payload wizard-seeker
             // (explodes into the ch3 mana-steal flash, wizards only).
-            // The lone thunk that writes NO filter at all — the seeker
-            // keeps its ctor pair, so the shared (3, 0xFF) stays here
-            // rather than the genie's own +66/+67.
+            // The lone thunk that writes NO filter at all (:24683-700
+            // stamps +68/+69/+24/+44/+26/+76/+146/+30/+32 and nothing
+            // else), and sub_39E40 (:46104-28) writes none either — so
+            // the seeker flies on NewEvent's WILDCARD pair, −1/−1
+            // (:43875-76), not the shared (3, 0xFF) that used to sit
+            // here. It is the widest filter in the game: the seeker
+            // collides with everything and dies silently on anything
+            // that is not a wizard. mc1l42 reads sclass 255 on every
+            // one of them (1,138 rows against the port's 3).
             11 => {
                 if let Some(p) = self.spawn_seeker(x, y, z) {
                     self.ent[p].f26 = 20;
-                    self.arm_projectile(p, owner, 3, 0xFF, tgt, tx, ty, tz, 3000, 25, lift);
+                    self.arm_projectile(p, owner, 0xFF, 0xFF, tgt, tx, ty, tz, 3000, 25, lift);
                     self.snd(9, i); // :24700
                     return true;
                 }
@@ -2973,7 +3129,26 @@ impl Gen {
         }
     }
 
-    fn m9_hidden_body(&mut self, i: usize, base: u8, ctx: &MobCtx) {
+    /// m9's HIDDEN PRE-WORK (sub_1D060 :23682-98): the burrow
+    /// countdown (bury as type 245 on the tick it reaches 1) and then
+    /// — for a mound still on the surface — the AWAKE RE-ARM,
+    /// `if (+58) +26 = 400` (:23697-98). Both sit above the mailbox
+    /// prologue at :23700, so a mound that takes its promoting hit
+    /// still ticks the timer and still re-arms: the burrow clock only
+    /// ever runs down while the player is far, and a hit tick is by
+    /// definition a tick with someone near. mc1l42 t=20721 slot 34 is
+    /// the family: retail hands the promoted mound +26 = 400, the
+    /// port's blanket hit-abort left the imported 399 standing (and at
+    /// t=23732 left the chase-exit disguise's 50).
+    ///
+    /// Scoped to `+71 == 0` — retail's countdown is a no-op for a
+    /// buried mound (its +26 is the NEGATIVE unbury clock) and the
+    /// buried branch at :23691-95 jumps past the re-arm to the entry
+    /// trailer, so hoisting only the surfaced head is exact.
+    fn m9_hidden_prework(&mut self, i: usize) {
+        if self.ent[i].f71 != 0 {
+            return;
+        }
         let v1 = self.ent[i].f26;
         if v1 > 0 {
             self.ent[i].f26 = v1 - 1;
@@ -2981,8 +3156,17 @@ impl Gen {
                 // sub_1DD90: bury.
                 self.set_sprite(i, 245);
                 self.ent[i].f71 = 1;
+                return; // :23691-95 — the bury tick skips the re-arm
             }
         }
+        if self.ent[i].f58 != 0 {
+            self.ent[i].f26 = 400; // player near: stay surfaced
+        }
+    }
+
+    fn m9_hidden_body(&mut self, i: usize, base: u8, ctx: &MobCtx) {
+        // The countdown / bury / awake re-arm head already ran in
+        // `creature_tick`, above the intake.
         if self.ent[i].f71 != 0 {
             // Buried, sub_1D6D0 (:23926). Damage pops it into CHASE
             // via the shared prologue (retail's own inbox arm). Core
@@ -3008,9 +3192,6 @@ impl Gen {
                 self.m9_convert(i, true);
             }
             return;
-        }
-        if self.ent[i].f58 != 0 {
-            self.ent[i].f26 = 400; // player near: stay surfaced
         }
         self.creature_move(i);
         if self.ent[i].act_life < 0 {
@@ -3316,9 +3497,23 @@ impl Gen {
 
     fn chase_entry_trailer(&mut self, i: usize, model: u8, role: u8) {
         match (model, role) {
-            (4, 0 | 1 | 3) => self.militia_arm(i),    // sub_1BC50
-            (7, 1 | 3) => self.ent[i].f26 = 1,        // sub_1C900/sub_1CA00
-            (9, 1 | 3) => self.m9_enter_chase(i),     // sub_1DCD0
+            // m2's lunge arm, the same trailer in three costumes:
+            // sub_1B350 :22319-20 (idle, silent), sub_1B370 :22327-31
+            // (wander, and ONLY the wander buzzes) and sub_1B4C0
+            // :22374-75 (pack, silent). It was reachable only through
+            // the two dispatch wrappers, so a bee PROMOTED BY DAMAGE
+            // never armed: mc1l42 t=19459 slot 230 and t=21217 slot
+            // 222 both take their 400 in the pack slot and retail
+            // hands back +26 = 1 where the port kept the running
+            // pack counter (79 / 30).
+            (2, 1) => {
+                self.snd(13, i);
+                self.ent[i].f26 = 1;
+            }
+            (2, 0 | 3) => self.ent[i].f26 = 1,
+            (4, 0 | 1 | 3) => self.militia_arm(i), // sub_1BC50
+            (7, 1 | 3) => self.ent[i].f26 = 1,     // sub_1C900/sub_1CA00
+            (9, 1 | 3) => self.m9_enter_chase(i),  // sub_1DCD0
             (15, 0 | 1) => self.guard_enter_chase(i), // sub_20410
             _ => {}
         }
@@ -3465,14 +3660,22 @@ impl Gen {
         // prologue. The prologue is not the handler's first act — it
         // lives inside the shared core `sub_1A120` (:21598-21651), so
         // anything a wrapper does before calling that core still lands
-        // on hit and death ticks. Only m2's is hoisted here (:22342-54,
-        // the mc1l2 (5,2) family). m6's `+126 = 30` (sub_1C4F0 :23146,
-        // likewise the handler's first statement) is the same class of
-        // pre-work and is DELIBERATELY still below the intake at its
-        // own site — the banked "HIT-ABORT RESTRUCTURE" spec lists it
-        // separately and no corpus row has demanded it yet.
+        // on hit and death ticks. m2's (:22342-54, the mc1l2 (5,2)
+        // family), m8's (:23550-52) and m9's hidden head (:23682-98 —
+        // both mc1l42 families) are
+        // hoisted here. m6's `+126 = 30` (sub_1C4F0 :23146, likewise
+        // the handler's first statement) is the same class of pre-work
+        // and is DELIBERATELY still below the intake at its own site —
+        // the banked "HIT-ABORT RESTRUCTURE" spec lists it separately
+        // and no corpus row has demanded it yet.
         if (model, role) == (2, 2) {
             self.m2_chase_prework(i, ctx);
+        }
+        if (model, role) == (8, 2) {
+            self.griffon_chase_prework(i);
+        }
+        if (model, role) == (9, 1) {
+            self.m9_hidden_prework(i);
         }
         // The damage inbox block opening every live state handler
         // (:21330-81): apply pending damage, dispatch death/aggro.

@@ -438,20 +438,41 @@ Report lines: `N pairs fully explained (conforming + explained = M)`
 is the roster-aware conformance tier; `UNEXPLAINED rows: F field,
 M missing, E extra` is the number a triage session works to zero.
 
-## The pose-phase classifier
+## The pose pair (and the `pose-phase` classifier it retired)
 
 Retail's player pose is TWO-VALUED within a tick: the carpet moves at
 its pool slot in the middle of the entity pass, so handlers at slots
 below it read the pre-move pose and handlers above it the post-move
-pose. The recording holds ONE sample per tick, so whichever
-`--pin-pose` drives a pair, one side of the carpet-slot boundary sees
-a pose that is one tick removed from what retail's same-slot handler
-saw — aim yaw/pitch and pose-reactive steps diverge by exactly that
-skew.
+pose.
 
-`verify-deltas` therefore re-runs every dirty pair under the OTHER
-pose sample (`--no-pose-alt` disables): a row that is clean in either
-run is tagged `pose-phase` — capture, not a lead. Row-level
+**Pair mode drives BOTH samples.** `verify-deltas` feeds the walk the
+record's pose PAIR — state@N below the carpet slot, state@N+1 above,
+swapped at the carpet's own slot exactly where `tick_flight`'s
+`FlightDrive` branch swaps for the free replay. `MGC_NO_POSE_PAIR=1`
+restores the old single-sample walk, where `--pin-pose n|n1` chose
+which sample drove the whole pass; under the pair, `--pin-pose` steers
+only the alt probe below.
+
+The single-sample walk was not merely imprecise — it could not
+reproduce retail at all wherever two entities on OPPOSITE sides of the
+carpet slot are coupled inside one tick. mc1l42 t=65 is the exemplar:
+the genie at slot 101 (below the carpet at 331) mints its steal seeker
+bearing on the PRE-move carpet, 309; the newborn seeker at slot 356
+(above it) refreshes `+34` on the POST-move carpet, 321 — exactly
+retail's record — and then eases one turn-cap step, landing on
+retail's `+30` of 320. No pinned sample can emit 320, which is why
+`retail − port@pin-n` was EXACTLY ±11 (one turn cap, never a fraction
+of one) in 201 of 201 (9,8) heading rows and 16 of 16 (10,25) rows.
+Landing the pair took mc1l42's CSV from 54,746 rows to 330 and its raw
+residue from 1,209 to 276, with all 77 fixtures unchanged.
+
+The recording still holds ONE sample per tick, so the alt pass remains
+as a residual classifier: `verify-deltas` re-runs every dirty pair
+under the other pose sample (`--no-pose-alt` disables) and a row clean
+in either run is tagged `pose-phase` — capture, not a lead. Under the
+pose pair that tag is nearly dead (53,157 rows → 26 on mc1l42); a
+surviving `pose-phase` row now means a genuinely unmodelled phase, not
+the routine slot-split. Row-level
 either-matching is deliberately the union of both phases, which is
 the slot-split semantics without needing the split point (below-slot
 rows match the `n` run, above-slot rows the `n1` run).

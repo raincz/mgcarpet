@@ -568,6 +568,19 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
         let slots: Vec<usize> = slots.split(';').filter_map(|s| s.parse().ok()).collect();
         Some((slots, a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
     });
+    // MGC_MANA_TRACE=<t0>:<t1> — THE MANA-LEDGER microscope. The
+    // delta register +132 is UNGRADED by the obs schema, so a
+    // divergent regen accumulator drifts invisibly and only
+    // materializes ticks later as a graded +140 row (mc1l42's free
+    // run: clean through t=349, wrong at 350). Prints retail's
+    // +132/+136/+140 for the human carpet beside the port's pool, plus
+    // every live class-12 burst counter (+48 → f26) on both sides —
+    // the pin's own clock, since `sub_55E80`'s mid-burst arm is what
+    // zeroes the delta.
+    let manatrace = std::env::var("MGC_MANA_TRACE").ok().and_then(|v| {
+        let (a, b) = v.split_once(':')?;
+        Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
+    });
     // MGC_SITE_TRACE=<x>,<y>:<t0>:<t1> — the site-roster companion:
     // every non-castle entity within 8 tiles of the site, both sides,
     // compact — the crush/effect-lifetime microscope.
@@ -849,6 +862,55 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         tick.t,
                     );
                 }
+            }
+            if let Some((t0, t1)) = manatrace
+                && tick.t >= t0
+                && tick.t <= t1
+            {
+                let rw = &st.ents[slot as usize];
+                let pin = PinnedMc1 {
+                    slot,
+                    local: pst.local_player,
+                    player_count: pst.player_count,
+                    pose: ch.pose(),
+                };
+                let pp = world.obs_project_mc1(&pin);
+                let pmana = pp.player.as_ref().map_or((0, 0), |p| (p.mana, p.mana_max));
+                let mut rtok = String::new();
+                for (s, re) in st.ents.iter().enumerate() {
+                    if re.class64 == 12
+                        && (re.f48 != 0
+                            || re.f26 != 0
+                            || std::env::var_os("MGC_MANA_TRACE_ALL").is_some())
+                    {
+                        let _ = write!(
+                            rtok,
+                            " [{s}]m{}+48={}+50={}+26={}",
+                            re.model65, re.f48, re.f50, re.f26
+                        );
+                    }
+                }
+                let mut ptok = String::new();
+                let (_, ev) = world.debug_pool();
+                for d in ev.iter().filter(|d| d.class == 12 && d.f26 != 0) {
+                    let _ = write!(ptok, " [{}]m{}f26={}", d.slot, d.model, d.f26);
+                }
+                println!(
+                    "MANA t={} retail life={} +132={} +136={} +140={} dw0={} chg={} tok:{}\n\
+                     MANA t={}   port                    +136={} +140={} tok:{}",
+                    tick.t,
+                    rw.act_life,
+                    rw.f132,
+                    rw.f136,
+                    rw.f140,
+                    cw.move_bits,
+                    cw.charge,
+                    rtok,
+                    tick.t,
+                    pmana.1,
+                    pmana.0,
+                    ptok
+                );
             }
             if let Some((sx, sy, t0, t1)) = strace
                 && tick.t >= t0

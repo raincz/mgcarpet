@@ -438,7 +438,7 @@ fn dump_state(args: &Args) -> i32 {
                 println!(
                     "t={t} wiz {i}: ent={} mv={:#x} hands=({},{}) charge={} \
                      grace={} stall={} rate={} ai_state={} burst={} pov={} \
-                     castle={} aggro={} owned={owned:?} cool={cools:?}",
+                     castle={} aggro={} breg={:?} owned={owned:?} cool={cools:?}",
                     w.play_index,
                     w.move_bits,
                     w.hand_left,
@@ -452,6 +452,7 @@ fn dump_state(args: &Args) -> i32 {
                     w.poverty,
                     w.castle,
                     w.aggro,
+                    w.balloon_reg,
                 );
             }
         }

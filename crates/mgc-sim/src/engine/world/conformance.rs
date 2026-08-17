@@ -55,6 +55,20 @@ pub struct ImportReport {
     pub stack_fallback: Option<(usize, usize)>,
 }
 
+/// One entity's ungraded raw lanes — see [`World::raw_shadow_mc1`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RawShadowMc1 {
+    pub slot: u16,
+    pub class: u8,
+    pub model: u8,
+    /// `+70` — the handler state byte.
+    pub f70: u8,
+    /// `+71` — the burst / charge register (the kraken's bolt count).
+    pub f71: u8,
+    /// `+58`.
+    pub f58: i16,
+}
+
 /// The pinned human context the projection needs: where the carpet
 /// sits in the recording and the pose the runner is driving.
 #[derive(Debug, Clone, Copy)]
@@ -275,6 +289,20 @@ impl World {
             pitch: carpet.f32,
             speed: carpet.f126,
         };
+        // The human's acquisition list (`Type_160+532`) verbatim: the
+        // death scatter walks it in order (:55519-24) and the port has
+        // no native model of it. Entries are pool slots while the
+        // wizard lives and MODEL numbers once his landing has run
+        // (:55523) — only the live form is a scatter order, and by
+        // then the corpse has nothing left to throw, so the raw
+        // negative/model values simply fail the class-12 gate in
+        // `player_land`.
+        self.mc1_acq = std::array::from_fn(|i| {
+            wiz.spell_list
+                .get(i)
+                .and_then(|&s| u16::try_from(s).ok())
+                .unwrap_or(0)
+        });
         // The carpet's Type_156 is the canonical `&unk_98F38[7]`
         // (retail's own load-fixup anchor) — derive the table base
         // from it instead of hardcoding a per-build guest address.
@@ -288,6 +316,14 @@ impl World {
             let r = &st.ents[slot];
             if slot == human_slot as usize {
                 self.g.ent[slot] = Ent::default();
+                // The carpet record stays class 0 (the pose is the
+                // runner's input and the pass anchors at the slot),
+                // but its +4 is a LIVE stream: the death scatter
+                // spends three draws per jar on the dying wizard's
+                // own `*(a1+4)` (:55538-46), never the world LCG.
+                // Seed it or the landing throws the wrong offsets and
+                // over-draws the graded rng channel by 15.
+                self.g.ent[slot].rand = r.rand;
                 continue;
             }
             if r.class64 == 0 {
@@ -464,6 +500,27 @@ impl World {
             }
         }
 
+        // The wizext+52 BALLOON REGISTER, by contrast, IS in the
+        // recording — the closure carries the whole Type_160 slice
+        // and `balloon_reg` decodes +52/+54/+56. Import it verbatim:
+        // the register's INDEX order (spawn order, unrecoverable from
+        // a pool census) is what decides which balloon claims which
+        // ball and which one a downgrade culls, so a rebuilt-by-slot
+        // stand-in hands the fleet its targets backwards. The KEY is
+        // the owner stamp the dispatcher reads off the castle (+24),
+        // so the human's carpet slot goes through `tr` like every
+        // other owner reference.
+        self.g.mc1_balloon_reg.0.clear();
+        for w in &st.wizards {
+            if w.play_index == 0 {
+                continue;
+            }
+            self.g
+                .mc1_balloon_reg
+                .0
+                .insert(tr(w.play_index), w.balloon_reg.to_vec());
+        }
+
         // The human column: pool-entity state routes to Player, the
         // Type_160 tail to the Gen mirrors.
         self.g.player_mail = carpet.mail.map(|(a, s)| (a, tr(s)));
@@ -540,10 +597,29 @@ impl World {
 
         // Hands: the raw +940/+944 bytes index the ACQUISITION list,
         // not the spell table — resolve through the manifestation.
+        //
+        // A CORPSE'S LIST HOLDS MODELS, NOT SLOTS. The death landing
+        // overwrites every live `+532` entry with its entity's +65
+        // (:55523) and −1 for the empty ones, so the pool-slot
+        // resolution above returns nothing for the whole dead window
+        // — retail's own hands read empty there, which is the
+        // measured `mc1-death-hand-spell-loss` law. But the RAW hand
+        // bytes never move (:54884-923 refills the same list slots in
+        // place), so the respawn hands back exactly the spells the
+        // corpse went down with; resolve them straight off the list
+        // or the re-grant has nothing to bind (mc1l42 t=17397, where
+        // retail comes back holding Fireball/Possess and ours came
+        // back empty-handed).
+        let dead = carpet.f70 == 3;
         let hand = |raw: u16| {
-            st.hand_spell(local, raw)
-                .filter(|&s| (s as usize) < SPELL_COUNT)
-                .map(SpellId)
+            let s = if dead {
+                wiz.spell_list
+                    .get(raw as usize)
+                    .and_then(|&m| u8::try_from(m).ok())
+            } else {
+                st.hand_spell(local, raw)
+            };
+            s.filter(|&s| (s as usize) < SPELL_COUNT).map(SpellId)
         };
         let mut death_owned = [false; SPELL_COUNT];
         let mut death_owned_blue = [false; SPELL_COUNT];
@@ -574,6 +650,16 @@ impl World {
             // rode f132 through the accel glide). Only the
             // still-inert hold/channel/toggle tokens keep the seed
             // clamp.
+            //
+            // HEAL (1) COUNTS AS LIVE. `sub_56270` shares nothing
+            // with the launcher skeleton but the +48 countdown — it
+            // never calls the `sub_55E80` delta debit — so a wizard
+            // mid-heal keeps his +100 floor, and the port runs the
+            // token itself ([`World::mc1_heal_token_tick`], the same
+            // exclusion the strict class-12 dispatch already makes).
+            // Clamping on it cost the recorded regen outright
+            // (mc1l42 t=10677/10684/10696: retail 800/400/500 against
+            // our 700/300/400, two rows a tick).
             mana_delta: if st.ents.iter().any(|e| {
                 e.class64 == 12
                     && e.f144 == 0
@@ -582,7 +668,8 @@ impl World {
                     && !(e.f70 % 3 == 0
                         && matches!(
                             e.f70 / 3,
-                            0 | 2
+                            0 | 1
+                                | 2
                                 | 3
                                 | 6
                                 | 7
@@ -626,7 +713,31 @@ impl World {
             },
             left: hand(wiz.hand_left),
             right: hand(wiz.hand_right),
-            owned: wiz.owned_slots,
+            // A CORPSE OWNS NOTHING. `var_676` is the "spells ever
+            // acquired" table — the jar poll's already-known marker
+            // reads it (:64790) — and the death scatter never clears
+            // it, so a dead wizard's entries still point at the jars
+            // his landing threw away (:55519-47 rewrites the +532
+            // acquisition list to MODEL numbers and clears each
+            // token's owned bit instead). Importing that as ownership
+            // made the respawn's re-grant hand back the SCATTERED
+            // jars — mc1l42 t=17397 warped the five decaying jars to
+            // the castle instead of minting the five fresh tokens
+            // retail lays there.
+            //
+            // A CORPSE, THOUGH — NOT A FALLER. The rewrite is the
+            // LANDING's (:55519-47), and `+70` only becomes 3 at
+            // :55550, past it; a wizard still falling (`+70` 2) owns
+            // his tokens exactly as an alive one does, and that
+            // ownership IS what the landing scatters. Zeroing state 2
+            // as well left the port's own landing with nothing to
+            // throw — retail's five jars leapt to the death point
+            // with fresh ttls and ours sat where they were (mc1l42
+            // t=17343, 25 rows across flags/life/x/y/z).
+            owned: match carpet.f70 {
+                3 => [0u16; SPELL_COUNT],
+                _ => wiz.owned_slots,
+            },
             grace: wiz.grace,
             // The 16-tick post-hit life-regen stall (u32_383,
             // :55387-90). Unseeded, every pair inside retail's stall
@@ -683,6 +794,37 @@ impl World {
     /// human carpet is synthesized back at the pinned slot;
     /// `owner_ptr` (a guest pointer) is emitted as 0 and skipped by
     /// the comparator.
+    /// THE UNGRADED RAW LANES — the per-entity bytes `EntObsMc1` does
+    /// NOT carry: `+70` (the handler state), `+71` (the burst/charge
+    /// register) and `+58`. The recording holds all three, and
+    /// [`Self::retail_import_mc1`] restores all three every pair, so the
+    /// graded diff can never see them: a handler that READS one
+    /// correctly and WRITES it wrong is erased before it is ever
+    /// observed, and pair mode reports CLEAN forever. Only a free run,
+    /// which carries its own copy for thousands of ticks, feels it —
+    /// which is why an mc1l42 free replay can be bit-exact in every
+    /// graded field at t=6623 and still drop two `(10,23)` beam
+    /// endpoints at t=6624.
+    ///
+    /// This is the shadow diff that catches the WRITE. Join it against
+    /// the recorded state@N+1 in pair mode and every ungraded write bug
+    /// in the take surfaces in one pass.
+    pub fn raw_shadow_mc1(&self) -> Vec<RawShadowMc1> {
+        (1..self.g.ent.len() as u16)
+            .filter_map(|slot| {
+                let e = &self.g.ent[slot as usize];
+                (e.class64 != 0).then_some(RawShadowMc1 {
+                    slot,
+                    class: e.class64,
+                    model: e.model65,
+                    f70: e.tick70,
+                    f71: e.f71,
+                    f58: e.f58,
+                })
+            })
+            .collect()
+    }
+
     pub fn obs_project_mc1(&self, pin: &PinnedMc1) -> ObsMc1 {
         let untr = |v: u16| if v == PLAYER_TARGET { pin.slot } else { v };
         let mut entities: Vec<EntObsMc1> = Vec::new();
@@ -745,7 +887,17 @@ impl World {
                 })
                 .map_or(0, |(s, _)| s as u16)
         };
-        let spell_u16 = |s: Option<SpellId>| s.map(|s| s.0 as u16);
+        // A CORPSE SHOWS EMPTY HANDS. The raw +940/+944 registers
+        // survive the death untouched, but the list they index has
+        // been rewritten to MODEL numbers by the landing (:55523), so
+        // retail's own resolution — and the comparator's, which runs
+        // the same `hand_spell` walk — reads None for the whole dead
+        // window. The port carries the resolved spell instead, so the
+        // emptiness has to be projected here; clearing the registers
+        // would lose what the respawn hands straight back (mc1l42
+        // t=17343 vs t=17397, the mirrored pair).
+        let corpse = self.player.state == LifeState::Dead;
+        let spell_u16 = |s: Option<SpellId>| s.filter(|_| !corpse).map(|s| s.0 as u16);
         let wizards: Vec<WizardMc1> = (0..8u16)
             .map(|i| {
                 let localw = i == pin.local;

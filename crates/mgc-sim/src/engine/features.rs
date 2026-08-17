@@ -661,6 +661,16 @@ pub(crate) struct Gen {
     /// t=2572). Position matters: a stale entry BEFORE the first
     /// empty slot blocks that same pass's spawn.
     pub(crate) mc1_guard_reg: Mc1GuardReg,
+    /// The MANA-BALLOON REGISTER (retail wizext+52, per OWNER): three
+    /// positional pool slots the fleet dispatch walks instead of a
+    /// pool census (`sub_47400` :56329-95). Register INDEX is the
+    /// law: it fixes the ball-pick order (index 0 picks first and
+    /// takes the nearest ball), it names the two exclusions handed to
+    /// `sub_46CA0` (:56377-80), and the over-quota / downgrade cull
+    /// frees the slots at index >= quota (:56399-411) — never "the
+    /// highest pool slot". Like the guard register it lives on the
+    /// WIZARD and outlives the castle.
+    pub(crate) mc1_balloon_reg: Mc1BalloonReg,
     /// Global LCG (`rand_4`), = the level seed at scan time.
     pub(crate) rand: u32,
     /// Terrain-retile LCG (`pseudoRand`), u16 stream.
@@ -1075,6 +1085,29 @@ impl std::hash::Hash for Mc1GuardReg {
     }
 }
 
+/// `MGC_NO_BALLOON_REG=1` drops the fleet dispatcher back to the
+/// live-census stand-in (empty register + the adoption pass = the old
+/// ascending-slot walk, and the imported wizext+52 order ignored) —
+/// the A/B arm for the register law, so one binary measures both.
+/// Read once: a whole-process arm, never a per-run input.
+fn no_balloon_reg() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var_os("MGC_NO_BALLOON_REG").is_some())
+}
+
+/// The per-owner mana-balloon register (see [`Gen::mc1_balloon_reg`]).
+/// HASH-SILENT ALWAYS: the register is pure spawn-order bookkeeping
+/// over a membership the hashed pool already carries, and its whole
+/// behavioural output — which balloon holds which ball (+146), which
+/// one the cull frees (+400) — lands in hashed entity fields, so a
+/// golden still catches every divergence it can cause.
+#[derive(Default, Clone, Debug, PartialEq)]
+pub(crate) struct Mc1BalloonReg(pub std::collections::BTreeMap<u16, Vec<u16>>);
+
+impl std::hash::Hash for Mc1BalloonReg {
+    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {}
+}
+
 impl<const TAG: u8> std::hash::Hash for Mc2SlotMap<TAG> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         if !self.0.is_empty() {
@@ -1312,6 +1345,7 @@ impl Gen {
             mob_chains: MobChains::default(),
             mc2_recycle: Mc2Recycle::default(),
             mc1_guard_reg: Mc1GuardReg::default(),
+            mc1_balloon_reg: Mc1BalloonReg::default(),
             rand: seed,
             pseudo,
             spawn_count: [0; 20],
@@ -1685,7 +1719,7 @@ impl Gen {
     }
 
     /// sub_41DD0 (:52486).
-    fn unlink(&mut self, i: usize) {
+    pub(crate) fn unlink(&mut self, i: usize) {
         if self.ent[i].flags & 4 == 0 {
             return;
         }
@@ -2316,13 +2350,18 @@ impl Gen {
                 e.f82 = 128;
                 e.f84 = 128;
             }
-            // sub_3A9A0: expanding crater (also the canyon digger ctor).
+            // sub_3A9A0 (:46763): expanding crater (also the canyon
+            // digger ctor). The flag word is EDITED, not cleared —
+            // `+16 &= 0xFFFDFFF7` then `+18 |= 2` (:46779-80), i.e.
+            // drop 0x20008 and raise 0x20000 over whatever the
+            // recycled slot still holds. Ours zeroed it, so every
+            // crater in mc1l42 read flags 0 against retail's 0x20000.
             11 => {
                 e.tick70 = 11;
                 e.max_life = 40;
                 e.act_life = 40;
                 e.f44 = 200;
-                e.flags = 0;
+                e.flags = (e.flags & !0x20008) | 0x20000;
                 e.f80 = 2304;
                 e.f82 = 2304;
                 e.f84 = 0x2000;
@@ -3957,20 +3996,35 @@ impl Gen {
     /// the established castle every other tick (:56016-20). Fleet
     /// quota by level: (balloons, guards) = L1(1,0) L2(1,0) L3(1,4)
     /// L4(2,6) L5(2,14) L6(3,18) L7(3,34); shortfalls respawn at the
-    /// castle (guards = class-5 m15, HP 512). Targeting (:56358-95):
-    /// per fleet index: a spawned index gets NO targeting that pass
-    /// (:56340-49 — the newborn parks at the flag with chase 0), a
-    /// dead one (life < 0) drops its cargo and frees (:56345-47),
-    /// and a live state-9 one retargets ONLY on the stagger turn
-    /// `castle+63 % quota == 0` (:56338) — between turns the stale
-    /// +146 stands, even one pointing at a freed slot (the blind
-    /// mover keeps stepping there). On a stagger turn the target
-    /// DEFAULTS to the castle (:56341 — return/offload/hover-home),
-    /// then is overridden to the nearest own claimed ball no sibling
-    /// is on (3-D metric, sub_42390) while the balloon has cargo
-    /// room. The census-full arm (houses + stored ≥ capacity)
-    /// bypasses the stagger and homes every live balloon every pass
-    /// (:56333-35). No free ball → the castle default stands.
+    /// castle (guards = class-5 m15, HP 512).
+    ///
+    /// THE BALLOON HALF WALKS A REGISTER, NOT A CENSUS (:56329-95):
+    /// `for i in 0..quota` over the owner wizard's three `+52 + 2*i`
+    /// slots ([`Gen::mc1_balloon_reg`]). Per index: an EMPTY slot
+    /// spawns and gets NO targeting that pass (:56340-49 — the
+    /// newborn parks at the flag with chase 0) and the dispatcher
+    /// walks on WITHOUT retargeting that index; a dead one (life < 0)
+    /// drops its cargo, frees, CLEARS the slot and likewise walks on,
+    /// so the replacement is a pass late; a live state-9 one
+    /// retargets ONLY on the stagger turn `castle+63 % quota == 0`
+    /// (:56338) — between turns the stale +146 stands, even one
+    /// pointing at a freed slot (the blind mover keeps stepping
+    /// there). On a stagger turn the target DEFAULTS to the castle
+    /// (:56341 — return/offload/hover-home), then is overridden to
+    /// the nearest own claimed ball (3-D metric, sub_42390) while the
+    /// balloon has cargo room. The census-full arm (houses + stored ≥
+    /// capacity) bypasses the stagger and homes every live balloon
+    /// every pass (:56333-35). No free ball → the castle default
+    /// stands.
+    ///
+    /// INDEX IS THE LAW, and it is spawn order, never slot order:
+    /// index 0 picks first and so takes the nearest ball, the two
+    /// exclusions handed to `sub_46CA0` are the OTHER TWO register
+    /// slots' live targets (:56377-80), and the cull frees the slots
+    /// at index >= quota (:56399-411). mc1l42 t=17150 is the whole
+    /// law in one tick: register [991, 199, 107], so 991 takes ball
+    /// 161 and 107 is left ball 328 — a pool scan gets the same SET
+    /// and hands them out backwards.
     fn castle_balloons(&mut self, i: usize) {
         const FLEET: [(usize, usize); 8] = [
             (0, 0),
@@ -3984,61 +4038,204 @@ impl Gen {
         ];
         let own = self.ent[i].id24;
         let (bq, gq) = FLEET[self.ent[i].f26.clamp(0, 7) as usize];
-        let mut balloons: Vec<usize> = Vec::new();
+        // MC2's dispatcher twin (sub_60400 EF:61405) has not been
+        // register-verified against the binary, so it keeps the live-
+        // census stand-in: an empty register plus the adoption pass
+        // below reproduces the old slot-order walk exactly.
+        let mc2 =
+            matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2) || no_balloon_reg();
+        let mut reg = if mc2 {
+            [0u16; 3]
+        } else {
+            let mut r = [0u16; 3];
+            if let Some(v) = self.mc1_balloon_reg.0.get(&own) {
+                for (k, s) in v.iter().take(3).enumerate() {
+                    r[k] = *s;
+                }
+            }
+            r
+        };
+        // A register entry can only go stale through a NON-retail
+        // path (a balloon freed at its own tick by `balloon_tick`, a
+        // forged test entity, a pool import): retail's own writers
+        // clear the slot as they free it. Clear those, then ADOPT any
+        // live owned balloon the register does not name into the
+        // first empty index in slot order — the fill order retail's
+        // own spawns produce, and the recovery that keeps an orphaned
+        // fleet (castle death, cf. docs/DEVIATIONS.md) steerable.
+        for k in 0..3 {
+            let s = reg[k] as usize;
+            if s == 0 {
+                continue;
+            }
+            let e = &self.ent[s];
+            if e.class64 != 3 || e.model65 != 3 || e.id24 != own || e.flags & 0x400 != 0 {
+                reg[k] = 0;
+            }
+        }
         let mut house_tally = 0i64;
+        let mut orphans: Vec<usize> = Vec::new();
         for j in 1..self.ent.len() {
             let e = &self.ent[j];
             if e.flags & 0x400 != 0 {
                 continue;
             }
             match (e.class64, e.model65) {
-                (3, 3) if e.id24 == own => balloons.push(j),
+                (3, 3) if e.id24 == own && !reg.contains(&(j as u16)) => orphans.push(j),
                 (10, 45) if e.f144 == own => house_tally += e.f140.max(0) as i64,
                 _ => {}
             }
         }
-        // The register walk's dead-reap (:56345-47): a balloon whose
-        // life went negative outside its own tick (the one-frame
-        // linger, or an imported mid-death seed) drops its cargo and
-        // frees at DISPATCH time, before the quota count.
-        balloons.retain(|&b| {
-            if self.ent[b].act_life < 0 {
-                self.corpse_drop(b);
-                self.ent[b].flags |= 0x400;
-                false
-            } else {
-                true
-            }
-        });
+        for b in orphans {
+            let Some(k) = reg.iter().position(|&s| s == 0) else {
+                break;
+            };
+            reg[k] = b as u16;
+        }
+        // The register microscope: `--env MGC_BALLOON_REG_TRACE=1`
+        // prints the walk order a pass is about to use, to diff
+        // against `dump-state <t> wiz`'s `breg=` (the recorded
+        // wizext+52 triple).
+        if std::env::var_os("MGC_BALLOON_REG_TRACE").is_some() {
+            eprintln!(
+                "breg castle={i} own={own} bq={bq} f63={} reg={reg:?}",
+                self.ent[i].f63
+            );
+        }
         let (cx, cy, cz) = {
             let e = &self.ent[i];
             (e.x, e.y, e.z)
         };
-        // A spawned fleet index takes the place of its targeting arm
-        // for the pass (:56340-49): everything from `first_fresh` on
-        // parks at the flag with chase 0 until its stagger turn.
-        let first_fresh = balloons.len();
-        while balloons.len() < bq {
-            let Some(b) = self.spawn_balloon(cx, cy, cz, own) else {
-                break;
+        let full = house_tally + self.ent[i].f140.max(0) as i64 >= self.ent[i].f136.max(0) as i64;
+        // THE STAGGER (:56338): the ball re-pick runs only on passes
+        // where castle+63 % quota == 0 — between turns every balloon
+        // keeps its stale +146 (even one pointing at a freed slot;
+        // the blind mover keeps flying there). The modulus is the
+        // QUOTA, not the live-fleet size — same as the MC2 twin
+        // (sub_60400 EF:61405).
+        let stagger = bq != 0 && self.ent[i].f63 as usize % bq == 0;
+        for k in 0..bq.min(3) {
+            if reg[k] == 0 {
+                // Shortfall spawn (:56350-57): fills THIS index, and
+                // the walk moves straight on — no targeting arm.
+                if let Some(b) = self.spawn_balloon(cx, cy, cz, own) {
+                    reg[k] = b as u16;
+                }
+                continue;
+            }
+            let b = reg[k] as usize;
+            // The dead-reap (:56345-47): a balloon whose life went
+            // negative outside its own tick (the one-frame linger, or
+            // an imported mid-death seed) drops its cargo and frees
+            // at DISPATCH time, and its index stays EMPTY for the
+            // rest of the pass — the replacement is one pass late.
+            if self.ent[b].act_life < 0 {
+                self.corpse_drop(b);
+                self.ent[b].flags |= 0x400;
+                reg[k] = 0;
+                continue;
+            }
+            if full {
+                // The census-full arm bypasses the stagger and homes
+                // every live balloon every pass (:56333-35).
+                self.ent[b].f146 = i as u16;
+                continue;
+            }
+            if !stagger || self.ent[b].tick70 != 9 {
+                continue; // stale target stands (:56338-40)
+            }
+            // The castle default is written FIRST (:56341), then a
+            // ball override while there is cargo room.
+            self.ent[b].f146 = i as u16;
+            if self.ent[b].f140 >= self.ent[b].f136 {
+                continue; // cargo full → home
+            }
+            // The two exclusions are a DOUBLE INDIRECTION through the
+            // neighbouring register slots (:56377-80):
+            // `pool[pool[reg[(k+1)%3]].+146]` — the CURRENT target of
+            // that slot, read live, so an earlier index's fresh pick
+            // already blocks this one. The modulus is 3, never the
+            // quota: on the pass after a downgrade the doomed slots'
+            // stale targets still block, and an EMPTY register slot
+            // indirects through pool[0], whose +146 retail zeroes
+            // first (:56376) — the scratch record, never a ball.
+            let ex0 = match reg[(k + 1) % 3] as usize {
+                0 => 0,
+                s => self.ent[s].f146 as usize,
             };
-            balloons.push(b);
+            let ex1 = match reg[(k + 2) % 3] as usize {
+                0 => 0,
+                s => self.ent[s].f146 as usize,
+            };
+            // Nearest own claimed ball (sub_46CA0 :55922) — 3-D
+            // squared distance (sub_42390: wrapping i16 deltas incl.
+            // z, compared UNSIGNED).
+            let (bx, by, bz) = (self.ent[b].x, self.ent[b].y, self.ent[b].z);
+            let mut best = 0usize;
+            let mut best_d = u32::MAX;
+            // sub_46CA0 (:55931-43) walks the TICK-TOP ball chain
+            // (`var_u32_36462[1]`, the head the case-10 arm rebuilds
+            // at :52296) and filters on MODEL 39 + owner ONLY — no
+            // class byte, no act_life, no 0x400. A ball absorbed
+            // EARLIER IN THIS TICK is still a member: sub_41E80
+            // (:52508-11) is nothing but `flags |= 0x400`, and the
+            // reclaim sub_41E90 (:52514-20) runs from the per-slot
+            // walk only at the next tick's top (:52226-31). The mover
+            // ticks at the balloon's slot and the dispatcher at the
+            // castle's, so the dispatcher re-locks onto the corpse it
+            // just drank (mc1l2 t=2409/2435/5443/5767). Dropping the
+            // class test is decompile-mandated too, not cosmetic: the
+            // mid-tick merge reclaim (sub_277D0 :29723+) clears
+            // class64 but leaves model65/+144, and retail still picks
+            // that record. HW twin :51986-52008 is identical.
+            for c in 0..self.ball_chain.visible_len() {
+                let j = self.ball_chain.list[c] as usize;
+                let e = &self.ent[j];
+                if e.model65 != 39 || e.f144 != own {
+                    continue;
+                }
+                if j == ex0 || j == ex1 {
+                    continue;
+                }
+                let dx = (e.x as i16).wrapping_sub(bx as i16) as i32;
+                let dy = (e.y as i16).wrapping_sub(by as i16) as i32;
+                let dz = (e.z).wrapping_sub(bz) as i32;
+                let d = dx
+                    .wrapping_mul(dx)
+                    .wrapping_add(dy.wrapping_mul(dy))
+                    .wrapping_add(dz.wrapping_mul(dz)) as u32;
+                if d < best_d {
+                    best_d = d;
+                    best = j;
+                }
+            }
+            if best != 0 {
+                self.ent[b].f146 = best as u16;
+            }
         }
-        // The over-quota cull (:56399-411, the dispatcher's slot-
-        // cleanup tail): a shrunken fleet quota (downgrade — including
-        // to the level-0 bare flag, quota 0) FREES the excess
-        // balloons, cargo first spilled as an owned ball (sub_27690,
-        // which spawns nothing for an empty balloon — only loaded
-        // culls leave a ball behind). Retail walks its 3-slot
-        // register; our owner scan in slot order stands in (same
-        // membership, the culled EXCESS may differ). TOTAL castle
-        // death runs the same demolition from castle_downgrade
-        // (retail orphans the fleet alive there — see
-        // docs/DEVIATIONS.md).
-        while balloons.len() > bq {
-            let b = balloons.pop().expect("len > bq >= 0");
+        // The cull tail (:56399-411) runs AFTER the targeting walk,
+        // and it frees BY REGISTER INDEX: every slot at index >=
+        // quota goes, cargo first spilled as an owned ball (sub_27690
+        // spawns nothing for an empty balloon — only loaded culls
+        // leave a ball behind). A shrunken quota (downgrade, or the
+        // level-0 bare flag at quota 0) therefore drops the LATEST-
+        // REGISTERED balloons, not the highest pool slots: mc1l42
+        // t=18704 frees 107 (index 2 of [991, 199, 107]) and t=21264
+        // frees 241, both of which our slot-order pop got backwards.
+        // TOTAL castle death runs the same demolition from
+        // castle_downgrade (retail orphans the fleet alive there —
+        // see docs/DEVIATIONS.md).
+        for k in bq.min(3)..3 {
+            if reg[k] == 0 {
+                continue;
+            }
+            let b = reg[k] as usize;
             self.corpse_drop(b);
             self.ent[b].flags |= 0x400;
+            reg[k] = 0;
+        }
+        if !mc2 {
+            self.mc1_balloon_reg.0.insert(own, reg.to_vec());
         }
         // Guard respawn (:56412-47) — driven by the wizext+84 GUARD
         // REGISTER ([`Gen::mc1_guard_reg`]), not a live census. Per
@@ -4118,83 +4315,6 @@ impl Gen {
                 }
             }
             self.mc1_guard_reg.0.insert(own, reg);
-        }
-        let full = house_tally + self.ent[i].f140.max(0) as i64 >= self.ent[i].f136.max(0) as i64;
-        // THE STAGGER (:56338): the ball re-pick runs only on passes
-        // where castle+63 % quota == 0 — between turns every balloon
-        // keeps its stale +146 (even one pointing at a freed slot;
-        // the blind mover keeps flying there). The modulus is the
-        // QUOTA, not the live-fleet size — same as the MC2 twin
-        // (sub_60400 EF:61405).
-        let stagger = bq != 0 && self.ent[i].f63 as usize % bq == 0;
-        for k in 0..balloons.len() {
-            let b = balloons[k];
-            if k >= first_fresh {
-                continue; // spawn pass: no targeting at all (:56340-49)
-            }
-            if full {
-                // The census-full arm bypasses the stagger and homes
-                // every live balloon every pass (:56333-35).
-                self.ent[b].f146 = i as u16;
-                continue;
-            }
-            if !stagger || self.ent[b].tick70 != 9 {
-                continue; // stale target stands (:56338-40)
-            }
-            // The castle default is written FIRST (:56341), then a
-            // ball override while there is cargo room.
-            self.ent[b].f146 = i as u16;
-            if self.ent[b].f140 >= self.ent[b].f136 {
-                continue; // cargo full → home
-            }
-            // Nearest own claimed ball a sibling isn't already on
-            // (sub_46CA0 :55922) — 3-D squared distance (sub_42390:
-            // wrapping i16 deltas incl. z, compared UNSIGNED).
-            let (bx, by, bz) = (self.ent[b].x, self.ent[b].y, self.ent[b].z);
-            let mut best = 0usize;
-            let mut best_d = u32::MAX;
-            // sub_46CA0 (:55931-43) walks the TICK-TOP ball chain
-            // (`var_u32_36462[1]`, the head the case-10 arm rebuilds
-            // at :52296) and filters on MODEL 39 + owner ONLY — no
-            // class byte, no act_life, no 0x400. A ball absorbed
-            // EARLIER IN THIS TICK is still a member: sub_41E80
-            // (:52508-11) is nothing but `flags |= 0x400`, and the
-            // reclaim sub_41E90 (:52514-20) runs from the per-slot
-            // walk only at the next tick's top (:52226-31). The mover
-            // ticks at the balloon's slot and the dispatcher at the
-            // castle's, so the dispatcher re-locks onto the corpse it
-            // just drank (mc1l2 t=2409/2435/5443/5767). Dropping the
-            // class test is decompile-mandated too, not cosmetic: the
-            // mid-tick merge reclaim (sub_277D0 :29723+) clears
-            // class64 but leaves model65/+144, and retail still picks
-            // that record. HW twin :51986-52008 is identical.
-            for k in 0..self.ball_chain.visible_len() {
-                let j = self.ball_chain.list[k] as usize;
-                let e = &self.ent[j];
-                if e.model65 != 39 || e.f144 != own {
-                    continue;
-                }
-                if balloons
-                    .iter()
-                    .any(|&s| s != b && self.ent[s].f146 as usize == j)
-                {
-                    continue;
-                }
-                let dx = (e.x as i16).wrapping_sub(bx as i16) as i32;
-                let dy = (e.y as i16).wrapping_sub(by as i16) as i32;
-                let dz = (e.z).wrapping_sub(bz) as i32;
-                let d = dx
-                    .wrapping_mul(dx)
-                    .wrapping_add(dy.wrapping_mul(dy))
-                    .wrapping_add(dz.wrapping_mul(dz)) as u32;
-                if d < best_d {
-                    best_d = d;
-                    best = j;
-                }
-            }
-            if best != 0 {
-                self.ent[b].f146 = best as u16;
-            }
         }
     }
 
@@ -5950,6 +6070,7 @@ impl Gen {
             // list next refreshes.
             mc2_recycle: _,
             mc1_guard_reg,
+            mc1_balloon_reg,
             // Rebuilt at every tick top — never saved.
             ball_chain: _,
             mob_chains: _,
@@ -6005,6 +6126,7 @@ impl Gen {
         w.put(mc2_allied);
         w.put(mc2_castle_research);
         w.put(&mc1_guard_reg.0);
+        w.put(&mc1_balloon_reg.0);
     }
 
     pub(crate) fn snap_apply(&mut self, r: &mut Reader) -> Result<(), SnapshotError> {
@@ -6055,6 +6177,7 @@ impl Gen {
         self.mc2_allied = r.get()?;
         self.mc2_castle_research = r.get()?;
         self.mc1_guard_reg.0 = r.get()?;
+        self.mc1_balloon_reg.0 = r.get()?;
         // Presentation feed — never saved, never inherited across a
         // load.
         self.bolt_fx.0.clear();
@@ -8106,5 +8229,74 @@ mod tests {
             wbefore,
             "every other idle wrapper has no mover"
         );
+    }
+
+    /// THE GROWL ARMS THE BURST AND THE SAME TICK SPENDS ITS FIRST
+    /// CHARGE. `sub_1C4F0`'s spit block (:23243-66) sits BELOW the
+    /// cadence gate that writes `+71 = 5` (:23241), so an in-range
+    /// cadence tick growls, arms five and immediately lays the first
+    /// beam — a burst is five bolts starting on the arming tick, not
+    /// four starting the tick after. The port tested `+71 > 0` above
+    /// the gate and lost the opening bolt of every burst.
+    ///
+    /// It keeps a unit test BESIDE its fixture
+    /// (`a-kraken-growl-tick-already-lays-its-first-bolt`, mc1l42
+    /// t=6453) because the two pin different halves: the fixture
+    /// asserts the whole tick against retail, this asserts the
+    /// ORDERING directly — that `+71` lands on 4 and not 5 — which is
+    /// the single number the law turns on, and it says so without a
+    /// 180 KB evidence file or a corpus to import.
+    #[test]
+    fn the_kraken_growl_lays_its_first_bolt_on_the_arming_tick() {
+        let mut g = Gen::new(
+            flat_land(8),
+            synthetic_assets(),
+            1,
+            ChassisParams::MC1,
+            crate::verbs::VerbSet::MC1,
+        );
+        // One tile away: inside any behavior row's v_28 keep-chasing
+        // radius, so the cadence tick takes the growl arm and not the
+        // drop-out to WANDER.
+        let ctx = ctx_at(0x4180, 0x4080, 0);
+        // Mid-tile, because `flat_land` is dry and row 18's v_20 is
+        // water-only: a kraken that crosses a tile boundary here fails
+        // all four candidates and `creature_move` kills it (:21293).
+        // Started at the tile centre, its pinned 30-unit step never
+        // leaves the tile and takes `move_probe`'s same-tile shortcut.
+        let k = g.spawn_creature(6, 0x4080, 0x4080, 0).expect("m6 slot");
+        g.ent[k].tick70 = 38; // (6,2) chase — base 36 + role 2
+        g.ent[k].f146 = crate::mc1::mobs::PLAYER_TARGET;
+        g.ent[k].f71 = 0; // no burst pending
+        g.ent[k].f63 = 0; // a cadence tick for every v_26
+        // The worm ctor leaves the head's life for the level loader to
+        // refill; mc1l42's krakens carry 9000/9000.
+        g.ent[k].max_life = 9000;
+        g.ent[k].act_life = 9000;
+        let beams = g
+            .ent
+            .iter()
+            .filter(|e| (e.class64, e.model65) == (9, 9))
+            .count();
+        g.creature_tick(k, &ctx);
+        assert_eq!(
+            g.ent[k].f71, 4,
+            "the growl arms five and the arming tick spends one \
+             (:23241 then :23245) [state {} life {}]",
+            g.ent[k].tick70, g.ent[k].act_life
+        );
+        assert_eq!(
+            g.ent
+                .iter()
+                .filter(|e| (e.class64, e.model65) == (9, 9))
+                .count(),
+            beams + 1,
+            "the arming tick lays a beam of its own"
+        );
+        // The burst then runs on every following tick while armed,
+        // cadence or not — the block is outside the `!v16` gate.
+        g.ent[k].f63 = 1;
+        g.creature_tick(k, &ctx);
+        assert_eq!(g.ent[k].f71, 3, "an off-cadence tick still spends a charge");
     }
 }

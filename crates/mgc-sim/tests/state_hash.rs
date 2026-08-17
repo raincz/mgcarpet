@@ -530,10 +530,19 @@ fn level_005_golden_state_hashes() {
         // the layout-only signal. The behavioral half is free-run-only
         // (mc1l2 horizon 392 → 8282, missing/extra 72/64 → 5/5), where
         // pair mode re-imports retail's own state every tick.
-        0x76533e7fc18c8b41, // post-init (feature pass + disposition 0)
-        0x62b38cefb306e235, // A: 32 idle ticks far afield
-        0x5d56881e6873bced, // B: crater trigger fired + 120 dig ticks
-        0x620b1bfe17e91e51, // C: ambush disposition fired
+        // B/C re-pinned for THE CRATER CTOR'S FLAG EDIT (the mc1l42
+        // intake): sub_3A9A0 :46779-80 READS the flag word, masks it
+        // `& 0xFFFDFFF7` and ORs `+18 |= 2` — a read-modify-write of
+        // whatever NewEvent left standing, not the fresh clear the
+        // port wrote. The (10,11) digger therefore keeps its inherited
+        // bits, which is the only word that moves here: level 005's
+        // authored crater dig runs through B and C and the diggers are
+        // gone by D, so post-init/A/D/E hold. OBSERVABLE holds
+        // byte-for-byte at ALL SIX — the dig's outcome, its cells and
+        // its population are identical and only the flag word differs,
+        // the layout-only signal. Corpus: mc1l42 t=20159, retail
+        // flags 131072 against the port's 0; the same mask-then-set
+        // shape as the (10,23) hit flash (sub_3AE80 :47076-79).
         // D/E previously re-pinned for THE CAST-PHASE LAW (the MC1
         // arm→token-fire restructure): every hand cast now arms its
         // spell token at the wizard pass and the token's own tick
@@ -691,8 +700,48 @@ fn level_005_golden_state_hashes() {
         // the correct signal for a pure timing law. Corpus: mc1l1
         // missing-(5,3) 85 → 0; mc1l0 free run stays bit-exact
         // 0..7097; 10/10 suites, 0 regressions.
-        0xec6c62fdd5fdc3c3, // D: 64 ticks of two-hand fireball combat
-        0x518965283f7263ee, // E: 100 aftermath ticks
+        // D/E re-pinned for THE mc1l42 RESIDUE SESSION. Post-init and
+        // A..C hold byte-for-byte in BOTH goldens; D and E move in
+        // both, which is the correct signal — every law that landed
+        // this session is a COMBAT law, and D/E are the only combat
+        // windows. mc1l5 is the militia/mound level, so the m4 idle's
+        // +146 ANCHOR ARM bites hardest: a militiaman carrying a stale
+        // +146 spends his every-v_26 tick forgetting it instead of
+        // drawing twice and jittering (:22543-68), which moves his
+        // per-entity draw stream from that tick on. Beside it: m9's
+        // hidden head hoisted above the mailbox intake so a mound
+        // promoted by damage re-arms +26 = 400 (:23682-98), m8's chase
+        // pre-work hoisted the same way (:23546-53), m2's lunge arm as
+        // a chase-ENTRY trailer (:22324-32), the genie's break-off
+        // firing its parting steal seeker (:24643-50), the m0
+        // fireball's vertical bearing taking the i16-TRUNCATED run
+        // (sub_42180 :52646-48 — past 32767 the negate hands back a
+        // positive run and retail aims the long way round), Heal's own
+        // token body (sub_56270 :65091-128) and the cast command's
+        // mana gate reading the pool ahead of the mailbox intake
+        // (:55354 before :55366/:55385). Corpus: mc1l42 raw 1,542 →
+        // 276, free-run horizon 349 → 1,161; mc1l0 3/0/0 → 0/0/0,
+        // mc1l1 5/0/2 → 1/0/2, mc1l2 4/0/0 → 3/0/0; 77/77 fixtures,
+        // 0 regressions.
+        // ALL SIX re-pinned again, same session, for ONE further cause:
+        // a THING-placed spell jar now runs the real ctor (`sub_3BF70`
+        // :47979-48013 via the `off_987DE[model]` thunks :48020-161)
+        // rather than the inert stand-in, so the level-load class-12
+        // records carry retail's life/max_life/flags/f136/f140/f50/f44.
+        // That is POST-INIT hashed state, hence every checkpoint moves.
+        // ⭐ OBSERVABLE HOLDS BYTE-FOR-BYTE AT ALL SIX below — the jars
+        // sit where they always sat and nothing reads the corrected
+        // fields in these windows, so this half is a pure byte-image
+        // correction, layout-only by the companion's construction.
+        // A/B-proven with `MGC_NO_MC1_JAR_CTOR=1`, which restores these
+        // hashes exactly (and `flight_tier_golden_state_hashes` too —
+        // one cause, both goldens). mc1l42 6 field rows -> 0.
+        0xee64edaaec220851, // post-init
+        0x39d77410d2db3af5, // A
+        0xe713b6beeb64afe7, // B
+        0x8bc77e31d36b8627, // C
+        0x1a48e86a9927d082, // D: 64 ticks of two-hand fireball combat
+        0xbbac5ecf86319f32, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,
@@ -843,8 +892,17 @@ fn level_005_golden_state_hashes() {
         // outcome is unchanged (B byte-identical), while the C
         // ambush's one-tick-later fire shifts every spawn's ctor
         // draws, poses and downstream combat.
-        0xcfa4e29486b7cd92, // D
-        0xf2c21907539bafd3, // E
+        // D/E move with THE mc1l42 RESIDUE SESSION's combat laws (see
+        // the GOLDEN note) — REAL behavior, stated as such: militia
+        // forget their stale targets instead of re-acquiring, damaged
+        // mounds re-arm, damaged bees lunge, a genie that breaks off
+        // still looses one steal seeker, and a fireball whose tracker
+        // is further than 32767 away aims the LONG way round. Combat
+        // in D therefore lands differently and the aftermath in E
+        // inherits it. Post-init..C hold, so nothing before the
+        // combat window moved.
+        0xcefaec7ca85967d6, // D
+        0xe4a404dd47a0029a, // E
     ];
     assert_eq!(
         obs, OBSERVABLE,

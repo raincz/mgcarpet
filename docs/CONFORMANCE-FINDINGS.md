@@ -13226,3 +13226,824 @@ killed by CRATER (the crater spell has no fixture at all), and
 **PLAYER DEATH — which has a known bug: monsters keep attacking the
 corpse**, producing bizarre situations. One fixture exists there so
 far (the kraken dive clock); the rest is an intake.
+
+## 🏆🏆🏆 THE mc1l42 INTAKE (2026-08-17): 43,516 → 2,117, THE LAKE OF KRAKENS, THE GENIE, THE PLAYER DEATH AND THE CRATER
+
+The take the player prepared for exactly this: a genie that resists
+killing and buzzes for half the level, an entire LAKE of krakens,
+griffins mostly killed by CRATER (a spell no fixture covered), and a
+PLAYER DEATH carrying a hand-reported gameplay bug — "monsters keep
+attacking the corpse, resulting in sometimes bizarre situations".
+
+**Measured, whole take (`verify-deltas`, default flags, unexplained =
+empty `rule`):**
+
+| | HEAD | after |
+|---|---|---|
+| raw `--csv` rows | 43,516 | **1,542** (−96.5 %) |
+| UNEXPLAINED field / missing / extra | 33,796 / 9,636 / 84 | **1,510 / 15 / 17** |
+| conforming pairs | 23,215 | **25,276** of 30,773 |
+| rng-mismatched pairs | 1 | **0** |
+| `+63` phase-clock disagreements | 40 | **1** |
+
+Pose channel stays 100 % bit-exact (30,680 stepped). Certified levels
+UNMOVED at their exact baselines — mc1l0 3/0/0, mc1l1 5/0/2, mc1l2
+4/0/0 — and mc1l5 −7. Suite **65 → 75 fixtures, 6 suites, all pass**.
+
+The take decomposed into three families worth 93 % of the residue, dug
+in parallel; three more laws were landed by the session lead.
+
+### ⭐ THE LAKE OF KRAKENS — 75 % of the take was ONE INVERTED TEST
+
+**THE ARM AND THE FIRST BOLT SHARE A TICK** (`sub_1C4F0` :23233-66).
+The burst block sits BELOW the cadence gate, not above it: :23241
+writes `+71 = 5` and :23243-44 immediately spends a charge and lays a
+beam on the same tick. The port tested `+71 > 0` above the gate, so
+every burst lost its OPENING bolt — and the opening bolt is the one
+whose `8·steps+1` chain is 81 entities wide. mc1l42 t=6327 (kraken slot
+108, `+63 = 210`, `+71 = 0`): retail lays beam + 81 segments + one
+(10,23) flash, the port laid NOTHING — 82 missing, ZERO extra, the
+signature of a spawn that never happened rather than a differently
+slotted one. Bolts 2-5 always matched (`+71` re-imports every pair),
+which is why the family read as one dirty tick per ten worth 82 rows
+each. ⚠ `LABEL_30` (:23239) is a backward jump to :23211, which is
+`sub_424F0(a1x, 0x25); return;` — a state-37 drop-out and a REAL
+return, so the out-of-range cadence tick never reaches the moved block.
+
+Three more on the same family:
+
+- **THE BEAM LEAVES THE TILE CHAIN BEFORE IT FLIES** (:63311). It is
+  unlinked for its whole resolution and afterlife and flies on RAW
+  `+72/+76` writes (:63247-48, :63253-54), never `sub_41C70`. The port
+  flew it with `move_relink`: retail's death flags read `0x400`, ours
+  `0x404`, 658 rows — plus whatever a resident beam did to every later
+  victim scan that tick.
+- **THE HIT FLASH IS NOT HITTABLE** (`sub_3AE80` :47076-79). The
+  (10,23) ctor MASKS then SETS — `+16 &= 0xFFFDFFF7` drops NewEvent's
+  bit 3 as well as 0x20000, then `+18 |= 2` puts 0x20000 back. The port
+  kept bit 3: retail `0x20005`, ours `0x2000D`, 598 rows, and a flash
+  other projectiles could detonate on.
+- **THE ENDPOINT VICTIM IS A FRESH SCAN** (:63422). `LABEL_22` opens
+  `v17 = sub_11980(a1)` from the beam's RESOLVED position, after the
+  chain is laid, and it is `v17` — not the flight loop's break value —
+  that stamps `+146` (:63428) and decides the shielded-wizard
+  quartering (:63437-47).
+
+(9,9)+(10,23) **32,512 → 847**; entity sets (9,9) 9,500/176 → 202/175.
+⚠ **Every (9,9) era is the same story**: the shooters at t=6327, 8558,
+10463, 11597 and 15289 are all class-5 model-6. Only the 27000s is
+different — the Lightning Storm, 22 rows, banked.
+
+### ⭐ THE GENIE'S MANA STEAL — the take's FIRST divergent pair, at t=4
+
+The cast was read off the recording, not guessed: every (9,8) carries
+`id24 = 101`, and slot 101 is the level's **(5,11) genie**. The whole
+stream is `sub_1E380`'s chase attack, not a rival's Steal Mana.
+
+- **THE m8 HIT TELEPORTS ONTO ITS VICTIM** (`sub_530C0` :63154-56) —
+  lift the victim's `+76` by its own `+78`, relink the SEEKER there,
+  put the lift back. `proj_m8_tick` was the one class-9 handler that
+  hand-rolled its tail and kept the stepped point. t=4→5: retail's
+  seeker AND its flash both read 896/21376/**3668** = carpet 331's
+  896/21376/3568 plus the carpet's own `+78 = 100`; the port read
+  890/21343/3672. The same edit gives the terrain arm its missing
+  unconditional relink (:63104, :63161-83).
+- **THE EXPLOSION CHILD CARRIES THE VICTIM** (:63196-202) —
+  `v19[73] = victim`, unconditional, so the human carpet stamps like
+  any other. 705 rows of `chase 0` against `331`.
+- **THE m11 SEEKER FLIES NewEvent's WILDCARD FILTER.** `sub_1E380`
+  (:24683-700) is the one attack thunk in the engine that writes no
+  `+66/+67` at all, and its ctor `sub_39E40` (:46104-28) writes none
+  either, so `sClass = sModel = −1` (:43875-76) rides and the seeker
+  collides with EVERYTHING. The port's `(3, 0xFF)` placeholder made it
+  a wizards-only ghost. 1,138 `sclass` rows.
+- **THE GENIE'S BLINK PHASE IS `+16` byte[0] BIT 0** (`&1` :24336,
+  `^1` :24383), not the port's private `flags 0x2000`. ⚠ The bit is
+  RECORDED, so the stand-in cost the port the entire cycle under
+  import: an imported genie read CLEAR forever and **never blinked at
+  all**. The SET phase walks each axis by `((rand % 0x3C) << 8) +
+  12800` toroidally, sub-tile remainder kept (:24345-48), and clears
+  the pending ch0 source (`+94 = 0`, :24339).
+
+(9,8) 4,391 → 672 · (10,25) 2,847 → 41 · (5,11) 142 → 2.
+
+### ⭐ THE PLAYER DEATH — THE CORPSE-AGGRO BUG IS FIXED
+
+Retail drops a dead wizard through **two independent tests**, and the
+port had stubbed BOTH because the human lives outside the entity pool:
+
+1. **bucket[0] membership** (:52254) — the tick-top rebuild admits a
+   class-3 body only while `actLife >= 0 && (flags & 0x10) == 0`, so a
+   wizard whose life goes negative is instantly unacquirable by every
+   scan that walks the list. `nearest_wizard_target` offered the human
+   unconditionally.
+2. **the chase's target-lost test** (:21658) — `sub_1A120`
+   dereferences `+146` whoever it names and drops to WANDER on
+   `+12 < 0 || (+17 & 4)`. The port hard-coded `lost = false` for
+   `PLAYER_TARGET`, so every latched creature stayed on the corpse
+   through the fall, the 54-tick hold AND the respawn.
+
+Both now ride `MobCtx::pdead`. Witness: mc1l42 t=17306, six class-5
+model-2 bees — retail keeps them at speed 70 on their own wander, the
+port had them at −30/210 off a corpse chase. A third face of the same
+law: the jar poll walks bucket[0] for the local carpet and tests it
+`!model65 && actLife >= 0` (:64784-86), so a corpse stamps no
+already-known marker.
+
+Around it: the dead wizard is **mana-deaf** (:55381 — the whole step
+sits inside `if (actLife >= 0)`; ours re-clamped the held purse down to
+a ball-less ceiling for all 54 ticks, `player.mana` 89,600 → 56,842);
+the death fall trails its (10,1) fire from the mover's **stale scratch
+axis**, post-move and PRE-gravity, with `flags |= 0x80` alone
+(:55478-83); the jar scatter had four transcription errors (owned-bit
+clear, `++tick70` phase walk rather than a flat state, decay clock on
+`actLife` not `+26`, the throw keeping the wizard's z — :55519-47); the
+respawn resets the mana pair to the INTRINSIC base (:55021-30) and lays
+re-minted tokens at the wizard's seat (:54894); and **a corpse owns
+nothing** — `var_676` is the "ever acquired" table, not ownership, so
+importing it as ownership made the re-grant hand back the SCATTERED
+jars.
+
+⚠ **THE (10,40) GRAVE'S RUNAWAY COUNTER IS A RETAIL ARTIFACT,
+FAITHFULLY REPRODUCED** (871 rows, the window's largest family). The
+per-tick census credits every counted entity's `+140` into
+`pool[+144].+136` (`sub_48340_48680` :56911-19) whoever `+144` names,
+and its only reset walks the PLAYER TABLE (:56861-63), so a non-wizard
+owner is never re-baselined. The death landing re-points the dead
+wizard's loose (10,39) balls at the (10,40) grave it raises, and the
+grave then counts their whole purse up without bound — slot 109,
++140,822 every tick, 7,604,388 by t=17,397. Nothing reads a grave's
+`+136`; it is recorded state, so the port keeps it.
+
+Harness gap closed with it: `verify-deltas` never fed
+`PlayerCommand::respawn`, so an imported corpse could never leave
+`LifeState::Dead` and the respawn pair was UNREACHABLE. Now taken from
+`recover_pair_mc1`'s SPACE lane. Death window t=17,200-18,200:
+**1,100 → 52 rows.**
+
+### ⭐ THE CRATER — the spell with no fixture, now with three
+
+- **THERE IS NO PER-SPELL LAUNCH-PITCH TABLE.** Meteor (:65402-04),
+  volcano (:65477-80) and crater (:65533-34) all copy the caster's
+  `+32` VERBATIM — the down-arc is the player's own aim. The port's
+  fixed `0x60` bias put every lob 96 units of pitch below retail
+  (t=20150: retail 136, port 232). ⚠ **RETIRES the
+  `World::cast_projectile (launch pitches)` entry in DEVIATIONS.md.**
+- **the launch boost lands on `+126` ALONE**; `+128` keeps the ctor 384
+  and the generic flight's 2/tick servo (:63565-67) walks it back. The
+  port pinned `+128` to the boosted value and never ran the servo in
+  `proj_payload_tick` — a frozen speed and a constant lag of exactly 2
+  from the first tick to the last (306,308,310…324 vs 304,306,308…322).
+- **the charge move is on the crater too** (:65536-37); ours listed only
+  earthquake/meteor/volcano. ⚠ the SAME move exists on steal mana
+  (:65756), lightning (:65846), undead army (:65910/:65973) and mana
+  magnet (:66031) — left alone for want of a corpus witness.
+- **`sub_54520`'s entry clamp sits ABOVE the model switch** (:63975-76),
+  so it caps `+26` at 16 even on `default:` models that acquire
+  nothing. Ours had it inside the aim-assist bodies, which m2/m5/m17
+  never reach — the bolt carried the raw meter where retail records 16.
+- **the grounding step is unclamped and spends no life** — the end test
+  short-circuits `ground > z || --life < 0 || hit` (the castle ball's
+  :63586-90 twin). t=20159: retail's bolt ends at z 5596 with the
+  ground at 5664, life 12 not 11.
+- **the (10,11) ctor EDITS the flag word** (`sub_3A9A0` :46779-80,
+  `+16 &= 0xFFFDFFF7` then `+18 |= 2`), it does not clear it — the same
+  mask-then-set shape as the (10,23) flash. Retail 131072/131074 on all
+  13 detonations, ours 0/2.
+
+`(9,5)`/`(10,11)`/`(5,8)` **582 → 53**.
+
+### THE MANA-STEAL DEBIT IS SIGNED AND UNFLOORED (session lead)
+
+`sub_46540` :55691 debits the victim's pool with a plain
+`+140 -= +108`, and the shield's quartered payment (:55703) does the
+same. Neither has a floor. The ONLY floor is the wizard tick's own
+`if (+140 < 0) +140 = 0` (:55391) — and it sits on the FAR SIDE of the
+regen add `+140 += +132` (:55385), so **an over-steal eats that tick's
+regen quantum** instead of being clipped where it lands. The port
+floored at the debit site and then handed the whole quantum back.
+
+`Player::mana` is unsigned, so the shortfall now rides the pending
+delta the step already clamps in i64 (`World::debit_mana`); the mail
+block runs before the regen block in the port exactly as in retail.
+mc1l42 t=78: retail 1150 → **0**, ours 1150 → **100**; 285 of the
+take's 354 `player.mana` rows read exactly `want 0, got 100`.
+**`player.mana` 300 → 14, the (3,0) carpet mirror 304 → 14.**
+
+### ⭐ THE ARCHER'S ARROW SCANS FROM WHERE IT WAS, NOT WHERE IT LANDS (player-reported)
+
+The player's own free-run symptom — *"the full level replay still
+diverges at t=526, the point of first damage taken (from an archer)"* —
+and it is a real law, not a capture artifact.
+
+**`sub_54180` (:63789) is the ONE class-9 flight handler that probes
+for victims from its PRE-STEP position.** It copies the pose into the
+global scratch, steps the SCRATCH, and then hands `sub_11980` an `a1`
+that was never moved (:63801-05); the HW twin `sub_544D0` is
+byte-identical (hw:59890-93). A census of every class-9 victim scan
+settles it — five of six commit the stepped point FIRST, four via
+`sub_41C70_41FB0(a1, &scratch)` (:62676, :62844, :63105, :63685) and
+the m9 beam via its raw `+72/+76` store (:63249, the unlink law above).
+Only the m13 bolt does not. `sub_11980` reads its whole victim window
+off `a1+72/74/80` (:16998-17001) and never looks at the scratch, so
+**the arrow's contact test trails its flight by a full 384-unit step**,
+while the ground test, the airborne relink and the expiry all run on
+the stepped point.
+
+mc1l42 t=525 is the exemplar and only the y axis of `sub_118C0`
+(:16963-77) separates the two probe points: from the PRE-step
+(18444, 26662) the carpet at (18505, 26355) is 307 away against a
+combined `+82` of 44 + 119 — a miss; from the stepped (18582, 26307)
+it is 48 away — a hit. Traced forward, **retail's arrow never connects
+at all**: it outruns the carpet through (18720, 25952, 520) …
+(19134, 24887, 640) and expires unmoved at t=531 with `act_life` −1.
+The militia MISSED; the port was scoring a hit on a shot retail flies
+clean through, and paying out its 250 into the human.
+
+The family's signature was the giveaway — ten ticks in five PAIRS
+(525, 1055/1056, 1085/1086, 1091/1092, 22454, 23717/23718), the port
+dying at t and retail at t+1. One call closes all of them:
+`victim_scan_at(i, tmp, ctx)` → `victim_scan(i, ctx)` in
+`Gen::proj_bolt_tick`, strictly local to state 13 — `victim_scan_at`
+is untouched, so no other projectile family moves.
+
+**Measured**: raw rows **2,117 → 2,065**; `(9,13)` **40 → 0**; the
+(3,0) carpet mirror 31 → 25; `player.life` residue 26 → 22; nothing
+grew in any family. Free replay `channel firsts` pose **t=526 → t=527**
+and rng **t=8513 → t=9368**. Certified levels unmoved (3/0/0, 5/0/2,
+4/0/0); 76 fixtures, 0 regressions; `cargo test --workspace --release`
+748 passed, 0 failed, no golden moved.
+
+⚠ The new pose lead at t=527 is the PRE-EXISTING m8 seeker `(9,8)`
+heading drift at slot 354 — present at the same tick in the baseline —
+i.e. the two-phase carpet pose banked below. The free run's bit-exact
+horizon is unchanged at 349 boundaries (t=1..350), still gated by the
+`slot 331 mana` fields divergence, which pair mode shows to be 350
+ticks of accumulation rather than a per-tick error.
+
+### VERIFICATION
+
+`cargo test --workspace --release --no-fail-fast` green under an
+ambient `MGC_REQUIRE_GOLDENS=1` — 43 test targets, 0 failures,
+**6 suites enforced, 77 fixtures, 0 regressions**. `cargo fmt --all
+--check` clean.
+
+**ONE GOLDEN RE-PINNED, DELIBERATELY**: `level_005_golden_state_hashes`
+at checkpoints **B and C only** (post-init/A/D/E hold), for the (10,11)
+crater-ctor flag law — attributed by probe (reverting that one line
+makes it pass and changes nothing else), and level 005's authored
+crater dig runs through B/C with its diggers gone by D, which is
+exactly the shape. **OBSERVABLE holds byte-for-byte at ALL SIX** — the
+dig's cells, outcome and population are identical and only the flag
+word moves. Layout-only by the test's own doctrine.
+
+### ⭐ THE MISS STAMP IS THE CONSTANT 64608 — DEVIATION TORN DOWN
+
+`v19[73] = (v17 - v21) / 164` (:63428) is an UNGUARDED pointer
+difference — the very next statement guards `v17` for the
+shielded-wizard quartering (:63437-47), so the author knew it could be
+null and left this one bare. A null probe therefore records
+`(0 - entBase) / 164` truncated to a word, and in a DOS binary with no
+ASLR that is a LINK-TIME CONSTANT, the same in every retail instance.
+DEVIATIONS.md called it "garbage" and had the port stamp hit-or-0.
+
+**Measured, not derived: 64608**, on all 542 mc1l42 (10,23) miss rows
+and its 13 (10,11) crater rows. **PLAYER RULING 2026-08-17: a
+deviation on a GRADED lane puts a permanent floor under the certified
+run, which is the one thing a registered deviation may not do** — and
+`+146` is the obs `chase` column. Torn down; the value is now
+`mc1::mobs::MC1_MISS_STAMP`, emitted at both cited stamp sites (the
+shared `proj_explode` arm and the m9 endpoint's own).
+
+Field rows **2,033 → 1,510**. It also unblocked the session's biggest
+law: all 143 kraken cadence ticks had been dirty by construction, and
+`PairDiff::clean()` deliberately ignores the roster so no suppression
+rule could ever have freed one. `a-kraken-growl-tick-already-lays-its-
+first-bolt` is now cut at **t=6453**.
+
+⚠ **PER BINARY.** HIDDEN.EXE links its pool at its own address and its
+constant has no corpus witness, so the HW column still stamps
+NewEvent's 0 rather than a confidently wrong value — measure it from an
+hw take before cutting it in. ⚠ The (10,38) storm-cloud site
+(`combat.rs` ~:1950) also stamps hit-or-0 and was left alone: no
+decompile citation for that write yet.
+
+⚠ **t=6327 WAS REJECTED AS THE FIXTURE TICK.** It is clean in the
+full-take sweep but carries one `pose-phase`-tagged (5,11)
+`target_yaw` row, and the suite runs each fixture in ISOLATION with the
+manifest's single `pin_pose` and no pose-alt pass — a strictly harder
+test. Per docs/CONFORMANCE.md the doctrine is to pick another tick, not
+to nurse it; t=6453 has zero rows of ANY kind. **Screen candidates on
+the untagged AND the tagged column before cutting.**
+
+The law also keeps a unit test beside its fixture —
+`the_kraken_growl_lays_its_first_bolt_on_the_arming_tick` — because the
+two pin different halves: the fixture asserts the whole tick against
+retail, the test asserts the ORDERING directly (`+71` lands on 4, not
+5) with no evidence file and no corpus. Proven non-vacuous by
+installing the old gate order behind a temporary probe.
+
+### RESIDUE (1,542) AND BANKED LEADS
+
+- **(9,8) 672 + (10,25) 41 — THE TWO-PHASE CARPET POSE, proved not a
+  port bug.** The genie is slot 101, the carpet 331, the seeker 350+:
+  within ONE tick the genie (below the carpet) launches on the
+  PRE-move pose while the seeker (above it) homes on the MOVED one.
+  t=65→66: retail `heading 320`, `--pin-pose n1` gives 321, `--pin-pose
+  n` gives 309, and **198 of the 202 (9,8) heading rows have retail's
+  value lying strictly BETWEEN the two samples**. `World::tick_inner`
+  already advances `ctx` at the carpet slot under a `FlightDrive`; the
+  pair runner passes one pinned pose. ⭐ Feeding the pair the POSE PAIR
+  and swapping at `mc1_carpet_slot` would close this family and, on the
+  evidence of the take's 52,717 `pose-phase`-tagged rows, bite deep
+  into every other one. Infrastructure, not a law.
+- **(9,9) 304 + the `target_yaw` family — THE AIM MIRROR IS A TICK
+  STALE FOR EVERY SLOT BELOW THE HUMAN'S.** Retail bears on the TARGET
+  ENTITY's `+72` (:23255-56, :21657) — for a human target that is
+  entity slot 331, whose mirror the human's own dispatch writes.
+  Proven arithmetically twice: t=8558 kraken 105 at (21448,59335) →
+  player@8558 gives 266.6 = retail's 267, player@8559 gives 262.4 =
+  the port's 263; t=10463 kraken 102 → player@10464 gives 1028.4 = the
+  port's 1029.
+- **(5,8) 40 — the crater's griffins.** At t=20161/62 retail's griffins
+  are in `griffon_chase` (flags 0x800C, the deflection bit :23552, and
+  speed pulled to `+128`) within 2-3 ticks of detonation; ours stay in
+  wander. The ch0 broadcast lands identically in BOTH (zero `life`
+  rows), so the missing step is the m8 PROMOTION, not the damage.
+  The player's "griffins killed by crater" line is this window.
+- **the jar scatter draws the DYING WIZARD's private LCG** (`a1+4`,
+  :55536-41) — the single draw-count divergence left in the take
+  (retail 1, port 16 at t=17343). `Mc1State.rand` IS that stream but
+  lives outside `World`, and `verify-deltas` runs `tick()` with no
+  `FlightDrive`.
+- **the death fall/landing runs in the tick TAIL, not at the carpet's
+  walk slot** (2 z rows); **`wizard0.hand_left/right`** (4 rows) is an
+  import/projection round-trip gap, not a sim law (the recorder resolves
+  the raw `+940/+944` through the `+532` list the scatter has rewritten
+  to MODEL numbers); **the Lightning Storm** (22 rows, t≈27215-27236).
+- **(9,0) 227 fireball** and **(10,0) 17 blast** — untouched this
+  session, no dig attempted.
+
+### ⭐ NEXT
+
+1. **The pose-pair runner** — the single highest-leverage item left,
+   and it is harness work with a measured warrant (52,717 tagged rows
+   in this take alone).
+2. **A ruling on the 64608 miss stamp** — a quarter of mc1l42's
+   residue and the only thing between the session's biggest law and a
+   fixture.
+3. **The griffin promotion** (5,8) — the player's own headline for
+   this recording.
+
+## 🏆🏆🏆 THE POSE PAIR — mc1l42 1,542 → 276, THE HARNESS LAW THAT WAS HIDING BEHIND ITS OWN TAG
+
+The banked next-item was "the pose-pair runner", estimated at ~713 rows
+plus a bite out of the `pose-phase` tag. It was worth far more, and for
+a reason the estimate did not contain: the tag was not absorbing noise,
+it was absorbing a COUPLING that no single pinned pose can reproduce.
+
+| lane | session start | after |
+| --- | --- | --- |
+| mc1l42 raw rows | 1,542 | **276** |
+| mc1l42 total CSV rows | 54,746 | **330** |
+| mc1l42 dirty pairs | 5,388 | **47** of 30,773 |
+| mc1l42 free-replay horizon | 349 boundaries | **1,161** |
+| mc1l0 (certified) | 3/0/0 | **0/0/0** |
+| mc1l1 (certified) | 5/0/2 | **1/0/2** |
+| mc1l2 (certified) | 4/0/0 | **3/0/0** |
+| fixtures | 77 | **77, 0 regressions** |
+
+### THE LAW
+
+Retail's carpet moves MID-WALK, at its own pool slot (331 in this
+take): `sub_455D0` is the class-3 dispatch TAIL, with the knock sampled
+inside it (:55204-18) and the mailbox block running BEFORE the move
+(:55344-78, the at-castle test on the PRE-move pose :55345-52). So
+within ONE tick every entity below slot 331 reads the pre-move carpet
+and every entity above reads the moved one. `tick_flight` has always
+encoded this for the free replay; PAIR MODE PINNED ONE SAMPLE and the
+`pose-phase` tag existed only to paper over the difference — 53,157
+rows on this take.
+
+### WHY A SINGLE SAMPLE CANNOT BE "CLOSE ENOUGH"
+
+The tell was that 766 raw rows had retail's value STRICTLY BETWEEN the
+two `--pin-pose` runs, which no choice of one sample can produce. On
+the angular fields it was not fuzzy at all: `retail − port@pin-n` was
+**exactly ±11 — one turn-cap step, never a fraction of one — in 201 of
+201 (9,8) heading rows**, and 16 of 16 (10,25) rows.
+
+t=65 settles the mechanism. `dump-state 65 356` shows `class64 = 0`, so
+the slot is FREE and the seeker is BORN during the pair; `dump-state
+66 356` gives `id24 = 101`, `f146 = 331`, `f34 = 321`, `f30 = 320`.
+
+- The caster is **slot 101**, a `(5,11)` genie, BELOW the carpet — it
+  bears on the PRE-move carpet: **309**, exactly `port@pin-n`. Its own
+  aim row is graded and wrong under n1 (`t=31 slot 101 target_yaw
+  retail 928 port 925`; all 15 such rows in t=30..160 close under the
+  pair).
+- The seeker is **slot 356**, ABOVE the carpet — later in the SAME walk
+  it refreshes `+34` on the POST-move carpet: **321**, exactly
+  `port@pin-n1`, and exactly retail's record.
+- Retail's heading is neither: **309 + 11 = 320**, one turn-cap ease.
+
+⭐ So the answer is INTRA-TICK COUPLING between two entities on opposite
+sides of the carpet slot — **not** a third mid-mover pose. Both values
+are recorded endpoints, which is why the plain two-phase switch is
+sufficient. `tick_inner` gained a `post: Option<PlayerPose>` beside the
+existing `drive` branch, at the same position, so `player_mail_block` /
+`regen_boost` stay on the PRE pose and `mc1_wizard_pass` /
+`player_regen_block` on the POST pose — `tick_flight`'s own phasing.
+
+**It is now the DEFAULT**; `MGC_NO_POSE_PAIR=1` is the A/B arm, and
+`--pin-pose` degrades to steering only the alt probe. All 77 fixtures
+pass in BOTH modes, so the flip cost zero re-cuts — and it unblocks
+fixture-cutting generally, since the suite runs each fixture in
+isolation under one `pin_pose` with no alt pass (this is what forced
+t=6327 to be abandoned last session).
+
+### THE OTHER LAWS THAT LANDED (five parallel digs, disjoint territories)
+
+- ⭐ **THE m0 FIREBALL'S VERTICAL BEARING TAKES AN i16-TRUNCATED RUN,
+  NEVER A CLAMPED ONE** (`sub_42180` :52646-48, `sub_423D0` :52739-44).
+  The horizontal run is an UNSIGNED isqrt reaching 46340 on a full-map
+  diagonal; past 32767 the `(__int16)` cast goes negative and the unary
+  minus hands `sub_40F87` a POSITIVE run, landing the bearing in the
+  1024−ε quadrant — nose UP and BACKWARDS. **Retail's homer aims the
+  LONG way round at any tracker further than 32767 away**; the port
+  clamped to 0x7FFF and kept turning the servo the other way at its
+  full row cap every tick. (9,0) 227 → 40. Compounds with the decided
+  one-shot tracker law: a fireball whose `+146` slot is recycled across
+  the map chases the recycled record the wrong way round.
+- ⭐ **HOIST THE PRE-WORK ABOVE THE DAMAGE INTAKE** — one shape, four
+  handlers, the same family as the already-decided HIT-ARM trailers.
+  m8's chase pre-work (:23546-53) so a griffon hit while chasing still
+  ratchets to `+128` and re-raises the 0x8000 deflection bit; m9's
+  hidden head (:23682-98) so a mound promoted by damage re-arms
+  `+26 = 400`; m2's lunge arm as a chase-ENTRY trailer (:22324-32) so a
+  bee promoted by damage arms `+26 = 1`. (5,8) 40 → 0, (5,9) 5 → 0,
+  (5,2) 2 → 0.
+- ⭐ **THE m4 MILITIA IDLE OPENS ITS every-`v_26` BLOCK WITH THE `+146`
+  ANCHOR ARM** (:22543-68): a non-house target is CLEARED and consumes
+  the whole tick — no jitter draws, no ladder. A militiaman whose chase
+  ended keeps `+146` naming his wizard, and retail spends the next
+  `v_26` tick FORGETTING him; the port drew twice, jittered and
+  re-acquired the human. (5,4) 11 → 0, and it was the free replay's
+  wall at t=472.
+- ⭐ **RETIRED DEVIATION: the genie's break-off is not a return** —
+  `sub_1E720` (:24724) is a plain CALL on both the dead-target and the
+  below-half-life arms (:24643-50), so a genie that breaks off still
+  looses ONE parting steal seeker. The port returned, with a code
+  comment registering it as deliberate. It sat on a graded lane, so
+  under the standing player rule it went.
+- ⭐ **1 HEAL HAS ITS OWN TOKEN BODY** (`sub_56270` :65091-128), not the
+  launcher skeleton: admission is `sub_55DD0` AND `actLife < maxLife`
+  AND `v1[35] >= *(a1+136)`, and it heals 5% of the life ceiling. With
+  it, **the cast command's silent mana gate reads the pool BEFORE the
+  mailbox intake** (:55354 ahead of :55366/:55385), so a mail-block
+  debit must ride the regen delta. Free-replay horizon 349 → 471 → 1,161.
+- ⭐ **EVERY `+146` STAMP IN THE ENGINE IS ONE IDIOM.** The storm
+  cloud's site had been left open "for want of a citation"; it is
+  :63778, `*(_WORD *)(v19 + 146) = (int)(v6 - base) / 164`, the same
+  unguarded pointer difference as :63428, with `v6` left 0 on every
+  miss path. The CRATER bowl takes it too (its cast arm stamps
+  `+68/+69 = 10/11` at :65528-29, so its detonation is a generic
+  explode child). All 13 recorded craters and the storm cloud read
+  **64608**. (10,11) 13 → 0, (10,38) 6 → 1.
+- ⭐ **THE STORM CLOUD'S TWO ALTITUDE CORRECTIONS ARE SEQUENTIAL, NOT
+  EXCLUSIVE** (:29294-306): the climb is a raw `+76 += 64` and the very
+  next `if` re-reads that NEW value against `v2 + 1024`. Both set the
+  skip flag, so the tick still fires no bolts — but the port returned
+  early and RECORDED the overshoot for a frame.
+- The storm carrier's grounding step is UNCLAMPED and spends NO LIFE
+  (:63681-98 — the ground read lands in the SCRATCH, and the countdown
+  lives inside the airborne arm), and the (10,38) ctor MASKS-then-SETS
+  its flag word, dropping NewEvent's hittable bit 3 (`sub_3B460`
+  :47409-11) — the same ctor family as (10,23) and (10,11).
+
+### ⚠⚠ METHOD — THE TWO THINGS THIS SESSION GOT WRONG
+
+**1. Cross-agent arithmetic is only valid on ONE binary you built.**
+A dig reported "241 HARNESS PHANTOM ROWS" in the evidence packet and
+instructed the lead to re-cut two other agents' evidence. It was a
+misattribution: it anchored its before/after to the LEAD's session-start
+row count while measuring on a LATER binary that already carried three
+other agents' fixes, so it read their fixes as disappearances. Its own
+counts are the tell — 187 = (9,0) 227→40, 40 = (5,8) 40→0, 14 =
+(10,0) 17→3, each exactly another agent's measured improvement.
+The refutation is a controlled pair taken before the workflow launched,
+same binary, same pin, differing only in the alt pass: **54,746 rows
+each, zero difference in either direction, and 0 of the 1,542 raw rows
+absent from the `--no-pose-alt` truth.** Its `alt_world` isolation edit
+is KEPT as hygiene (`fixtures.rs:139-156` already documents that
+`retail_import_mc1` does not reset every cross-pair latch) but its
+benefit on this corpus is 0 rows, not 241.
+
+**2. A confident citation is still a citation to CHECK.** The
+adversarial pass refuted 3 of 15 claimed laws. The one that mattered:
+a dig asserted "model 12 is `sub_54520`'s `default:` — no candidate set,
+so the scan can never fire" and hard-coded a heading mirror in its
+place. The case labels are :63979 (0/3/4), :64040 (1), **:64078-81
+(7, 8, 0xB, 0xC)**, :64125 (9), :64185 (default) — **0xC IS 12**, inside
+the significant-list block, which walks the class-3 list, scores through
+`sub_54A90(a1, cand, 0x71, 0x71)` and snaps the winner (:64092-93). The
+storm carrier is a REAL acquirer; the mirror was replaced with
+`aim_assist_wizards`, which is already that block's implementation and
+carries sub_54520's `+26` entry clamp internally.
+
+**3. ⭐ THE POSE CHANNEL IS A LAGGING INDICATOR — read `channel firsts`
+LEFT TO RIGHT.** The player, reading a replay: *"still a fair amount of
+divergence, now up at 1862 (pose divergence, so the real divergence is
+earlier)"* — correct, and worth stating as method. mc1l42 reads
+`entity-set t=1162, fields t=1162, pose t=1862, rng t=8511`: the human's
+motion column stays bit-exact for SEVEN HUNDRED TICKS after the world
+around it has drifted, because the carpet flies on input, terrain and
+knock rather than on anything the entity pool does. Grade the earliest
+channel, never the pose one.
+
+### GOLDEN
+
+`level_005_golden_state_hashes` re-pinned at **D and E only**; post-init
+and A..C hold byte-for-byte in BOTH goldens. OBSERVABLE moves at the
+same two indices, and that is the CORRECT signal rather than a layout
+shuffle: D is "64 ticks of two-hand fireball combat" and E "100
+aftermath ticks", every law that landed is a combat law, and mc1l5 is
+the militia/mound level where the m4 anchor arm bites hardest.
+⚠ Attribution discipline held: one dig proved its own change innocent
+with an env-gated A/B (hashes byte-identical on and off) rather than
+guessing, and no agent re-pinned — the lead did.
+
+### PLAYTEST: CLEARED
+
+The player playtested this session's combat changes and reported them
+good. Worth recording as CLEARED rather than the usual OWED, because
+this batch deliberately moved native feel: militia forget stale targets
+instead of re-acquiring, damaged mounds re-arm, damaged bees lunge, a
+genie breaking off looses a parting seeker, and a long-range fireball
+aims the long way round.
+
+### RESIDUE (276 rows) AND THE PLAYER'S TRIAGE
+
+`(9,8)` 97 + `(9,1)` 17 + `(10,25)` 16 = **the m8 steal seeker's player
+hit firing one tick early** — one law, and it also owns the free
+replay's wall at t=1162 (`slot 213 flags: retail 4 port 1028`; the early
+death frees and reallocates slots so the (9,1) cluster holds the wrong
+records). Wave 1 proved the port's `player_overlap` AABB passes on all
+three axes by a wide margin at t=4418 while retail does not hit at all,
+and that testing against carpet@N is closer still — so retail's
+m8→wizard contact is NOT the box the port models.
+`(3,3)` 47 = the 3-slot BALLOON REGISTER on the owner wizard's
+`Type_160` at `+52 + 2*i` (:56329-95), whose double indirection
+(:56371-80) supplies both the pick ORDER and the exclusion set — the
+port scans the pool and gets the right SET in the wrong ORDER.
+t=17343's 30 rows = the death/respawn tick.
+⛔ **PLAYER-RULED: the (9,12) Lightning Storm rows are BANKED, not dug**
+— 13 rows from two casts in the last 12% of the take (*"I don't even
+remember using storm in this run… I only found the jar at the very
+end"*, and the take agrees: every (9,12)/(10,38) row in 30,878 ticks
+falls in t=27215..27240).
+
+### ⭐ THE MANA-BALLOON FLEET IS A 3-SLOT REGISTER — (3,3) CLOSED, 47 → 0
+
+`sub_47400` :56329-95. The fleet dispatcher does **not** census the
+pool: it walks the owner wizard's `Type_160 + 52 + 2*i` for
+`i in 0..quota`, three positional pool slots that live on the WIZARD
+and outlive the castle (the balloon twin of the wizext+84 guard
+register). REGISTER INDEX IS THE LAW, and index order is SPAWN order,
+never slot order:
+
+- **index 0 picks first**, so it takes the nearest own claimed ball and
+  leaves the rest for the higher indices;
+- the two exclusions handed to `sub_46CA0` are a DOUBLE INDIRECTION
+  through the neighbours — `pool[pool[reg[(i+1)%3]].+146]` and the
+  `(i+2)%3` twin (:56377-80) — read live, so an earlier index's fresh
+  pick already blocks a later one. The modulus is 3, never the quota,
+  and an empty register slot indirects through `pool[0]`, whose `+146`
+  retail zeroes first (:56376) — the scratch record, never a ball;
+- the cull tail frees **by index >= quota** (:56399-411), not "the
+  highest pool slot", and it runs AFTER the targeting walk, so a doomed
+  slot's stale `+146` still blocks a pick on its last pass;
+- an empty slot spawns and the walk moves on with **no targeting arm**
+  (:56340-49); a dead one (`life < 0`) drops its cargo, frees, clears
+  the slot and likewise walks on — so the replacement is one pass late,
+  where the port's census respawned in the same pass.
+
+The port scanned the pool in ascending slot order. Same membership,
+backwards hand-out. mc1l42 t=17150 is the whole law in one tick:
+`breg=[991, 199, 107]`, so 991 takes ball 161 and 107 is left 328 —
+we had them SWAPPED, and with them the ball's tether bit (`+16 & 0x40`)
+and its `+146` back-link, which land on whichever balloon actually
+claims it. t=18704 and t=21264 are the cull half: retail frees 107 and
+241 (index 2 of `[991, 199, 107]` / `[991, 199, 241]`) where our
+slot-order pop freed 991 — and freeing the wrong record is what moved
+those slots' `+0` seeds, which the harness grades as `rand`.
+
+**The register IS in the recording.** The closure carries the whole
+`Type_160` slice; `RetailWizardMc1::balloon_reg` now decodes +52/+54/+56
+and `retail_import_mc1` seeds it verbatim (keyed through `tr`, so the
+human's carpet slot becomes `PLAYER_TARGET` like every other owner
+reference). `dump-state <t> wiz` prints it as `breg=`; the port's own
+walk order prints under `--env MGC_BALLOON_REG_TRACE=1`. A/B arm:
+`MGC_NO_BALLOON_REG=1` drops back to the census stand-in.
+
+Measured back-to-back on one binary over the 14 packet ticks:
+**52 → 5** rows for the family (`MGC_NO_BALLOON_REG=1` vs default).
+Over the whole take there are now **zero (3,3) rows in 30,878 pairs**.
+
+MC2 keeps the census stand-in (`sub_60400` EF:61405 is not
+register-verified): an empty register plus the orphan-adoption pass
+reproduces the old ascending-slot walk exactly. Adoption is also the
+port-side recovery for a fleet the register cannot name — forged test
+entities, and the orphaned fleet of docs/DEVIATIONS.md's castle-death
+entry.
+
+### ⚠ RESIDUE IN THE SAME PACKET: THE HOLD-TOKEN MANA CLAMP (3 rows)
+
+`(3,0)` t=10677/10684/10696, `player.mana` +100 short each time (plus
+the sibling `t=10690 slot 204 f26` row). Not the balloon column: the
+carpet's regen tail applies `+140 += +132` every tick (:55385), and
+`sub_55E80` :64951-56 zeroes `wizext+132` from a live hold token only
+when `+48 != +50 && +48 != 0 && +132 > 0`. The importer stands in for
+the still-inert hold/channel tokens by seeding `mana_delta = 0` whenever
+any such token is live — but at exactly these three ticks the Heal
+token (slot 204, m1) does NOT zero: its `+48` collapses 19 → 0 (channel
+BREAK) instead of decrementing 20 → 19, and on a break tick `sub_55E80`
+is never reached, so the afield floor (+100) lands. The seed heuristic
+cannot see a break from state@N. The fix is to run the hold tokens live
+like the 2/21 launcher/speed pair already are, not to widen the exempt
+list.
+
+## 🏆🏆🏆🏆 mc1l42 CLOSED — 1,542 → **ONE ROW**, AND THE FREE RUN REACHES THE KRAKENS
+
+Wave 2, same session. Three digs on the 276-row residue, plus the lead's
+cross-territory landings.
+
+| lane | start | wave 1 | **FINAL** |
+| --- | --- | --- | --- |
+| raw rows | 1,542 | 276 | **1** |
+| conforming pairs | — | 30,726 | **30,772 / 30,773** |
+| rng channel | dirty | dirty | **0 / 30,878** |
+| pose channel | — | — | **100 % bit-exact** |
+| free-replay horizon | 349 | 1,161 | **6,623** |
+
+77/77 fixtures, 0 regressions. `cargo test -p mgc-sim` green, fmt clean.
+mc1l0 **0/0/0**, mc1l1 1/0/2, mc1l2 3/0/0. Playtest CLEARED by the player.
+
+### THE LAWS
+
+- ⭐⭐ **`sub_11980` HAS NO PLAYER ARM.** The whole body (:16988) is a
+  `mapEntityIndex` chain walk plus `sub_11950`'s AABB, and it `return 0`s
+  on an empty walk (:17020-27). The human is reached ONLY through the
+  tile chain, so the probe's CELL WINDOW gates it — and the port's
+  `victim_scan` tail returned `MailTarget::Player` on a bare AABB from
+  anywhere the box overlapped, because the importer deliberately splices
+  the human out of the tile chains. Exemplar t=4418 slot 373: the seeker
+  overlaps the carpet on ALL THREE axes by a wide margin (dx 88, dy 168,
+  dz 4 against 194/194/175) and retail still does not hit, because the
+  carpet's truncated link cell (26,136) sits outside the seeker's rounded
+  centre ring (26,137..140). (9,8) 110 → 7, (10,25) 19 → 0, (9,1) 17 → 0.
+- ⭐ **`sub_54520`'s block 7/8/0xB/0xC IS ONE ACQUIRE PROLOGUE AND THE
+  PORT WAS MISSING IT ON TWO MODELS.** `sub_530C0` (:63071-84) opens on
+  an acquire-or-track fork: `+146 == 0` ⇒ latch `+16 |= 2`, call
+  `sub_54520` ONCE, snap `+30/+32` from `+34/+36` on a win and mirror on a
+  miss. The m8 steal seeker had only the tracker half; the storm carrier
+  (model 12) had a hard-coded mirror landed on the false premise that
+  model 12 is the helper's `default:`. It is not — the case labels are
+  :63979 (0/3/4), :64040 (1), **:64078-81 (7, 8, 0xB, 0xC)**, :64125 (9),
+  :64185 (default). Retail's newborn seeker is the fingerprint: `flags 6`
+  (bit 1 latched), `+26 16` (sub_54520's entry clamp, :63975-76, cutting
+  a launch value of 20) and `+30 == +34`.
+- ⭐ **THE GENIE'S PARTING SHOT IS BORN UNTARGETED** (mobs.rs
+  `genie_chase`). :24697 stamps the seeker's `+146` from the caster's
+  LIVE `+146` — which `sub_1E720` has just zeroed (:24724) — while the
+  launch BEARING still rides the stale `v9` resolved at :24633. The port
+  passed the stale target for both, so the seeker was born pre-targeted
+  and the acquire above could never fire. **This one line took the free
+  replay from 2,133 to 6,623 boundaries.**
+- ⭐ **THE FLEET WALKS A 3-SLOT REGISTER, NOT THE POOL** (:56329-95, the
+  `for i in 0..quota` walk over `Type_160 + 52 + 2*i`, exclusions
+  :56377-80). Register index IS the pick order, and it is SPAWN order,
+  not slot order — the port's pool scan got the right SET in the wrong
+  ORDER. Its sibling: **the over-quota cull frees by register index ≥
+  quota** (:56399-411), so retail kills the LATEST-REGISTERED while the
+  port killed the highest pool slot. (3,3) → **0 across all 30,878 pairs**.
+  ⭐⭐ THE REUSABLE PART: wave 1 had diagnosed this family as
+  UNRECOVERABLE in pair mode, on the analogy of the `wizext+84` guard
+  register that must be rebuilt from a slot-order census. **It was in the
+  recording all along** — `Type_160 +52/+54/+56` was simply never
+  decoded, and the closure already carries the slice that
+  `decode_retail_wizard_mc1` reads `+50` out of. Check the recording
+  before promoting "the harness cannot see it" to an assumption.
+- ⭐ **A THING-PLACED SPELL JAR RUNS THE REAL CTOR** (`sub_3BF70`
+  :47979-48013 via the `off_987DE[model]` thunks :48020-161), not the
+  inert stand-in — the class-12 post-init did only the swi_id. 30 rows
+  across six ticks. This is the single cause of BOTH golden moves.
+- The death-tick set: a falling wizard still owns his tokens (the corpse
+  law starts at the LANDING, :55519-47 with `*(a1+70) = 3` set past the
+  loop); the scatter walks the `+532` acquisition list and spends the
+  DYING wizard's private stream (:55519-24, :55538-46 — replaying the
+  recorded seed 3128788622 reproduces the jitter exactly); the fall and
+  corpse arms are the carpet's own dispatch slot chosen at entry
+  (behavior table :4669-71); a corpse shows EMPTY HANDS and the respawn
+  hands back what the list still names (:55523, :54884-923); Heal never
+  zeroes the regen delta (it never calls `sub_55E80` :64936); the grave is
+  born at the wizard's own altitude (:55550).
+- The flight speed servo is **`2 × SIGN(+128 − +126)`**, not the gap
+  clamped to ±2 (:63097-99, and the same three lines at :62671, :63478,
+  :63571, :63680) — retail deliberately OVERSHOOTS. Landed on m8; the
+  other five handlers still carry the clamp (OPEN, and the surviving
+  (9,12) `speed` rows have exactly that smell).
+
+### ⭐⭐ THE FREE RUN NOW ENDS ON AN UNGRADED LANE — THE BLIND SPOT, CAUGHT
+
+The horizon is t=6624, the first kraken clash. Three facts hold at once:
+the free run is **bit-exact through t=6623 in every GRADED field**; pair
+mode is **CLEAN across that very pair** (0/0/0 over 22 fixture-grade pairs
+at t=6610-6650); and the free run nonetheless drops two `(10,23)` beam
+endpoints at 6624. That is only possible if the free state differs from
+retail's in a lane `EntObsMc1` does not carry. **SUSPECT: the kraken's
+burst counter `+71`** — it decides how many beam entities get laid (the
+growl-tick law writes `+71 = 5` and spends one per bolt) and it is not in
+the obs schema, so a wrong `+71` is invisible to every pair and surfaces
+only as missing endpoints in a free run.
+
+⚠ METHOD: **pair-mode cleanliness AT a free-run break is an ATTRIBUTION,
+not a puzzle — it proves the break is INHERITED.** The campaign banked the
+converse warning earlier ("pair cleanliness ≠ a faithful free replay");
+this is the same instrument read the other way. It cleared the kraken
+clash without a dig: between the t=2134 seed and the t=6624 clash there
+are only 55 rows in three families — (9,8) 43, (10,25) 7 (the seeker's own
+shadow, since a seeker dying a tick early blooms its flash a tick early)
+and (12,1) 5 — i.e. ONE law firing ~20 times over 4,500 ticks.
+
+### GOLDEN
+
+`level_005_golden_state_hashes` re-pinned at ALL SIX and
+`flight_tier_golden_state_hashes` at all eight, from ONE cause: the THING
+jar ctor writes real level-load fields, which is POST-INIT hashed state.
+⭐ `level_005`'s OBSERVABLE companion **holds byte-for-byte at all six**,
+so that half is a pure byte-image correction, layout-only by the
+companion's construction. A/B-proven with `MGC_NO_MC1_JAR_CTOR=1`, which
+restores both exactly. (The earlier D/E-only re-pin in this same session
+was the combat half, where OBSERVABLE correctly DID move.)
+
+### OPEN, AND DELIBERATELY LEFT
+
+- **The one row**: `t=17343 slot 122 (10,1) z, retail 1911 / port 1950` —
+  the death-fall trail spawns at the mover's stale global scratch axis
+  (:55478-83), the carpet's post-move PRE-gravity pose. Diagnosed, not
+  reconstructed. ⛔ PLAYER-RULED acceptable: *"we can definitely leave it
+  at a small hard to diagnose problem unresolved."*
+- **The (9,12) Lightning Storm rows** — player-ruled BANKED (two casts in
+  the last 12 % of the take).
+- `filter_admits` (combat.rs :208) is a SHAPE MISMATCH against retail
+  (:17022-25 is `f66 == -1 || (f66 == class && f67 == -1) || (f66 ==
+  class && f67 == model)` — a wildcard `f66` admits everything regardless
+  of `f67`; the port requires both clauses independently). Unreachable in
+  this corpus and it feeds `area_write`, so it was NOT landed blind.
+
+### ⭐⭐ THE RAW SHADOW — A NEW INSTRUMENT, AND THE `+71` SUSPECT REFUTED
+
+The free run's t=6624 break pointed at an ungraded lane, and the player's
+own observation narrowed it: *"the krakens are attacking… they're
+attacking for a while and it only breaks midway through it."* A gate that
+misfires breaks at the START of an attack; a break MIDWAY is a COUNTER.
+The named suspect was the kraken's burst register `+71`.
+
+Settling it turned out to be cheap, because pair mode already holds both
+sides — the port's post-tick state and the recording's state@N+1 — and
+simply never compares the raw bytes. **`MGC_RAW_SHADOW=1`** on
+`verify-deltas` now diffs the ungraded per-entity lanes (`+70` state,
+`+71` burst, `+58`) and tallies them per (class, model, field):
+`World::raw_shadow_mc1` plus the tally in `verify.rs`. Default OFF; it
+grades nothing and does not touch the UNEXPLAINED headline.
+
+It catches a class the graded diff structurally CANNOT. `retail_import_mc1`
+restores all three fields every pair, so a handler that READS one
+correctly and WRITES it wrong is erased before it is ever observed — pair
+mode reports clean forever, and only a free run, carrying its own copy for
+thousands of ticks, ever feels it.
+
+**`+71` HAS ZERO MISMATCHES across all 30,773 mc1l42 pairs.** The burst
+counter writes correctly everywhere; the hypothesis is dead. What the
+sweep did surface:
+
+| lane | mc1l42 | mc1l0 | shape |
+| --- | --- | --- | --- |
+| `+58`, class-5 | ~1,300 (**krakens (5,6): 175**) | 331 | retail 2-12, **port 250** |
+| `+70` | 22 (21 on (3,2), 1 on (10,0)) | 16, all (3,2) | retail 4, port 5 |
+| `+71` | **0** | **0** | — |
+
+⚠⚠ **DO NOT OVERCLAIM `+58`.** mc1l0 is 0/0/0 in pair mode AND bit-exact
+end-to-end in free replay while carrying 331 of these mismatches, so an
+ungraded divergence is not automatically consequential. `+58` is the best
+available lead for t=6624 — it is the DECREMENTING AWAKE counter, it is
+kraken-specific at 175 rows, and a drifting wake cadence is exactly the
+shape of "they attack for a while and it breaks midway" — but it is a
+LEAD, not a diagnosis.
+
+⚠ TRAP: compare `+58` as a BYTE. The recording's is signed and the port
+widens it to i16 while its own decrements wrap as u8, so retail's -6 and
+the port's 250 are the SAME byte. Unmasked, that artifact alone reported
+62,535 mismatches where 1,322 are real. (That the port loses the SIGN of a
+counter other code tests against zero is its own ungraded lead.)

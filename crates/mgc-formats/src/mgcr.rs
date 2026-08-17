@@ -1003,6 +1003,13 @@ pub struct RetailWizardMc1 {
     /// Danger-music countdown (v_46).
     pub danger: i16, // +46
     pub castle: u16,      // +50 (established castle slot)
+    /// The BALLOON REGISTER (+52 + 2*i, three u16 pool slots). The
+    /// fleet dispatcher walks THIS, not a pool census (`sub_47400`
+    /// :56329-95): register index decides ball-pick ORDER, the
+    /// exclusion set is the other two slots' current targets read
+    /// through a double indirection (:56377-80), and the over-quota
+    /// cull frees the slots at index >= quota (:56399-411).
+    pub balloon_reg: [u16; 3], // +52
     /// Claimed-house mana tally (u32_308).
     pub banked_houses: i32, // +308
     /// Cast-charge meter (u8_326): +1 per carpet tick to a 200 cap
@@ -1194,6 +1201,7 @@ fn decode_retail_wizard_mc1(d: &[u8], i: u16) -> RetailWizardMc1 {
         eff_pitch: u16_(d, t + 28),
         danger: i16_(d, t + 46),
         castle: u16_(d, t + 50),
+        balloon_reg: [u16_(d, t + 52), u16_(d, t + 54), u16_(d, t + 56)],
         banked_houses: i32_(d, t + 308),
         charge: u8_(d, t + 326),
         roll_acc: u16_(d, t + 327),

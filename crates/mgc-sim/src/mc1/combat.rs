@@ -29,7 +29,7 @@
 
 use crate::engine::features::{Ent, Gen, lcg32, tile};
 use crate::mc1::behavior::BEHAVIOR;
-use crate::mc1::mobs::{MobCtx, PLAYER_TARGET};
+use crate::mc1::mobs::{MC1_MISS_STAMP, MobCtx, PLAYER_TARGET};
 use crate::mc1::sprite_stats::SPRITE_STATS;
 use crate::verbs::{CorpseVerb, TargetingVerb, VerbKind};
 
@@ -42,6 +42,23 @@ use crate::verbs::{CorpseVerb, TargetingVerb, VerbKind};
 fn no_ball_merge_fix() -> bool {
     static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *V.get_or_init(|| std::env::var_os("MGC_NO_BALL_MERGE_FIX").is_some())
+}
+
+/// `MGC_NO_PROBE_WINDOW_PLAYER=1` restores the projectile probe's
+/// unconditional player AABB arm — the pre-dig [`Gen::victim_scan`]
+/// tail that reached the human from anywhere its box overlapped,
+/// ignoring the cell window `sub_11980` actually walks. A/B arm only.
+fn no_probe_window_player() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var_os("MGC_NO_PROBE_WINDOW_PLAYER").is_some())
+}
+
+/// `MGC_NO_M8_ACQUIRE=1` restores the pre-dig [`Gen::proj_m8_tick`]
+/// head: no `sub_54520` acquire fork for an untargeted steal seeker
+/// and the `.clamp(-2, 2)` speed servo. A/B arm only.
+fn no_m8_acquire() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var_os("MGC_NO_M8_ACQUIRE").is_some())
 }
 
 /// The player carpet's half-extents (sprite 44 stats halves — the
@@ -715,8 +732,27 @@ impl Gen {
 
     /// Vertical bearing (sub_42180 :52644): the pitch whose polar step
     /// descends from `fz` toward `tz` over horizontal distance `dh`.
+    ///
+    /// ⭐ THE RUN IS TRUNCATED TO i16 BEFORE IT IS NEGATED, NOT
+    /// CLAMPED. `sub_42180` is `sub_40F87(a1->z - a2->z, -(__int16)
+    /// sub_423D0(a1, a2))` (:52646-48) and `sub_423D0` (:52739-44)
+    /// returns an UNSIGNED isqrt that reaches 46340 for a full-map
+    /// diagonal. Past 32767 the `(__int16)` cast goes negative and the
+    /// unary minus hands `sub_40F87` a POSITIVE run, which lands the
+    /// bearing in the 1024−ε quadrant (nose UP and BACKWARDS) instead
+    /// of the 0+ε one — retail's homer aims the LONG way round at any
+    /// tracker further than 32767 away. The port clamped to 0x7FFF and
+    /// so kept aiming forward, turning the servo the opposite way at
+    /// its full row cap every tick.
+    ///
+    /// This is the (9,0) fireball's whole residue on mc1l42: the
+    /// one-shot tracker never re-validates (see [`Self::home`]), so a
+    /// fireball whose +146 slot gets recycled into something across
+    /// the map homes on garbage at 35537 units — retail pitches DOWN
+    /// 22/tick, the port pitched UP 22/tick, and x/y/z followed
+    /// (t=2137-42 slot 371, t=6051-56, t=12274-80, t=14485-89).
     pub(crate) fn pitch_toward(fz: i16, tz: i16, dh: i32) -> u16 {
-        Self::angle_of(fz.wrapping_sub(tz), (-(dh.clamp(0, 0x7FFF))) as i16)
+        Self::angle_of(fz.wrapping_sub(tz), (dh as i16).wrapping_neg())
     }
 
     /// The acquire score, sub_54A90 :64212-17 (its castle twin
@@ -1196,7 +1232,8 @@ impl Gen {
 
     /// sub_11980 (:16988) from a projectile: first overlapped victim
     /// in the surrounding cells passing the filter/owner/damageable
-    /// gates. Also probes the out-of-pool player.
+    /// gates. The out-of-pool player rides the same cell window (see
+    /// the tail).
     ///
     /// Geometry identical to its `sub_11AC0` sibling below, and for
     /// the same reason — both walk the SEARCH.DAT ring iterator, not
@@ -1213,7 +1250,8 @@ impl Gen {
             (e.x, e.y, e.id24, e.f66, e.f67)
         };
         let r = (self.ent[i].f80 as i32 + 255) >> 8;
-        for t in self.probe_window(wx, wy, r) {
+        let cells = self.probe_window(wx, wy, r);
+        for &t in &cells {
             let mut j = self.map_entity[t] as usize;
             while j != 0 {
                 let c = &self.ent[j];
@@ -1242,7 +1280,43 @@ impl Gen {
                 j = c.next20 as usize;
             }
         }
-        if id != PLAYER_TARGET && Self::filter_admits(f66, f67, 3, 0) && self.player_overlap(i, ctx)
+        // The player probe. `sub_11980` has NO player arm: it returns
+        // pool records only (:17020-27), so retail reaches the human
+        // exactly like every other victim — through the tile chain,
+        // where the carpet sits as an ordinary linked record. So the
+        // probe's CELL WINDOW gates it, the same law [`Self::area_write`]
+        // already carries: the carpet is linked at its plain
+        // `(x>>8, y>>8)` tile (`sub_41CF0` :52468, truncated), while
+        // the probe centres on the ROUNDED cell (:17000-01) and walks
+        // the SEARCH.DAT ring from there — so the two grids are half a
+        // tile out of step and a bolt whose ring stops one cell short
+        // sails straight past a carpet its AABB overlaps.
+        //
+        // The port's unconditional AABB arm is what killed the genie's
+        // mana-steal seeker a tick early all over mc1l42 (~20 events,
+        // the level's largest single family, and the free replay's
+        // t=1162 wall): exemplar t=4418 slot 373, seeker stepping to
+        // (6643, 35222) = rounded cell (26, 138), carpet 331 at its
+        // POST-walk sample (6731, 35054) = linked cell (26, 136) —
+        // two rows below a ring that reaches 137. All three AABB axes
+        // pass by 88/168/4 against half-sums of 194/194/175, and
+        // retail still does not hit: retail's scan never sees the
+        // record. The port hit, took the `MailTarget::Player` arm,
+        // teleported onto the carpet and spawned its (10,25) flash a
+        // tick early.
+        //
+        // MC2 keeps the pure AABB probe, in step with `area_write`:
+        // its window is the inflated square with the `.max(1)` floor
+        // (see [`Self::probe_window`]), one half of a compensating
+        // pair with the chord march, so gating it there would be
+        // gating a window that is not retail's.
+        let player_in_window = no_probe_window_player()
+            || matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2)
+            || cells.contains(&tile((ctx.px >> 8) as u8, (ctx.py >> 8) as u8));
+        if id != PLAYER_TARGET
+            && player_in_window
+            && Self::filter_admits(f66, f67, 3, 0)
+            && self.player_overlap(i, ctx)
         {
             return Some(MailTarget::Player);
         }
@@ -1457,6 +1531,7 @@ impl Gen {
                 e.f32 = pitch;
             }
         }
+        let miss_stamp = (!self.is_hidden_worlds()).then_some(MC1_MISS_STAMP);
         if let Some(fx) = self.spawn_effect(f69, x, y, z) {
             let e = &mut self.ent[fx];
             e.id24 = owner;
@@ -1469,9 +1544,41 @@ impl Gen {
             // Provenance only — no effect handler reads it — but it
             // is an observable lane (the mc1hwl0 clouds carry
             // chase=522).
+            // The write is a raw pointer-to-index of whatever the
+            // probe returned, so the HUMAN CARPET stamps like any
+            // other victim — mc1l42's steal flashes all read chase =
+            // the carpet slot, never 0. `PLAYER_TARGET` is the port's
+            // name for that slot; the projection untranslates it.
+            // ...and a MISS stamps too. `v19[73] = (v17 - v21) / 164`
+            // (:63428) is an UNGUARDED pointer difference — the very
+            // next statement guards `v17` for the shielded-wizard
+            // quartering (:63437-47), so the author knew it could be
+            // null and left this one bare. A null probe therefore
+            // yields `(0 - entBase) / 164` truncated to a word, which
+            // in a DOS binary with no ASLR is a LINK-TIME CONSTANT,
+            // identical in every retail instance.
+            //
+            // It is measured from the recording, not derived: mc1l42
+            // reads 64608 on all 542 (10,23) miss rows and on the 13
+            // (10,11) crater rows. Reproducing it is deliberate — the
+            // lane is GRADED (the obs `chase` column), so declining to
+            // emit it put a permanent floor under any certified run,
+            // which is the one thing a registered deviation may not do
+            // (docs/DEVIATIONS.md, ruling 2026-08-17).
             if stamp_victim {
-                if let Some(MailTarget::Pool(j)) = struck {
-                    e.f146 = j as u16;
+                match struck {
+                    Some(MailTarget::Pool(j)) => e.f146 = j as u16,
+                    Some(MailTarget::Player) => e.f146 = PLAYER_TARGET,
+                    // HIDDEN.EXE links its pool at its own address, so
+                    // the constant is PER BINARY and the HW one has no
+                    // corpus witness yet. Leave HW at NewEvent's 0
+                    // rather than stamp a confidently wrong value; cut
+                    // it in when an hw take shows the miss rows.
+                    None => {
+                        if let Some(s) = miss_stamp {
+                            e.f146 = s;
+                        }
+                    }
                 }
             }
             if copy_f44 {
@@ -1879,33 +1986,104 @@ impl Gen {
     /// cloud, passing owner/heading/victim/damage and the (9,9)
     /// bolt spec down (:63767-83).
     fn proj_m12_tick(&mut self, i: usize, ctx: &MobCtx) -> bool {
-        let e = &mut self.ent[i];
-        e.f126 += (e.f128 - e.f126).clamp(-2, 2);
+        // :63653-76 — the TARGET TEST OPENS THE HANDLER, above the
+        // speed servo, and the untargeted arm is sub_52770's one-shot
+        // acquire prologue verbatim: latch flags bit 1, call
+        // sub_54520 ONCE, snap +30/+32 from the acquired +34/+36 on a
+        // win and mirror the live heading back on a miss.
+        //
+        // ⚠ THE STORM CARRIER IS A REAL ACQUIRER, NOT A `default:`.
+        // `sub_54520_548B0`'s switch on +65 lists model 12 EXPLICITLY:
+        // the case labels are :63979 (0/3/4), :64040 (1), :64078-81
+        // (7, 8, 0xB, **0xC**), :64125 (9), :64185 (default) — and
+        // 0xC is 12, inside the significant-list block. So the carrier
+        // walks the class-3 list, scores each candidate through
+        // `sub_54A90_54FC0(a1, cand, 0x71, 0x71)` (:64104/:64110),
+        // stamps the winner into +146 and snaps (:64092-93). It is the
+        // same block models 7/8/0xB ride, which is exactly what
+        // [`Self::aim_assist_wizards_mc1`] already implements, and
+        // sub_54520's entry clamp on +26 (:63975-76, above the switch)
+        // rides inside it. mc1l42 t=27215: retail's carrier reads
+        // flags 6 and +26 = 16 off a 101-tick charge, ours 4 and 0.
         if self.ent[i].f146 != 0 {
             self.home(i, ctx);
+        } else if self.ent[i].flags & 2 == 0 {
+            self.ent[i].flags |= 2;
+            self.aim_assist_wizards(i, ctx);
+            if self.ent[i].f146 != 0 {
+                self.ent[i].f30 = self.ent[i].f34;
+                self.ent[i].f32 = self.ent[i].f36;
+            } else {
+                self.ent[i].f34 = self.ent[i].f30;
+                self.ent[i].f36 = self.ent[i].f32;
+            }
         }
+        let e = &mut self.ent[i];
+        e.f126 += (e.f128 - e.f126).clamp(-2, 2);
         let mut tmp = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
         let (yaw, pitch, speed) = {
             let e = &self.ent[i];
             (e.f30, e.f32, e.f126)
         };
         Self::polar_step(&mut tmp, yaw, pitch, speed);
-        let hit = self.victim_scan_at(i, tmp, ctx);
+        // :63683-85 — the stepped point is COMMITTED AND RELINKED
+        // before the victim probe (`sub_41C70_41FB0` then
+        // `sub_11980(a1)` off the entity's own +72), and it is
+        // committed RAW: the ground read at :63689 lands in the
+        // SCRATCH's z, never the entity's, so a carrier that steps
+        // into a hill keeps the buried z. mc1l42 t=27217: retail's
+        // carrier ends at 3775 with the ground at 3871, and the
+        // (10,38) cloud it raises inherits that buried z (3839, not
+        // 3935). Same law as the castle ball / crater grounding.
+        self.move_relink(i, tmp.0, tmp.1, tmp.2);
+        let hit = self.victim_scan(i, ctx);
         let ground = self.ground_z(tmp.0, tmp.1) as i16;
         let grounded = ground > tmp.2;
-        self.move_relink(i, tmp.0, tmp.1, if grounded { ground } else { tmp.2 });
-        self.ent[i].act_life -= 1;
-        if hit.is_none() && !grounded && self.ent[i].act_life >= 0 {
-            return false;
+        // :63692-98 — the life countdown lives INSIDE the airborne
+        // arm, so a touchdown never reaches it and the carrier that
+        // blooms on contact is recorded one tick "younger" (mc1l42
+        // t=27217 life 3 not 2; t=27236 life 5 not 4 — the second
+        // storm grounds on its very first tick and never spends one).
+        if hit.is_none() {
+            if !grounded {
+                self.ent[i].act_life -= 1;
+                if self.ent[i].act_life >= 0 {
+                    return false;
+                }
+            } else if self.ent[i].model65 != 4 && self.on_water_pub(tmp.0, tmp.1) {
+                self.splash_and_die(i); // stormless water end (:63699-709)
+                return false;
+            }
         }
-        if grounded && self.on_water_pub(tmp.0, tmp.1) {
-            self.splash_and_die(i); // stormless water end (:63704)
-            return false;
+        // :63759-61 — a struck carrier parks on the victim's aim
+        // point (the +76/+78 sub_524C0 bracket) before it blooms, so
+        // the cloud is laid on the victim, not at the step endpoint.
+        match hit {
+            Some(MailTarget::Pool(j)) => {
+                let (jx, jy, jz) = (self.ent[j].x, self.ent[j].y, self.ent[j].aim_z());
+                self.move_relink(i, jx, jy, jz);
+            }
+            Some(MailTarget::Player) => {
+                self.move_relink(i, ctx.px, ctx.py, ctx.pz.wrapping_add(PLAYER_HH as i16));
+            }
+            None => {}
         }
         let (x, y, z, own, f44, f30, f32) = {
             let e = &self.ent[i];
             (e.x, e.y, e.z, e.id24, e.f44, e.f30, e.f32)
         };
+        // The cloud's +146 is written by the SAME unguarded pointer
+        // difference as the explode children's (:63778 `*(v19 + 146)
+        // = (v6 - base) / 164`, the :63428 twin): `v6` is the probe
+        // result, and the probe returning NULL is never guarded, so a
+        // MISS records `(0 - entBase) / 164` truncated to a word —
+        // the link-time constant [`MC1_MISS_STAMP`], not 0. This is
+        // the citation the site was missing: mc1l42's storm clouds
+        // read chase = 64608 on every miss (t=27217 slot 99). ⚠ the
+        // constant is PER BINARY; HIDDEN.EXE links its pool
+        // elsewhere and has no corpus witness, so HW keeps
+        // NewEvent's 0.
+        let miss_stamp = (!self.is_hidden_worlds()).then_some(MC1_MISS_STAMP);
         if let Some(s) = self.spawn_effect(38, x, y, z) {
             let e = &mut self.ent[s];
             e.id24 = own;
@@ -1917,7 +2095,7 @@ impl Gen {
             e.f146 = match hit {
                 Some(MailTarget::Pool(j)) => j as u16,
                 Some(MailTarget::Player) => PLAYER_TARGET,
-                None => 0,
+                None => miss_stamp.unwrap_or(0),
             };
         }
         self.ent[i].flags |= 0x400;
@@ -2478,11 +2656,54 @@ impl Gen {
     /// victims (class 3 model ≤ 1 / the player); every other end is a
     /// silent despawn (:63188-210).
     fn proj_m8_tick(&mut self, i: usize, ctx: &MobCtx) -> bool {
-        let e = &mut self.ent[i];
-        e.f126 += (e.f128 - e.f126).clamp(-2, 2);
-        if self.ent[i].f146 != 0 {
+        // sub_530C0 opens on the SAME acquire-or-track fork every
+        // other flight handler carries (:63071-84), and the port ran
+        // only the tracker half. `+146 == 0` means the seeker was
+        // launched UNTARGETED; retail then latches +16 bit 1 and runs
+        // the ONE-SHOT acquire — `sub_54520` block 8, the
+        // significant-list-only scan ([`Self::aim_assist_wizards`]) —
+        // snapping the live heading onto the pick, or mirroring the
+        // heading into the aim fields when nothing scores.
+        //
+        // Retail launches m8s untargeted from BOTH of its two sites:
+        // the wizard's Steal Mana cast (`sub_57250` :65740-62 stamps
+        // +68/+69/+44/+24/+76/+140/+26/+150/+30/+32 and never +146)
+        // and the genie's PARTING shot, which reads the caster's LIVE
+        // +146 at :24697 — `sub_1E720` has just zeroed it — while the
+        // launch bearing still comes off the stale `v9`. So an
+        // untargeted seeker never acquired, never latched the bit, and
+        // never took `sub_54520`'s entry clamp of +26 to 16 (:63975-76).
+        // mc1l42 t=2133 slot 378, the genie at slot 101 dropping its
+        // target that very tick (+146 331 → 0): retail hands back
+        // flags 6 / +26 16 / +30 1321 / +146 331, the port flags 4 /
+        // +26 20 / +30 1322.
+        if self.ent[i].f146 == 0 && !no_m8_acquire() {
+            if self.ent[i].flags & 2 == 0 {
+                self.ent[i].flags |= 2;
+                self.aim_assist_wizards(i, ctx);
+                if self.ent[i].f146 != 0 {
+                    self.ent[i].f30 = self.ent[i].f34;
+                    self.ent[i].f32 = self.ent[i].f36;
+                } else {
+                    self.ent[i].f34 = self.ent[i].f30;
+                    self.ent[i].f36 = self.ent[i].f32;
+                }
+            }
+        } else if self.ent[i].f146 != 0 {
             self.home(i, ctx);
         }
+        // :63097-99 — and the whole flight family (:62671, :63478,
+        // :63571, :63680): the servo step is `2 * SIGN(+128 - +126)`,
+        // not the gap clamped to ±2. On an odd gap of 1 retail steps 2
+        // and OVERSHOOTS; the port stalled one short and never
+        // converged. (The sibling handlers still carry the clamp form
+        // — same law, other territory.)
+        let e = &mut self.ent[i];
+        e.f126 += if no_m8_acquire() {
+            (e.f128 - e.f126).clamp(-2, 2)
+        } else {
+            2 * (e.f128 - e.f126).signum()
+        };
         // Move.
         let mut tmp = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
         let (yaw, pitch, speed) = {
@@ -2495,9 +2716,30 @@ impl Gen {
                 MailTarget::Player => true,
                 MailTarget::Pool(j) => self.ent[j].class64 == 3 && self.ent[j].model65 <= 1,
             };
-            self.move_relink(i, tmp.0, tmp.1, tmp.2);
+            // THE HIT TELEPORTS ONTO THE VICTIM (:63154-56), exactly
+            // like the generic arm: `sub_524C0` lifts the victim's +76
+            // by its own +78 in place, `sub_41C70(a1, victim+72)`
+            // relinks the seeker there, `sub_524E0` puts the lift back
+            // — the model-2 castle exemption rides in [`Ent::aim_z`].
+            // The stepped point is NEVER where a hit lands, and the
+            // flash is born at the seeker's post-snap position: mc1l42
+            // t=4→5, retail seeker AND flash at 896/21376/3668 =
+            // carpet 331's 896/21376/3568 + its +78 of 100, against
+            // the port's stepped 890/21343/3672.
+            match v {
+                MailTarget::Pool(j) => {
+                    let (jx, jy, jz) = (self.ent[j].x, self.ent[j].y, self.ent[j].aim_z());
+                    self.move_relink(i, jx, jy, jz);
+                }
+                MailTarget::Player => {
+                    self.move_relink(i, ctx.px, ctx.py, ctx.pz.wrapping_add(PLAYER_HH as i16));
+                }
+            }
             if wizard {
-                self.proj_explode(i, ctx, Some(v), true, false);
+                // The child carries the struck victim in +146
+                // (:63201 `v19[73] = victim`) — the mana-steal flash
+                // reads chase 331 on every recorded strike.
+                self.proj_explode(i, ctx, Some(v), true, true);
             } else {
                 self.ent[i].flags |= 0x400;
             }
@@ -2510,10 +2752,18 @@ impl Gen {
             if self.ent[i].act_life < 0 {
                 self.ent[i].flags |= 0x400; // silent timeout
             }
-        } else if self.on_water_pub(tmp.0, tmp.1) {
-            self.splash_and_die(i);
         } else {
-            self.ent[i].flags |= 0x400; // silent ground end
+            // Terrain block: the relink to the stepped point is
+            // UNCONDITIONAL and happens before the probe (:63104), and
+            // this arm has no revert — the water test, the splash and
+            // the silent end all read the point the seeker flew TO
+            // (:63161-83), not the one it flew from.
+            self.move_relink(i, tmp.0, tmp.1, tmp.2);
+            if self.on_water_pub(tmp.0, tmp.1) {
+                self.splash_and_die(i);
+            } else {
+                self.ent[i].flags |= 0x400; // silent ground end
+            }
         }
         false
     }
@@ -2530,6 +2780,15 @@ impl Gen {
     fn proj_m9_tick(&mut self, i: usize, ctx: &MobCtx) -> bool {
         self.ent[i].f126 = self.ent[i].f128;
         let spawn = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
+        // THE BEAM LEAVES THE TILE CHAIN BEFORE IT FLIES (:63311) and
+        // never rejoins: sub_534C0's flight writes +72/+76 RAW
+        // (:63247-48, :63253-54), not through the move-relink every
+        // other projectile uses, so the record spends its whole
+        // resolution — and its whole afterlife, since the beam dies on
+        // this same tick — unlinked. Retail's beam is therefore
+        // invisible to every scan that walks the tile lists, and its
+        // death flags read 0x400 with the link bit CLEAR.
+        self.unlink(i);
         // sub_534C0 (:63216): one-time aim assist only while
         // untargeted (+146 == 0 — fire sites that pre-lock +146 also
         // pre-aim +30/+32 at the target, closing this gate); snap to
@@ -2559,7 +2818,6 @@ impl Gen {
         // why the retail bolt points at (and lands on) its victim.
         let (yaw0, pitch0) = (self.ent[i].f30, self.ent[i].f32);
         let mut steps: i32 = 0;
-        let mut hit: Option<MailTarget> = None;
         loop {
             steps += 1;
             let mut tmp = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
@@ -2571,17 +2829,16 @@ impl Gen {
             if let Some(v) = self.victim_scan_at(i, tmp, ctx) {
                 // Snap to the victim's exact position — no +78
                 // half-height, unlike the fireball (:63252-56).
-                match v {
-                    MailTarget::Pool(j) => {
-                        let (jx, jy, jz) = (self.ent[j].x, self.ent[j].y, self.ent[j].z);
-                        self.move_relink(i, jx, jy, jz);
-                    }
-                    MailTarget::Player => self.move_relink(i, ctx.px, ctx.py, ctx.pz),
-                }
-                hit = Some(v);
+                let p = match v {
+                    MailTarget::Pool(j) => (self.ent[j].x, self.ent[j].y, self.ent[j].z),
+                    MailTarget::Player => (ctx.px, ctx.py, ctx.pz),
+                };
+                let e = &mut self.ent[i];
+                (e.x, e.y, e.z) = p;
                 break;
             }
-            self.move_relink(i, tmp.0, tmp.1, tmp.2);
+            let e = &mut self.ent[i];
+            (e.x, e.y, e.z) = tmp;
             if self.ground_z(tmp.0, tmp.1) as i16 > tmp.2 {
                 break; // terrain stop — sub_534C0 has no water case
             }
@@ -2664,6 +2921,17 @@ impl Gen {
             }
         }
         // ---- endpoint (:63421-49) ----
+        // The victim the endpoint reads is a FRESH scan (:63422
+        // `sub_11980(a1)`), taken after the chain is laid and from the
+        // beam's own resolved position — not the verdict the flight
+        // loop broke on. The two normally agree (a beam that connected
+        // is sitting on its victim), but a beam that stopped on
+        // terrain or ran out of life re-scans where it stopped, and a
+        // scan that finds nothing is what leaves the +146 stamp below
+        // unfed. Own-chain segments are invisible to it: they carry
+        // the beam's own +24, and the scan's first test is `+24 !=
+        // ours` ([`Gen::victim_scan`]).
+        let hit = self.victim_scan(i, ctx);
         let (f69, f44, f140, f146) = {
             let e = &self.ent[i];
             (e.f69, e.f44, e.f140, e.f146)
@@ -2691,9 +2959,10 @@ impl Gen {
         // The explosion lands at the SEGMENT-WALK endpoint, not the
         // beam's snapped position. Shielded (+17 bit7) class-3
         // victims with mana ≥ +140/4 quarter the payload — no drain,
-        // no deflection (:63435-47). +146: the original stamps
-        // garbage when nothing was hit (remc2 guards this) — we
-        // stamp hit-or-0, flagged deviation.
+        // no deflection (:63435-47). +146 is the unguarded pointer
+        // difference, so a scan that found nothing records the
+        // link-time constant [`MC1_MISS_STAMP`] rather than 0.
+        let miss_stamp = (!self.is_hidden_worlds()).then_some(MC1_MISS_STAMP);
         if let Some(fx) = self.spawn_effect(f69, disp.0, disp.1, disp.2) {
             let quartered = match hit {
                 Some(MailTarget::Pool(j)) => {
@@ -2710,7 +2979,7 @@ impl Gen {
             e.f146 = match hit {
                 Some(MailTarget::Pool(j)) => j as u16,
                 Some(MailTarget::Player) => PLAYER_TARGET,
-                None => 0,
+                None => miss_stamp.unwrap_or(0),
             };
             e.f44 = if quartered { f44 >> 2 } else { f44 };
         }
@@ -2737,7 +3006,31 @@ impl Gen {
             (e.f30, e.f32, e.f126)
         };
         Self::polar_step(&mut tmp, yaw, pitch, speed);
-        let hit = self.victim_scan_at(i, tmp, ctx);
+        // ⭐ THE ARROW SCANS FROM WHERE IT STANDS, NOT WHERE IT LANDS.
+        // Every other class-9 flight handler relinks onto the stepped
+        // point BEFORE the probe — `sub_41C70(a1, &scratch)` then
+        // `sub_11980(a1)` at :62703-06 (generic), :62872-75 (fireball),
+        // :63133-36, :63713-16, and the direct +72/+76 store at
+        // :63275-78. sub_54180 is the family's ONE exception: it steps
+        // only the global scratch `word_AE454_AE444` and hands
+        // `sub_11980` an `a1` still parked at the tick's start
+        // (:63801-05; the HW twin sub_544D0 is byte-identical,
+        // hw:59890-93). Since sub_11980 reads the victim window off
+        // `a1 + 72/74/80` (:16998-17001) and never touches the
+        // scratch, the arrow's contact test trails its flight by a
+        // full 384-unit step, while the ground test below still runs
+        // on the stepped point. Scanning the endpoint made the arrow
+        // connect a tick EARLY — mc1l42 t=525: the militia's arrow
+        // steps clean THROUGH the human carpet's box and lives on at
+        // act_life 5 → 4. Only the y axis of sub_118C0 (:16963-77)
+        // separates the two probe points: from the pre-step
+        // (18444, 26662) the carpet at (18505, 26355) is 307 away
+        // against a combined +82 of 44 + 119, a miss; from the
+        // stepped (18582, 26307) it is 48 away, a hit. Retail's arrow
+        // in fact never connects at all — it outruns the carpet and
+        // expires unmoved at t=531. The whole (9,13) residue was
+        // pairs of this shape: port dies at t, retail at t+1.
+        let hit = self.victim_scan(i, ctx);
         // End of flight (:63806-26): the airborne survival arm is the
         // ONLY step onto tmp. A grounding step kills at the PRE-step
         // pose with the life decrement skipped (the decrement lives
@@ -2789,6 +3082,16 @@ impl Gen {
         if self.ent[i].f146 == 0 {
             if self.ent[i].flags & 2 == 0 {
                 self.ent[i].flags |= 2;
+                // sub_54520's entry clamp (:63975-76) sits ABOVE the
+                // model switch, so it caps +26 at 16 even on the
+                // `default:` models that acquire nothing — the crater
+                // bolt carries the caster's charge meter (up to 200)
+                // and retail records 16 on every single one. Our
+                // clamp lived inside the aim-assist bodies, which
+                // m2/m5/m17 never reach.
+                if self.ent[i].f26 > 16 {
+                    self.ent[i].f26 = 16;
+                }
                 match self.ent[i].model65 {
                     4 => self.aim_assist(i, ctx),
                     7 | 11 => self.aim_assist_wizards(i, ctx),
@@ -2805,6 +3108,17 @@ impl Gen {
         } else {
             self.home(i, ctx);
         }
+        // The launch-boost servo (sub_52770's own :63565-67, the twin
+        // the castle ball already runs): +126 walks 2/tick toward the
+        // ctor +128, so a lob launched at carpet speed accelerates
+        // back to its row base over the flight. The cast arm bumps
+        // +126 alone, never +128 (see `World::cast_projectile`).
+        // mc1l42 slot 259 pins the cadence exactly: 306, 308, 310 …
+        // 324 across the crater bolt's nine airborne ticks.
+        {
+            let e = &mut self.ent[i];
+            e.f126 += (e.f128 - e.f126).clamp(-2, 2);
+        }
         let mut tmp = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
         let (yaw, pitch, speed) = {
             let e = &self.ent[i];
@@ -2814,15 +3128,30 @@ impl Gen {
         let hit = self.victim_scan_at(i, tmp, ctx);
         let ground = self.ground_z(tmp.0, tmp.1) as i16;
         let grounded = ground > tmp.2;
-        self.move_relink(i, tmp.0, tmp.1, if grounded { ground } else { tmp.2 });
-        self.ent[i].act_life -= 1;
+        // The grounding step is NOT clamped to the terrain — the bolt
+        // keeps the z its polar step put it at, under the ground, and
+        // the payload detonates from there (the castle ball's
+        // recorded "z 7344 under ground 7808", docs/DEVIATIONS.md).
+        // mc1l42 t=20159: retail's crater bolt ends at 5596 with the
+        // ground at 5664, and its (10,11) inherits that buried z.
+        self.move_relink(i, tmp.0, tmp.1, tmp.2);
+        // The life countdown runs on AIRBORNE ticks only: retail's
+        // end test short-circuits `ground > z || --life < 0 || hit`
+        // (the castle ball's :63586-90 twin), so a touchdown never
+        // reaches the decrement and the detonating bolt is recorded
+        // one tick "younger" than the port's used to be (mc1l42
+        // t=20159 life 12, not 11 — every crater detonation in the
+        // take reads the same way).
+        if !grounded {
+            self.ent[i].act_life -= 1;
+        }
         if hit.is_some() || grounded || self.ent[i].act_life < 0 {
             if let Some(MailTarget::Pool(j)) = hit {
                 let amt = self.ent[i].f44 as u32;
                 let src = self.ent[i].id24;
                 self.mail_write(MailTarget::Pool(j), 0, amt, src);
             }
-            self.spell_payload(i);
+            self.spell_payload(i, hit);
             self.ent[i].flags |= 0x400;
         }
         false
@@ -2830,7 +3159,10 @@ impl Gen {
 
     /// The per-model detonation payloads of the player-spell
     /// projectiles (each cite = the traced cast arm's effect).
-    fn spell_payload(&mut self, i: usize) {
+    /// `hit` is the detonation's own victim probe — the generic
+    /// explode stamps it into the child's `+146` unguarded, so it
+    /// rides down here too (see the crater arm).
+    fn spell_payload(&mut self, i: usize, hit: Option<MailTarget>) {
         let (x, y, z, model) = {
             let e = &self.ent[i];
             (e.x, e.y, e.z, e.model65)
@@ -2857,10 +3189,39 @@ impl Gen {
                 }
             }
             // Crater (:65491): the expanding bowl (authentic:
-            // effect c10 m11).
+            // effect c10 m11). The detonation is the generic explode
+            // shape — the child is laid at the BOLT's own axis (all
+            // three components: the buried grounding z, not the
+            // terrain under it) and carries the bolt's owner, heading
+            // and pitch, exactly as `proj_explode`'s children do.
+            // mc1l42's thirteen craters read the pair off retail:
+            // heading/pitch = the bolt's +30/+32 on every one, z =
+            // the bolt's own (5596 under ground 5664 at t=20159).
             5 => {
-                if let Some(c) = self.spawn_creator(11, x, y, gz) {
-                    self.ent[c].id24 = own;
+                let (yaw, pitch) = {
+                    let e = &self.ent[i];
+                    (e.f30, e.f32)
+                };
+                // ...and the child's `+146` too. The explode's stamp
+                // is the raw unguarded pointer difference (:63428 /
+                // :63778), so a detonation that probed NOTHING —
+                // which every lobbed crater does, it dies on the
+                // ground — records the link-time constant
+                // [`MC1_MISS_STAMP`] rather than 0. mc1l42 reads
+                // 64608 on all THIRTEEN craters; the lane is the
+                // graded obs `chase`, so leaving it at 0 was a floor
+                // under the certified run.
+                let miss_stamp = (!self.is_hidden_worlds()).then_some(MC1_MISS_STAMP);
+                if let Some(c) = self.spawn_creator(11, x, y, z) {
+                    let e = &mut self.ent[c];
+                    e.id24 = own;
+                    e.f30 = yaw;
+                    e.f32 = pitch;
+                    e.f146 = match hit {
+                        Some(MailTarget::Pool(j)) => j as u16,
+                        Some(MailTarget::Player) => PLAYER_TARGET,
+                        None => miss_stamp.unwrap_or(0),
+                    };
                 }
             }
             // Duel to the Death (:65620 → (10,26) ctor :47116): the
@@ -3291,16 +3652,29 @@ impl Gen {
             (e.x, e.y, e.z)
         };
         let g = self.ground_z(x, y) as i16;
-        // :29296-303 — BOTH altitude corrections set the `v1` skip
+        // :29296-306 — BOTH altitude corrections set the `v1` skip
         // flag: the tick the cloud is pulled DOWN onto the ceiling
         // (drifted terrain, a cloud born high) fires nothing either.
-        if z < g.wrapping_add(1024) {
-            let nz = z.wrapping_add(64);
-            self.move_relink(i, x, y, nz);
-            return false;
+        // ⚠ THEY ARE SEQUENTIAL, NOT EXCLUSIVE. The climb writes +76
+        // in place and the ceiling test then re-reads that NEW z, so
+        // a cloud within 64 of the ceiling climbs PAST it and is
+        // pulled straight back to ground+1024 in the SAME tick — it
+        // never records the overshoot. The port returned after the
+        // climb and spent a second tick coming back down, leaving the
+        // cloud up to 63 units high for one frame (mc1l42 t=27234:
+        // retail 4895 = ground+1024, ours 4927 = the raw z+64).
+        let mut nz = z;
+        let mut held = false;
+        if nz < g.wrapping_add(1024) {
+            nz = nz.wrapping_add(64);
+            held = true;
         }
-        if z > g.wrapping_add(1024) {
-            self.move_relink(i, x, y, g.wrapping_add(1024));
+        if nz > g.wrapping_add(1024) {
+            nz = g.wrapping_add(1024);
+            held = true;
+        }
+        if held {
+            self.move_relink(i, x, y, nz);
             return false;
         }
         // :29311-13 — PRE-decrement life test, as across the whole
@@ -3886,6 +4260,15 @@ impl Gen {
                 let e = &mut self.ent[s];
                 e.tick70 = 40;
                 e.max_life = 32;
+                // The ctor EDITS the flag word rather than clearing
+                // it (:47409-11 `v3 = v1[16] & 0xF7` → `+16 = v3`) —
+                // the same mask-then-set shape as the (10,23) flash
+                // and the (10,11) crater bowl, and it drops
+                // NewEvent's hittable bit 3. A raining storm cloud is
+                // NOT a thing other projectiles can detonate on:
+                // retail's clouds read flags 4, ours read 12
+                // (mc1l42 t=27217 slot 99).
+                e.flags &= !8;
                 self.link(s, x, y, z);
                 self.refill_life(s);
                 self.set_sprite(s, 272);
@@ -3897,6 +4280,12 @@ impl Gen {
                 e.tick70 = 23;
                 e.max_life = 8;
                 e.f44 = 25;
+                // The ctor's flag word is a mask-then-set pair
+                // (:47076-79): `+16 &= 0xFFFDFFF7` drops NewEvent's
+                // hittable bit 3 as well as 0x20000, and `+18 |= 2`
+                // puts 0x20000 straight back. The port kept bit 3 —
+                // every retail flash reads 0x20005, ours 0x2000D.
+                e.flags &= !8;
                 e.flags |= 0x20000 | 1;
                 self.link(s, x, y, z);
                 self.refill_life(s);

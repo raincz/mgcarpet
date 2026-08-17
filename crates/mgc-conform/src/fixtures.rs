@@ -253,7 +253,17 @@ fn for_each_pair(
                         &obs,
                         pcmd,
                         prev_cmd,
-                        pin_n1,
+                        // The frozen-law suite follows the pose-pair
+                        // A/B (`MGC_POSE_PAIR=1`) so a fixture's
+                        // signature can be re-graded under the
+                        // two-phase walk before the default flips.
+                        if verify::pose_pair() {
+                            verify::PairPose::Pair
+                        } else if pin_n1 {
+                            verify::PairPose::PinN1
+                        } else {
+                            verify::PairPose::PinN
+                        },
                     )
                     .map_err(|e| format!("t={pt}: {e}"))?;
                     f(pt, pd, &class_map_mc1(&obs))?;

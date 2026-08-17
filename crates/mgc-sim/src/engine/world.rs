@@ -692,6 +692,15 @@ pub struct World {
     /// carpet mover (tokens sit below the carpet in every recorded
     /// pool). A pose echo like `human_pose_prev` — HASH-EXCLUDED.
     mc1_cast_pose: PlayerPose,
+    /// The human's ACQUISITION LIST (`Type_160+532`, 24 pool slots in
+    /// pickup order) — conformance import only, 0 = empty. The death
+    /// scatter walks THIS, not the spell table (:55519-24), and the
+    /// three RNG draws it spends per jar make the order observable in
+    /// every scattered jar's x/y/ttl. The port models ownership as a
+    /// spell-indexed map with no order, so native play falls back to
+    /// ascending spell id; the import replays retail's list.
+    /// HASH-EXCLUDED, like the wizard-pass anchor above.
+    mc1_acq: [u16; SPELL_COUNT],
     /// The doomsday HUD meter `x_BYTE_D9F50[0x87a]` (0..1200),
     /// driven by the pyramid's bit-5 ramp — banked for the 4.9 HUD
     /// track (hash-transparent while 0, like the latch).
@@ -1254,6 +1263,18 @@ pub(crate) fn mc2_death_off() -> bool {
     *V.get_or_init(|| std::env::var_os("MGC_NO_MC2_DEATH").is_some())
 }
 
+/// `MGC_NO_MC1_JAR_CTOR=1` — the A/B toggle for the THING-placed
+/// class-12 jar constructor (`spawn_from_thing_at`'s class-12 arm):
+/// the spawn falls back to the inert stand-in, i.e. the pre-dig port
+/// that minted every authored/disposition-fired spell jar at
+/// life 300/300 with the "already known" bit pre-set and an empty
+/// price cache. THE STATE-HASH GOLDENS MOVE ACROSS THIS ARM (the
+/// hashed entity fields it corrects are level-load state).
+pub(crate) fn mc1_jar_ctor_off() -> bool {
+    static V: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *V.get_or_init(|| std::env::var_os("MGC_NO_MC1_JAR_CTOR").is_some())
+}
+
 /// Records the app can draw (mc1_entities has a sprite mapping).
 /// Class 9 = projectiles; class 10 is logic/terrain except the portal
 /// vortex and the combat effects (fire, flame, splash, flashes, mana
@@ -1444,6 +1465,7 @@ impl World {
             mc1_carpet_slot: 0,
             mc1_hand_bits: 0,
             mc1_cast_pose: PlayerPose::default(),
+            mc1_acq: [0; SPELL_COUNT],
             mc2_doom_meter: 0,
             mc2_doom_level: false,
             terrain_dirty: false,
@@ -2186,15 +2208,26 @@ impl World {
         // landing — retail's pre-move read (dy 1751) kept the castle
         // rate, the port's post-move re-read dropped to the floor
         // for exactly one tick (+100 vs +1000).
+        //
+        // THE WHOLE STEP IS DAMAGE-DEAF ONCE THE WIZARD IS DEAD: the
+        // block sits inside `if (actLife >= 0)` (:55381), so the
+        // fatal hit's own tick already skips it and the corpse holds
+        // its purse and its last delta untouched until the respawn
+        // re-mints them. Ours ran unconditionally, so every dead-hold
+        // tick re-clamped the held mana down to the (now ball-less)
+        // ceiling — mc1l42 t=17344-17397, `player.mana` 89600 → 56842
+        // for the whole 54-tick corpse window.
         let pre_mana = self.player.mana;
-        let stepped = self.player.mana as i64 + self.player.mana_delta as i64;
-        self.player.mana = stepped.clamp(0, self.player.mana_max as i64) as u32;
-        let (at_castle, at_dolmen) = boost;
-        self.player.mana_delta = if at_castle || at_dolmen {
-            ((self.player.mana_max / 200) as i32).max(1000)
-        } else {
-            ((self.player.mana_max / 2000) as i32).max(100)
-        };
+        if self.player.life >= 0 {
+            let stepped = self.player.mana as i64 + self.player.mana_delta as i64;
+            self.player.mana = stepped.clamp(0, self.player.mana_max as i64) as u32;
+            let (at_castle, at_dolmen) = boost;
+            self.player.mana_delta = if at_castle || at_dolmen {
+                ((self.player.mana_max / 200) as i32).max(1000)
+            } else {
+                ((self.player.mana_max / 2000) as i32).max(100)
+            };
+        }
         if alive && cmd.demolish {
             // dw_0 == 48 exactly (:55837-39): the BOUND castle to −1
             // (`if (wizext->var_50) pool[var_50].actLife = -1` — the
@@ -2570,11 +2603,40 @@ impl World {
         conformance::integer_pose(d.s)
     }
 
+    /// Publish a carpet pose that landed mid-walk (`sub_455D0`'s move,
+    /// or the pair-mode snap to the recorded N+1 sample) to the two
+    /// channels the higher-slot walkers read: the aggro/awake ctx and
+    /// the `human_pose` register the wizard/rival lanes probe.
+    fn adopt_walk_pose(&mut self, player: PlayerPose, ctx: &mut MobCtx) {
+        *ctx = MobCtx {
+            px: player.x,
+            py: player.y,
+            pz: player.z,
+            pyaw: player.heading,
+            ..*ctx
+        };
+        self.human_pose = (player.x, player.y, player.z);
+    }
+
     /// One game turn (`sub_41780_41AC0`, :52197) under a PINNED pose:
     /// the caller moved (or pinned) the human flight outside and every
     /// pass reads that single pose — the pair-mode/conformance shape.
     pub fn tick(&mut self, player: PlayerPose, cmd: PlayerCommand) {
-        self.tick_inner(player, cmd, None)
+        self.tick_inner(player, cmd, None, None)
+    }
+
+    /// One game turn under a RECORDED pose PAIR — the pair-mode twin of
+    /// [`Self::tick_flight`]. `pre` is the carpet's state@N sample,
+    /// `post` its state@N+1 sample; the swap lands at the carpet's own
+    /// walk slot, so walkers below read the pre-move pose and walkers
+    /// above the settled one, exactly as `sub_455D0`'s mid-walk
+    /// dispatch does. The mover itself never runs (both endpoints are
+    /// recorded truth), which is why this is a pose PAIR and not a
+    /// drive: the pose channel already proves pose(N)+input → pose(N+1)
+    /// bit-exact, so the open question is only WHICH phase each walker
+    /// sees.
+    pub fn tick_pose_pair(&mut self, pre: PlayerPose, post: PlayerPose, cmd: PlayerCommand) {
+        self.tick_inner(pre, cmd, None, Some(post))
     }
 
     /// One game turn with the human flight stepped IN-WALK: the mover
@@ -2585,19 +2647,21 @@ impl World {
     /// law (the carpet must not lag a rising tower by one tick).
     pub fn tick_flight(&mut self, drive: &mut FlightDrive<'_>, cmd: PlayerCommand) {
         let entry = conformance::integer_pose(drive.s);
-        self.tick_inner(entry, cmd, Some(drive))
+        self.tick_inner(entry, cmd, Some(drive), None)
     }
 
     /// The shared turn body. `player` feeds the trigger volume probes,
     /// creature awake checks and aggro scans; `cmd` is the rest of the
     /// player's tick input (fire). Under `drive` the pose ADVANCES at
-    /// the carpet's walk slot ([`Self::step_player_flight`]); pinned
-    /// lanes see one pose throughout.
+    /// the carpet's walk slot ([`Self::step_player_flight`]); under
+    /// `post` it SNAPS to the recorded N+1 sample at that same slot
+    /// (pair mode); pinned lanes see one pose throughout.
     fn tick_inner(
         &mut self,
         player: PlayerPose,
         cmd: PlayerCommand,
         mut drive: Option<&mut FlightDrive<'_>>,
+        post: Option<PlayerPose>,
     ) {
         let mut player = player;
         // The MC2 respawn key (retail PlayerAction 0xF → `sub_5C950`,
@@ -3003,7 +3067,8 @@ impl World {
             // effective cast phase post-move). The pose and mob ctx
             // advance mid-walk: walkers below keep the record's
             // pre-move pose, walkers above see the settled one (pair
-            // mode pins n1 throughout).
+            // mode replays the same phasing off the record's two
+            // samples under `MGC_POSE_PAIR=1`, else it pins one).
             if !matches!(self.game, GameId::Mc2) && i == self.mc1_carpet_slot as usize {
                 // The armed pose-channel ground snapshot: the mover's
                 // probe phase is HERE (sub_455D0 is the dispatch
@@ -3018,17 +3083,23 @@ impl World {
                 self.player_mail_block(player, at_castle);
                 if let Some(d) = drive.as_deref_mut() {
                     player = self.step_player_flight(d);
-                    ctx = MobCtx {
-                        px: player.x,
-                        py: player.y,
-                        pz: player.z,
-                        pyaw: player.heading,
-                        ..ctx
-                    };
-                    self.human_pose = (player.x, player.y, player.z);
+                    self.adopt_walk_pose(player, &mut ctx);
+                } else if let Some(p) = post {
+                    player = p;
+                    self.adopt_walk_pose(player, &mut ctx);
                 }
                 self.mc1_wizard_pass(alive, edge, cmd, player, &ctx, (at_castle, at_dolmen));
                 self.player_regen_block(at_castle, at_dolmen);
+                // The non-alive arms of the SAME dispatch slot (the
+                // class-3 behavior table's +70 2/3 entries, :4669-71)
+                // — chosen by the state the record carried at DISPATCH
+                // ENTRY, like every table lookup: the tick a fatal hit
+                // lands still runs `sub_45C90` to the end and the fall
+                // only starts on the next pass (mc1l42 t=17305, where
+                // the port grew a (10,1) trail retail has no room for).
+                if !alive {
+                    self.mc1_mortality_pass(player, cmd);
+                }
             }
             if self.g.ent[i].class64 == 0 {
                 continue;
@@ -3633,14 +3704,10 @@ impl World {
             self.player_mail_block(player, at_castle);
             if let Some(d) = drive {
                 player = self.step_player_flight(d);
-                ctx = MobCtx {
-                    px: player.x,
-                    py: player.y,
-                    pz: player.z,
-                    pyaw: player.heading,
-                    ..ctx
-                };
-                self.human_pose = (player.x, player.y, player.z);
+                self.adopt_walk_pose(player, &mut ctx);
+            } else if let Some(p) = post {
+                player = p;
+                self.adopt_walk_pose(player, &mut ctx);
             }
             self.mc1_wizard_pass(alive, edge, cmd, player, &ctx, (at_castle, at_dolmen));
             self.player_regen_block(at_castle, at_dolmen);
@@ -3736,25 +3803,21 @@ impl World {
             // input phase above, not here.
             LifeState::Falling if mc2 => self.mc2_player_fall(player),
             LifeState::Dead if mc2 => self.mc2_player_dead_wait(player),
-            LifeState::Falling => {
-                // The fire trail (:55478-83): one damage-suppressed
-                // (10,1) spreader per tick at the carpet.
-                if let Some(s) = self.g.spawn_effect(1, player.x, player.y, player.z) {
-                    self.g.ent[s].flags |= 0x80 | 0x10000;
-                    self.g.ent[s].id24 = PLAYER_TARGET;
-                }
-                // Landing (:55485): the sim's fall integration rides
-                // the z-floor down; ground+128 is touchdown.
-                let ground = self.g.ground_z(player.x, player.y) as i16;
-                if player.z <= ground.saturating_add(128) {
-                    self.player_land(player);
-                }
-            }
-            LifeState::Dead => {
-                if cmd.respawn {
-                    self.player_respawn();
-                }
-            }
+            // MC1's fall/corpse arms are the CARPET's own dispatch
+            // (the class-3 behavior table hands +70 == 2 to
+            // `sub_45FC0_46300` and +70 == 3 to the wait, :4669-71 —
+            // the very slot `sub_45C90` occupies for +70 == 0), so
+            // they ran at the walk anchor above whenever the pool
+            // holds the carpet; post-walk here is the native
+            // fall-through. Ordering is observable: the landing's jar
+            // scatter re-arms the tokens' decay clocks and altitudes,
+            // and every token ABOVE the carpet slot then ticks its own
+            // −1/z-servo in the SAME pass (mc1l42 t=17343, jars 332
+            // and 333: ttl 281→280 and z 1876→1748/1814 at N+1).
+            LifeState::Falling | LifeState::Dead if self.mc1_carpet_slot != 0 => {}
+            // Same entry-state dispatch rule as the walk anchor.
+            LifeState::Falling | LifeState::Dead if !alive => self.mc1_mortality_pass(player, cmd),
+            LifeState::Falling | LifeState::Dead => {}
             // The MC1/HW win-exit (Space, command 27 :20910/:48804):
             // only while ALIVE and the win flag holds — retail's
             // handler issues cmd 15 BEFORE cmd 27, and a latched
@@ -3773,7 +3836,7 @@ impl World {
                 // (deviation — retail's loop is one-shot and eats
                 // the spell; see death_regrant).
                 if self.player.death_owned.iter().any(|&b| b) {
-                    self.death_regrant();
+                    self.death_regrant(None);
                 }
             }
         }
@@ -3942,6 +4005,53 @@ impl World {
 
     // ---- player mortality (sub_46540 / sub_45FC0 / sub_44D30) -------------
 
+    /// The pool debits inside the mailbox pass — the mana steal
+    /// (:55691) and the shield's quartered payment (:55703) — are
+    /// PLAIN SIGNED SUBTRACTS on `+140`, with no floor of their own:
+    /// the pool goes negative and stays there for the rest of the
+    /// pass. The only floor in the wizard tick is `if (+140 < 0)
+    /// +140 = 0` (:55391), and it sits on the FAR SIDE of the regen
+    /// add `+140 += +132` (:55385), so an over-steal EATS that tick's
+    /// quantum instead of being clipped where it lands.
+    ///
+    /// `Player::mana` is unsigned, so the shortfall rides the pending
+    /// delta the step at [`Self::mc1_wizard_pass`] already clamps in
+    /// i64 — the mail block runs before the regen block in both
+    /// engines, so the arithmetic is retail's. mc1l42's genie strikes
+    /// are the corpus: t=78 retail 1150 → 0, ours 1150 → 100, and
+    /// 285 of the take's 354 `player.mana` rows read exactly
+    /// `want 0, got 100` (the afield quantum `max(mana_max/2000, 100)`).
+    ///
+    /// **MC1 RIDES THE WHOLE DEBIT, NOT JUST THE SHORTFALL, BECAUSE
+    /// THE CAST COMMAND READS THE POOL BEFORE THE MAILBOX.** Retail's
+    /// carpet dispatch is `sub_46840` (:55354 — the per-hand cast
+    /// commands, whose silent gate is `+140 < cost`) and only THEN the
+    /// mailbox (:55366) and the step (:55385). The port runs the cast
+    /// commands inside the wizard pass, after the mail block, so a
+    /// steal landing this tick would move the gate's pool a whole tick
+    /// early. Carrying the debit entirely on the delta leaves `+140`
+    /// at its pre-mailbox value until the step, which sums to exactly
+    /// retail's `(+140 − steal) + delta` and floors in the same place.
+    /// mc1l42 t=349: retail's 3000 steal arrives with the pool at 200
+    /// and the fireball command already armed off that 200, so the
+    /// TOKEN gate (:64926, full tick, post-step pool 0 < cost 200)
+    /// fails, releases `+48` and skips `sub_55E80` — no mid-burst pin,
+    /// `+132` keeps its fresh 100 and the pool regens at 350. Ours
+    /// gated the command on the post-steal 0, left the burst running
+    /// and pinned the delta to 0: the free run's t=350 wall, on a lane
+    /// the obs schema never grades. MC2 keeps the split — its step is
+    /// PRE-walk and its mail block post-walk, so a deferred debit
+    /// would land a tick late there.
+    fn debit_mana(&mut self, amt: u32) {
+        if matches!(self.game, GameId::Mc1 | GameId::Mc1Hw) {
+            self.player.mana_delta -= amt.min(i32::MAX as u32) as i32;
+            return;
+        }
+        let owed = amt.saturating_sub(self.player.mana);
+        self.player.mana = self.player.mana.saturating_sub(amt);
+        self.player.mana_delta -= owed as i32;
+    }
+
     /// sub_46540 (:55641): apply the pending mailbox channels to the
     /// mortal player.
     fn apply_player_damage(&mut self, player: PlayerPose) {
@@ -3963,7 +4073,7 @@ impl World {
         if self.g.player_mail[3].1 != 0 {
             let amt = self.g.player_mail[3].0;
             self.g.player_mail[3].1 = 0; // source only (:55696)
-            self.player.mana = self.player.mana.saturating_sub(amt);
+            self.debit_mana(amt);
             self.player.regen_delay = 16;
             self.g.player_danger = 100;
             self.g.player_alert = 4; // +392=4 (:55692)
@@ -3978,7 +4088,7 @@ impl World {
             // continuous while the spell runs.)
             if self.player.shield {
                 amt /= 4;
-                self.player.mana = self.player.mana.saturating_sub(amt);
+                self.debit_mana(amt);
                 // :55704 writes the QUARTERED value back into +90, so
                 // the shield shrinks the residue too — the next hit
                 // accumulates onto the absorbed amount, not the raw one.
@@ -4042,6 +4152,61 @@ impl World {
         // (:55485-569).
     }
 
+    /// The MC1 carpet's NON-ALIVE dispatch arms — the class-3
+    /// behavior table's `+70 == 2` slot (`sub_45FC0_46300` :55434,
+    /// the death fall and its landing) and its `+70 == 3` slot (the
+    /// wait for Space). Siblings of `sub_45C90`, i.e. the same walk
+    /// position [`Self::mc1_wizard_pass`] runs at; only the native
+    /// (carpet-less pool) column falls through to the post-walk call.
+    fn mc1_mortality_pass(&mut self, player: PlayerPose, cmd: PlayerCommand) {
+        match self.player.state {
+            LifeState::Falling => {
+                // The fire trail (:55478-83): one (10,1) spreader per
+                // tick, thrown at `word_AE454_AE444` — the GLOBAL
+                // scratch axis the mover left behind, i.e. the
+                // carpet's POST-MOVE, PRE-GRAVITY pose (:18806-27
+                // stamps it, :55467-69 then integrates +46 into the
+                // entity's own z and the spawn still reads the stale
+                // scratch). So the trail marks where the carpet was
+                // when the tick started falling, one gravity step
+                // above where it ends up. Ours spawned at the settled
+                // pose and ran the whole fall one step low.
+                //
+                // Under a conformance import nothing integrates the
+                // human (the pose is pinned), so the recorded +46 IS
+                // this tick's applied step; natively the fall already
+                // consumed and decremented it in `step_player_flight`.
+                let applied = if self.strict_retail {
+                    self.player.fall_speed
+                } else {
+                    (self.player.fall_speed + 2).min(0)
+                };
+                let tz = player.z.wrapping_sub(applied);
+                // Retail's ctor decorations are exactly `flags |= 0x80`
+                // and `+24 = the wizard's own +24` (:55480-82) — no
+                // damage-suppression bit. Ours also raised 0x10000,
+                // which the whole (10,1) column then carried
+                // (mc1l42 t=17305-17343: retail 0x20084, port 0x30084).
+                if let Some(s) = self.g.spawn_effect(1, player.x, player.y, tz) {
+                    self.g.ent[s].flags |= 0x80;
+                    self.g.ent[s].id24 = PLAYER_TARGET;
+                }
+                // Landing (:55485): the sim's fall integration rides
+                // the z-floor down; ground+128 is touchdown.
+                let ground = self.g.ground_z(player.x, player.y) as i16;
+                if player.z <= ground.saturating_add(128) {
+                    self.player_land(player);
+                }
+            }
+            LifeState::Dead => {
+                if cmd.respawn {
+                    self.player_respawn();
+                }
+            }
+            LifeState::Alive => {}
+        }
+    }
+
     /// The death landing (:55485-569): wipe the mailbox, scatter the
     /// spell inventory as decaying jars, raise the (10,40) grave and
     /// hand it the player's loose mana balls (possess the grave to
@@ -4051,13 +4216,41 @@ impl World {
         // Jar scatter (:55519-47): the 24 slots remember the MODELS
         // (re-instantiated on respawn); the manifestation entities
         // become world jars again, thrown into a ±1-tile box with
-        // 200-289 ticks to live. Three LCG draws per jar; the
-        // original rolls the dying wizard's private stream — ours
-        // uses the world stream (deliberate: same constants; the
-        // wizard stream isn't modeled outside flight).
-        for s in 0..SPELL_COUNT {
-            let m = self.player.owned[s] as usize;
-            if m == 0 {
+        // 200-289 ticks to live.
+        //
+        // THE WALK IS THE ACQUISITION LIST, not the spell table:
+        // `for (i = 0; i != 96; i += 4)` steps `wizext+532` and reads
+        // each entry's own +65 for the model (:55519-24). Order is
+        // observable — three draws per jar — and mc1l42 t=17343
+        // measures it exactly: retail's five jars land in pickup
+        // order (0, 3, 1, 16, 2), not ascending spell id, and every
+        // jitter/ttl triple matches that permutation.
+        //
+        // THE THREE DRAWS ARE THE DYING WIZARD'S PRIVATE STREAM
+        // (`*(a1+4)`, the carpet ENTITY's +4 — :55538-46), never the
+        // world LCG. Ours spent 15 world draws here, which both
+        // scattered to the wrong offsets and pushed the recorded rng
+        // channel off by 15 on the landing pair. Native play has no
+        // pooled carpet (`mc1_carpet_slot` 0) and keeps the world
+        // stream.
+        let strict = self.strict_retail;
+        let cs = self.mc1_carpet_slot as usize;
+        let cs = (cs != 0 && cs < self.g.ent.len()).then_some(cs);
+        let order: Vec<usize> = if self.mc1_acq.iter().any(|&m| m != 0) {
+            self.mc1_acq.iter().map(|&m| m as usize).collect()
+        } else {
+            (0..SPELL_COUNT)
+                .map(|s| self.player.owned[s] as usize)
+                .collect()
+        };
+        for m in order {
+            if m == 0 || m >= self.g.ent.len() || self.g.ent[m].class64 != 12 {
+                continue;
+            }
+            // :55523 — the bank entry is the ENTITY's own model, the
+            // same value the list slot is overwritten with.
+            let s = self.g.ent[m].model65 as usize;
+            if s >= SPELL_COUNT || self.player.owned[s] as usize != m {
                 continue;
             }
             self.player.death_owned[s] = true;
@@ -4066,16 +4259,49 @@ impl World {
             // expires meanwhile.
             self.player.death_owned_blue[s] = self.g.ent[m].flags & BLUE_SPELL != 0;
             self.player.owned[s] = 0;
-            let d1 = features::lcg32(&mut self.g.rand);
-            let d2 = features::lcg32(&mut self.g.rand);
-            let d3 = features::lcg32(&mut self.g.rand);
+            let (d1, d2, d3) = {
+                let r = match cs {
+                    Some(c) => &mut self.g.ent[c].rand,
+                    None => &mut self.g.rand,
+                };
+                (features::lcg32(r), features::lcg32(r), features::lcg32(r))
+            };
             let x = player.x.wrapping_add(((d1 & 0x1FF) as i32 - 256) as u16);
             let y = player.y.wrapping_add(((d2 & 0x1FF) as i32 - 256) as u16);
-            let z = self.g.ground_z(x, y) as i16;
+            // The scratch axis the throw builds is the WIZARD's own
+            // (x, y, z) with only x and y jittered (:55536-40) and
+            // `sub_41C70_41FB0` writes all three verbatim — the jar
+            // keeps the dying carpet's ALTITUDE and only its own
+            // z-servo walks it down to the ground afterwards. (mc1l42
+            // t=17343: the three jars whose slots sit BELOW the
+            // carpet's still read 1876, the landing altitude, at
+            // N+1; the two above it have already run their servo.)
+            let z = player.z;
             {
                 let e = &mut self.g.ent[m];
-                e.tick70 = DROPPED_JAR;
-                e.f26 = (d3 % 90 + 200) as i16;
+                // :55534-35 — the owned bit goes out and the token's
+                // OWN +70 advances one phase; retail's class-12 state
+                // is `spell*3 + phase`, so this walks the owned token
+                // (phase 0) into the first world-jar phase. The port's
+                // native encoding keeps a flat decay state instead.
+                e.flags &= !1;
+                e.tick70 = if strict {
+                    e.tick70.wrapping_add(1)
+                } else {
+                    DROPPED_JAR
+                };
+                // The decay clock rides actLife (+12, :55547) — the
+                // jar poll's own top decrements THAT (:64755-61), not
+                // +26. Ours banked it in +26 and the strict jar tick
+                // then read a 0 clock, so a scattered jar never aged.
+                // (The native encoding keeps its own +26 clock, which
+                // is the field its flat `DROPPED_JAR` state reads.)
+                let ttl = (d3 % 90 + 200) as i32;
+                if strict {
+                    e.act_life = ttl;
+                } else {
+                    e.f26 = ttl as i16;
+                }
                 // Back to the ground-jar convention (f144 = 0): a
                 // stale owner tag would let a post-death charge-pin
                 // release zero this jar's decay timer.
@@ -4091,9 +4317,15 @@ impl World {
         // The grave (:55550-65). On a full pool the original retries
         // the whole landing next tick; ours proceeds graveless (the
         // balls simply stay player-owned) — a benign deviation
-        // (deliberate).
-        let gz = self.g.ground_z(player.x, player.y) as i16;
-        if let Some(gv) = self.g.spawn_grave(player.x, player.y, gz) {
+        // (deliberate). The spawn axis is the WIZARD's own `a1+72`
+        // (:55550) — position AND altitude, exactly like the jar
+        // throw above; the grave's own tick ground-snaps it from
+        // there (sub_275C0 :29636). Ours sampled the ground plane at
+        // the spawn instead, which reads a whole tile lower whenever
+        // the landing clamp parked the carpet on a hover offset
+        // (mc1l42 t=17343: retail's grave is born at 1876, the
+        // landing altitude, ours at 1748).
+        if let Some(gv) = self.g.spawn_grave(player.x, player.y, player.z) {
             for j in 1..self.g.ent.len() {
                 if self.g.ent[j].class64 == 10
                     && self.g.ent[j].model65 == 39
@@ -4121,6 +4353,11 @@ impl World {
             return;
         };
         let e = &self.g.ent[c];
+        // The carpet is MOVED to the castle before anything else
+        // (:54858-61 — `if (wizext->var_50) v32x = pool[var_50].pos`,
+        // then `sub_41C70_41FB0`), and every field the rest of the
+        // routine stamps from the wizard's own axis reads THIS pose.
+        let seat = (e.x, e.y, e.z);
         self.pending_respawn = Some((e.x as f32 / 256.0, e.y as f32 / 256.0));
         // Type_160 re-arm (:54866-83) + HP/mana reset (:55019-32).
         // The respawn screen-mode chime (case 0xF runs sub_3DC90(0)
@@ -4135,13 +4372,23 @@ impl World {
         self.player.hit_flash = 0;
         self.g.player_knock = (0, 0);
         self.g.player_danger = 0;
-        self.player.mana = self.player.mana_max;
+        // The mana pair goes back to the INTRINSIC BASE, not to
+        // whatever the census last left standing: :55026-30 writes
+        // `+136 = 1000`, `maxLife = 10000`, `actLife = maxLife`,
+        // `+140 = +136` and re-seeds the wizext's own `u32_322` from
+        // it. The census re-grows the ceiling from next tick's owned
+        // purse — but the respawn RECORD reads 1000/1000 (mc1l42
+        // t=17397, where ours would have handed back the 56,842 the
+        // corpse was still censusing).
+        self.player.mana_max = WIZARD_BASE_MANA;
+        self.player.mana = WIZARD_BASE_MANA;
         // Jar re-instantiation (:54884-923): every remembered model
-        // returns as an owned manifestation; the scattered decaying
-        // jars stay out in the world until they expire. Hand equips
+        // returns as an owned manifestation AT THE WIZARD'S SEAT
+        // (:54894 spawns on `v2x->+72`); the scattered decaying jars
+        // stay out in the world until they expire. Hand equips
         // survive death untouched (the original never clears
         // var_940/944 on respawn).
-        self.death_regrant();
+        self.death_regrant(Some(seat));
     }
 
     /// Drain the death bank into owned manifestations. A starved
@@ -4160,7 +4407,13 @@ impl World {
     /// hand-spell eater (mc1:49 + mc1hw:0): grants run in spell-id
     /// order, so a partial starve ate the high-id late-book spells,
     /// exactly the ones a veteran keeps equipped.
-    fn death_regrant(&mut self) {
+    ///
+    /// `seat` is the respawning wizard's own axis — retail's spawn
+    /// call takes it (:54894) and the token is laid there, so the
+    /// re-minted set sits on the castle the wizard just returned to.
+    /// `None` = the Alive-arm retry, which has no fresh seat.
+    fn death_regrant(&mut self, seat: Option<(u16, u16, i16)>) {
+        let strict = self.strict_retail;
         for s in 0..SPELL_COUNT {
             if !self.player.death_owned[s] {
                 continue;
@@ -4169,6 +4422,21 @@ impl World {
                 continue;
             };
             self.player.death_owned[s] = false;
+            // :54895-96 — the token is stamped back onto the wizard
+            // (+42, our f144, which `grant_spell` already writes) and
+            // its OWNED bit goes back up. A strict pool carries
+            // retail's `spell*3 + phase` state, so the re-mint lands
+            // on phase 0.
+            {
+                let e = &mut self.g.ent[m];
+                e.flags |= 1;
+                if strict {
+                    e.tick70 = 3 * s as u8;
+                }
+            }
+            if let Some((x, y, z)) = seat {
+                self.g.move_relink(m, x, y, z);
+            }
             if std::mem::take(&mut self.player.death_owned_blue[s]) {
                 // :54908-12 — the re-grant restores blue: the
                 // unrestricted marker + the blue sprite type.
@@ -4707,6 +4975,7 @@ impl World {
             mc1_carpet_slot: _,
             mc1_hand_bits: _,
             mc1_cast_pose: _,
+            mc1_acq: _,
             table,
             terrain_dirty: _,
             entities_dirty: _,
@@ -5020,7 +5289,7 @@ impl World {
 
         // 23: the firehose.
         if id == 23 {
-            if !self.spell_gate(id, def) {
+            if !self.spell_gate(id, def, pre_mana) {
                 self.g.snd_player(29); // cast-blocked buzz (:64930)
                 return;
             }
@@ -5158,7 +5427,7 @@ impl World {
             self.emit_spell(id, m, p, right, ctx);
             return;
         }
-        if !self.spell_gate(id, def) {
+        if !self.spell_gate(id, def, pre_mana) {
             self.g.snd_player(29); // cast-blocked buzz
             return;
         }
@@ -5238,7 +5507,7 @@ impl World {
             // 16 Create Castle (:65862).
             16 => self.cast_castle(p, right),
             // 18 Lightning Storm (:65988).
-            18 => self.cast_storm(p),
+            18 => self.cast_storm(p, right),
             // 20 Wall of Fire (:66110).
             20 => self.cast_firewall(p, right),
             // 22 Global Death (sub_580A0 :66235): launches the (9,18)
@@ -5338,17 +5607,26 @@ impl World {
         };
         let Some(pr) = pr else { return };
         let def = &self.spells()[id];
-        // Deliberate approximation of the original per-spell launch
-        // pitches (:65579-style): the down-arc terrain spells get a
-        // fixed downward bias on the pose pitch (engine pitch positive
-        // = down).
-        let pitch = match id {
-            6 | 8 | 9 => p.pitch.wrapping_add(0x60) & 0x7FF,
-            _ => p.pitch,
-        };
+        // THERE IS NO PER-SPELL LAUNCH-PITCH TABLE. Every arm in the
+        // block stamps `+30 = caster.+30` and `+32 = caster.+32`
+        // verbatim (meteor :65402-04, volcano :65477-80, crater
+        // :65533-34) — the down-arc is the CASTER's own aim, and the
+        // port's fixed 0x60 bias was a guess that put the crater bolt
+        // 96 units of pitch below retail on every cast (mc1l42
+        // t=20150: retail pitch 136, port 232). The DEVIATIONS.md
+        // "launch pitches" entry is retired by this.
+        let pitch = p.pitch;
         let e = &mut self.g.ent[pr];
+        // The launch boost lands on +126 ALONE (:65529-30 `+126 +=
+        // caster.+126`); +128 keeps the ctor base, which is what the
+        // generic flight's 2/tick servo then walks back up to — the
+        // same "+128 is never bumped" law the castle ball already
+        // carries (docs/DEVIATIONS.md castle_latch_bug). Ours pinned
+        // +128 to the boosted value, so the payload lobs flew at a
+        // frozen speed and lagged retail by one servo step forever
+        // (mc1l42 slot 259: retail 306→324 over the flight, port
+        // 304→322, a constant 2 behind).
         e.f126 += p.speed; // carpet speed inherited (:65060)
-        e.f128 = e.f126;
         e.id24 = PLAYER_TARGET;
         // +30/+32 only (the sub_56510 skeleton :65250-51); +34/+36
         // keep the ctor default — corpus target_yaw 0 on fresh spawns.
@@ -5401,13 +5679,18 @@ impl World {
             15 => e.f69 = 23,
             _ => {}
         }
-        // The charge move: of this family only earthquake (:65356),
-        // meteor (:65414) and volcano (:65472) bank the caster's
-        // meter in the bolt's +26; possess zeroes WITHOUT stamping
-        // (:65246 — its forced 200 is set above). The other arms
-        // (crater/duel/steal/magnet/bolt) never touch +326.
+        // The charge move: earthquake (:65356), meteor (:65414),
+        // volcano (:65472) and CRATER (:65536-37) bank the caster's
+        // meter in the bolt's +26 and zero it; possess zeroes WITHOUT
+        // stamping (:65246 — its forced 200 is set above). mc1l42
+        // t=20150 reads the crater pair straight off: bolt +26 = 16,
+        // and the wizard's own meter back at 1 (zeroed, then the
+        // carpet tick's `if (<200) ++`). ⚠ THE SAME MOVE EXISTS ON
+        // steal mana (:65756), lightning (:65846), undead army
+        // (:65910/:65973) and mana magnet (:66031) — left alone here
+        // for want of a corpus witness in those families.
         match id {
-            6 | 7 | 8 => {
+            6 | 7 | 8 | 9 => {
                 self.g.ent[pr].f26 = self.wiz_charge[0] as i16;
                 self.wiz_charge[0] = 0;
             }
@@ -5815,6 +6098,19 @@ impl World {
             _ => WIZARD_BASE_MANA,
         };
         let mut castle_stored = 0u32;
+        // THE RUNAWAY OWNER ACCUMULATOR. `sub_48340_48680` (:56911-19)
+        // credits the counted entity's +140 into `pool[+144].+136`
+        // whoever that names, and the census's only reset walks the
+        // PLAYER TABLE (:56861-63 — `ent[playIndex].+136 = u32_322`).
+        // A non-wizard owner is therefore never re-baselined and its
+        // +136 grows by its whole owned purse every tick, forever.
+        // The (10,40) GRAVE a dead wizard leaves is exactly that: the
+        // landing re-points his loose (10,39) balls at it (:55561-64)
+        // and from the next tick on the grave counts them up without
+        // bound (mc1l42 slot 109: +140,822/tick for the 871 ticks it
+        // stands). Nothing reads a grave's +136 — this is a retail
+        // artifact, but it is recorded state, so the port keeps it.
+        let mut owner_credit: Vec<(u16, u32)> = Vec::new();
         for j in 1..self.g.ent.len() {
             let e = &self.g.ent[j];
             if e.flags & 0x400 != 0 {
@@ -5861,7 +6157,15 @@ impl World {
                 r.mana_max = r.mana_max.saturating_add(m);
             } else if let Some(r) = self.mc2_rivals.iter_mut().find(|r| r.ent == owner) {
                 r.mana_max = r.mana_max.saturating_add(m);
+            } else if owner != 0 && (owner as usize) < self.g.ent.len() {
+                // Owner tag that names no wizard: the credit still
+                // lands on the entity and nothing ever resets it.
+                owner_credit.push((owner, m));
             }
+        }
+        for (owner, m) in owner_credit {
+            let e = &mut self.g.ent[owner as usize];
+            e.f136 = e.f136.saturating_add(m.min(i32::MAX as u32) as i32);
         }
         self.player.mana_max = max;
         self.player.banked = houses.saturating_add(castle_stored);
@@ -5903,9 +6207,18 @@ impl World {
 
     /// sub_55DD0 (:64909): the cast gate — the castle ladder first
     /// (a nonzero live requirement needs an owned castle STORING at
-    /// least that much), then the wizard pool covers the full cost.
-    /// The fizzle 29 on failure is the caller's job.
-    fn spell_gate(&self, id: usize, def: &crate::mc1::spells::SpellDef) -> bool {
+    /// least that much), then `pool` covers the full cost. The fizzle
+    /// 29 on failure is the caller's job.
+    ///
+    /// `pool` is the caller's read of the purse, and every COMMAND-site
+    /// caller must hand it the PRE-STEP figure: retail consumes the
+    /// command word ahead of the wizard's mana step (:55890, the
+    /// mc1l32 t=671 law that `mc1_cast_command` already honours), while
+    /// the port's step runs at the top of the same wizard pass. Reading
+    /// `player.mana` here instead admitted casts on the strength of a
+    /// regen tick retail had not applied yet — mc1l42 t=10690 arms a
+    /// Heal at the post-step 1000 that retail refuses at 900.
+    fn spell_gate(&self, id: usize, def: &crate::mc1::spells::SpellDef, pool: u32) -> bool {
         if self.dev_spells {
             return true;
         }
@@ -5917,7 +6230,7 @@ impl World {
         {
             return false;
         }
-        self.player.mana >= def.possess_mana
+        pool >= def.possess_mana
     }
 
     /// sub_55E80 (:64936): the cast debit rides the regen delta —
@@ -6103,23 +6416,43 @@ impl World {
     /// wizard-homing when rivals exist), becoming the (10,38) storm
     /// cloud on any non-water end — the cloud climbs to ground+1024
     /// and rains 2 bolts/tick for 33 ticks at the spell's 2000.
-    fn cast_storm(&mut self, p: PlayerPose) {
-        use crate::mc1::combat::PLAYER_HH;
+    fn cast_storm(&mut self, p: PlayerPose, right: bool) {
         let def = &SPELLS[18];
-        let z = p.z.wrapping_add(PLAYER_HH as i16);
-        let Some(pr) = self.g.spawn_storm_carrier(p.x, p.y, z) else {
+        // The carrier leaves the HAND, not the hull: `sub_55EF0_56420`
+        // (:66022) runs on it exactly like every other emit, offset
+        // 256 to the casting side with the inside-terrain revert.
+        // Ours launched from the carpet's own axis, a flat 256 units
+        // off retail on every storm (mc1l42 t=27215/27236).
+        let (mx, my, mz) = self.muzzle(p, right);
+        let Some(pr) = self.g.spawn_storm_carrier(mx, my, mz) else {
             return;
         };
+        // The charge move (:66031-32): the carrier banks the caster's
+        // +326 meter in its own +26 and ZEROES the meter — the same
+        // law the fireball/quake family already carries, and mc1l42
+        // t=27215 is its witness in this family (bolt +26 = 16, the
+        // wizard's meter back at 1 after the carpet tick's ++). Read
+        // and cleared before the borrow below.
+        let charge = self.wiz_charge[0] as i16;
+        self.wiz_charge[0] = 0;
+        // The emit copies the MANIFESTATION's +140 (:66029) — the
+        // ctor's cost-per-shot a4/count, not the row's total; the
+        // same live-vs-computed identity `cast_firewall` documents.
+        let per_shot = (def.possess_mana / def.count.max(1) as u32) as i32;
         let e = &mut self.g.ent[pr];
+        // :66021 bumps +126 ALONE — +128 keeps the ctor base, which
+        // the generic flight's 2/tick servo then walks back up to
+        // (the "+128 is never bumped" law the payload lobs already
+        // carry). Pinning it froze the carrier 2 fast forever.
         e.f126 += p.speed;
-        e.f128 = e.f126;
         e.id24 = PLAYER_TARGET;
         e.f30 = p.heading;
         e.f34 = p.heading;
         e.f32 = p.pitch;
         e.f36 = p.pitch;
         e.f44 = def.damage.min(u16::MAX as u32) as u16;
-        e.f140 = def.possess_mana as i32;
+        e.f140 = per_shot;
+        e.f26 = charge;
         e.f68 = 9;
         e.f69 = 9;
         self.entities_dirty = true;
@@ -6197,6 +6530,55 @@ impl World {
         self.entities_dirty = true;
     }
 
+    /// 1 Heal — `sub_56270_567A0` (:65091), a token body of its OWN,
+    /// not the launcher skeleton: it never calls `sub_55E80`, so heal
+    /// does NOT pin mid-burst regen; instead every admitted tick heals
+    /// 5% of the life CEILING (:65112) and stamps the whole `+136`
+    /// one-shot cost on the caster's regen delta (:65117-21 — remc1
+    /// comments the write out behind the same `//fix` marker as
+    /// sub_55E80's twin, and the corpus says it is live). Admission is
+    /// the shared gate AND `actLife < maxLife` AND `+140 >= +136`
+    /// (:65103-05); a refusal RELEASES the burst (`+48 = 1`, then the
+    /// shared decrement zeroes it, :65120) — that is why retail's heal
+    /// dies the tick the pool falls under 1000 instead of running its
+    /// count out. Exactly one decrement per tick either way (the
+    /// positive-delta arm returns after its own).
+    ///
+    /// mc1l42 t=10668-10697: the token sits at slot 204, BELOW the
+    /// carpet, so it heals and debits before the wizard step applies
+    /// the delta the same frame — retail +505 life / −1000 mana per
+    /// tick against our +5/+100 while the token lay inert.
+    fn mc1_heal_token_tick(&mut self, i: usize) {
+        if self.g.ent[i].f26 <= 0 {
+            return;
+        }
+        // The live per-manifestation cost (+136), not the table: the
+        // same entity field the castle ladder rewrites and a blue
+        // grant can move.
+        let cost = {
+            let e = &self.g.ent[i];
+            if e.f136 > 0 {
+                e.f136 as u32
+            } else {
+                SPELLS[1].possess_mana
+            }
+        };
+        let admitted = self.mc1_token_gate(1)
+            && self.player.life < PLAYER_LIFE_MAX
+            && (self.dev_spells || self.player.mana >= cost);
+        if admitted {
+            if self.g.ent[i].f26 == self.spells()[1].count as i16 {
+                self.g.snd_player(25); // :65110 — the burst's first tick only
+            }
+            self.player.life = (self.player.life + PLAYER_LIFE_MAX / 20).min(PLAYER_LIFE_MAX);
+            self.mana_debit(cost);
+        } else {
+            self.g.ent[i].f26 = 1; // :65127 — the release
+        }
+        self.player.heal_active = self.g.ent[i].f26 > 1;
+        self.g.ent[i].f26 -= 1;
+    }
+
     /// Class-12 dispatch: pre-placed JARS wait for pickup; owned
     /// manifestations run their burst countdown + continuous effects.
     fn class12_tick(&mut self, i: usize, ctx: &MobCtx) {
@@ -6261,8 +6643,16 @@ impl World {
                 // kill, the contrail and the burst-end base-speed
                 // mail). The wizard pass at the recorded carpet slot
                 // applies the delta after these slots, retail's own
-                // ordering. Rival tokens and the hold/channel set
-                // stay inert (their lanes below).
+                // ordering. Rival tokens and the rest of the
+                // hold/channel set stay inert (their lanes below).
+                //
+                // HEAL RUNS TOO, on its OWN body: `sub_56270` shares
+                // nothing with the launcher skeleton but the +48
+                // countdown ([`Self::mc1_heal_token_tick`]).
+                if spell == 1 && self.player.owned[1] == i as u16 {
+                    self.mc1_heal_token_tick(i);
+                    return;
+                }
                 if self.player.owned[spell] == i as u16
                     && matches!(
                         spell,
@@ -6368,7 +6758,16 @@ impl World {
             if self.g.ent[i].f63 & 3 != 0 {
                 return;
             }
-            if self.player.owned[spell] != 0 {
+            // The "already known" marker walks bucket[0] for the LOCAL
+            // carpet and tests it `!model65 && actLife >= 0` (:64784-86)
+            // before consulting the acquisition table — so a DEAD
+            // wizard stamps nothing, exactly as he grants nothing. The
+            // port's marker read the bank with no liveness gate, so
+            // every jar the death scatter had just thrown re-stamped
+            // bit 0 on its next poll (mc1l42 t=17346 onward: retail
+            // holds the five scattered jars at flags 4, the port
+            // pushed them back to 5 every fourth tick).
+            if self.player.state == LifeState::Alive && self.player.owned[spell] != 0 {
                 if self.g.ent[i].flags & 1 == 0 {
                     self.g.ent[i].flags |= 1;
                     self.entities_dirty = true;
@@ -8297,6 +8696,31 @@ impl World {
                 5 => self.g.spawn_creature(r.model, x, y, z),
                 10 => self.g.spawn_creator(r.model, x, y, z),
                 11 => self.spawn_trigger(r.model, x, y, z),
+                // A THING-placed spell jar runs the REAL ctor
+                // `sub_3BF70` (:47979-48013) through its per-spell
+                // thunk `off_987DE[model]` (:48020-161), exactly like
+                // a scatter or a phase-2 re-mint: +8/+12 zeroed then
+                // RefillLife (an authored jar carries life 0/0 and
+                // never decays), +136/+140 the price cache, +50/+44
+                // the thunk's count/damage, and +16 &= ~8. The inert
+                // stand-in instead ran RefillLife over the ctor's
+                // 300 default and set bit 0 — but `+16 |= 1` belongs
+                // to the class-ELEVEN arm of :44040-44, and bit 0 on
+                // a jar is the earned "already known" marker, not a
+                // birth state. mc1l42 t=3267/15575/16153/16782/
+                // 25401/26579: five rows apiece (flags, life,
+                // max_life, mana, mana_max). Every thunk's a3 is
+                // 3*spell, so the retail encoding is born there and
+                // the post-init below adds the swi_id phase; the
+                // port's native encoding keeps the bare phase.
+                12 if (r.model as usize) < SPELL_COUNT && !mc1_jar_ctor_off() => {
+                    let base = if self.strict_retail {
+                        (r.model as u8).wrapping_mul(3)
+                    } else {
+                        0
+                    };
+                    self.spawn_spell_jar(r.model as usize, base, x, y, z)
+                }
                 7 | 9 | 12 => self.spawn_inert(r.class, r.model, x, y, z),
                 _ => None,
             },
@@ -11373,6 +11797,7 @@ impl World {
             mc1_carpet_slot: _,
             mc1_hand_bits: _,
             mc1_cast_pose: _,
+            mc1_acq: _,
             // Conformance instrument (pose-channel ground snapshot),
             // armed/consumed around a single pair tick — never live
             // in a playable world.
@@ -18357,10 +18782,13 @@ mod tests {
         assert!(!l.bindable[red], "red grant still needs the ladder");
         w.player.mana = 2000;
         assert!(
-            w.spell_gate(blue, &SPELLS[blue]),
+            w.spell_gate(blue, &SPELLS[blue], w.player.mana),
             "blue grant casts castle-less"
         );
-        assert!(!w.spell_gate(red, &SPELLS[red]), "red grant gate holds");
+        assert!(
+            !w.spell_gate(red, &SPELLS[red], w.player.mana),
+            "red grant gate holds"
+        );
 
         // Death and castle respawn: blue survives the scatter bank.
         let c =
