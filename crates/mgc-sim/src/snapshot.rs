@@ -128,8 +128,14 @@ pub(crate) struct Writer {
 }
 
 impl Writer {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Writer { buf: Vec::new() }
+    }
+
+    /// The finished stream — used by the conformance world dump, which
+    /// serializes one section at a time rather than one whole sim.
+    pub(crate) fn into_buf(self) -> Vec<u8> {
+        self.buf
     }
 
     pub(crate) fn raw(&mut self, bytes: &[u8]) {

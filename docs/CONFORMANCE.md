@@ -347,14 +347,14 @@ its note claims.
 
 | manifest | take | fixtures |
 |---|---|---|
-| `conformance/mc1l0.json` | mc1l0 — certified bit-exact end-to-end (0..7097) | 18 |
-| `conformance/mc1l1.json` | mc1l1 — certified bit-exact (0..10709) | 10 |
-| `conformance/mc1l2.json` | mc1l2 — certified faithful free replay (0..8282) | 14 |
+| `conformance/mc1l0.json` | mc1l0 — CERTIFIED bit-exact (0..7097) | 18 |
+| `conformance/mc1l1.json` | mc1l1 — CERTIFIED bit-exact (0..10709) | 10 |
+| `conformance/mc1l2.json` | mc1l2 — CERTIFIED bit-exact (0..10588) | 16 |
 | `conformance/mc1l5.json` | mc1l5 — hit-arm trailer receipt | 1 |
 | `conformance/mc1l32.json` | mc1l32 + the retired bee-height cut | 21 |
-| `conformance/mc1l42.json` | mc1l42 — hit-arm trailer receipt | 1 |
+| `conformance/mc1l42.json` | mc1l42 — CERTIFIED bit-exact (0..30878) | 17 |
 
-65 fixtures, 6.0 MB, **0.3 s**. The three certified MC1 levels were
+83 fixtures, **0.3 s**. The three certified MC1 levels were
 mined in one pass (2026-08-17) by the reversion probe above; every
 fixture cut there is measured non-vacuous against its level's own
 pre-fix binary. ⚠ Their files are ~120-180 KB each rather than
@@ -579,6 +579,23 @@ THE REVERSION PROBE (`tools/conform-rig`) was built to do the hard way
 — that probe stays useful for mining laws that landed before this
 instrument existed, and stops being needed for new work.
 
+⚠ **CHECK `D1(t)` BEFORE REACHING FOR THE CUTTER.** The candidate list
+is a list of FREE-RUN breaks, and the fixture runner is PAIR mode, so
+the two only overlap where the break is LOCAL. A reset whose pair diff
+is CLEAN is by construction a law the importer restores every tick
+(`+44`, the acquisition list, the free stack, the whole flight chain):
+no fixture can hold it, however real it is, and the lane is a UNIT
+TEST (§Sizing). DIRTY → cut the fixture; CLEAN → write the test.
+
+How the split actually falls depends on how mined the take is. On the
+first session to work this list (2026-08-18b, mc1l42 22 clusters → 1
+and mc1l2 3 → 1) exactly ONE of ten closed laws was pair-visible — but
+those two takes had already been driven to 1 and 3 graded rows by
+earlier sessions, so what was left was, by selection, the residue no
+pair could see. Expect the opposite mix on a FRESH recording: there
+the pair-dirty families come first and the segmented list is mostly
+their downstream noise.
+
 ⭐ **Attribution falls out of running it beside `verify-deltas`.** At a
 break tick `t`, the pair diff `D1(t)` DIRTY means the error is LOCAL to
 `t`; `D1(t)` CLEAN means it was INHERITED from earlier in the segment
@@ -590,6 +607,82 @@ the measured channel**, so a format-1 take (no terrain channel) resets
 to PRISTINE planes and re-breaks immediately; the mode prints a warning
 and the reset count is a capture artifact. mc1l32 is such a take
 (42,925 "resets" — meaningless until it is re-recorded with terrain).
+
+### The two instruments that attribute a CLEAN-`D1(t)` break
+
+When a segmented break's pair diff is clean, the error was inherited
+through a lane nothing grades, and these are how it gets named.
+
+**`MGC_RAW_SHADOW=1` — every ungraded per-entity lane, in BOTH
+runners** (`crates/mgc-conform/src/shadow.rs`; one implementation, by
+construction). `EntObsMc1` carries 22 fields, `RetailEntMc1` carries
+50-odd, and every field in the gap is a lane the recording HOLDS, the
+importer RESTORES and the graded diff can never see. It started as
+`+70`/`+71`/`+58`/`+44` — each of which paid for itself — and is now
+all of `+26`…`site_z`, the six damage mailboxes and the tile links.
+
+Run it in both modes, because they answer different questions:
+
+- on `verify-deltas` the state is re-imported every tick, so a
+  mismatch is a one-tick WRITE bug, attributable to the handler that
+  ran;
+- on `replay` the port has carried its own copy since the anchor, so
+  the FIRST tick a lane parts is the first tick the port's HISTORY
+  parts from retail's.
+
+`MGC_RAW_SHADOW_ROWS=<path>` dumps every row as a TSV
+(`t, slot, class, model, field, retail, port`) — the summary keeps one
+example per `(class, model, field)`, which is the wrong resolution when
+the question is WHICH TICK a lane first parts. Two lanes are handled
+specially and both are load-bearing: slot-valued fields
+(`+38`/`+40`/`+144`/mail sources) get the obs projection's own
+`PLAYER_TARGET` untranslation, without which the sentinel alone is
+~400,000 rows on mc1l2; and tile links that thread THROUGH the human
+are skipped, because the port's carpet is not a pool record and no
+chain of ours can match link-for-link there.
+
+**`MGC_STATE_DUMP=<t>:<path>` on `replay` — the sectioned whole-world
+dump** (`World::debug_state_sections`). The shadow covers everything
+the RECORDING holds; this covers everything the PORT holds, which is
+strictly more: the terrain planes, the tile heads, the wizard
+registers, the THING table, the player column, `Gen::exhausted`. It
+fires at the first tick at or after `t`, **anchor ticks included** — so
+a run seeded at `t` dumps retail's imported state and a run that walked
+there dumps the port's, and diffing the two names the state that
+parted. A byte offset into a 400 KB blob is not an answer; a section
+name is. (Format: one line per section, `name TAB bytelen TAB hex`. An
+`Ent` inside the `ent` section is 143 bytes in the `Snap for Ent`
+field order, after the Vec's 4-byte length header.)
+
+**`MGC_TEAR_TRACE=<t0>:<t1>` on `replay` — why a boundary is called
+TORN.** `recover::capture_clean_mc1` decides whether a boundary can be
+graded at all, and it is a HEURISTIC (a `+63` step census plus the
+one-step global-LCG test), not a record of missing data — it predates
+the recorder's monotonic frame counter, when tick identity had to be
+inferred. This splits the verdict into its two clauses and names the
+suspects, which is the only way to tell a real tear from a false one.
+
+⚠⚠ **AN ENTITY-POOL OVERFLOW LOOKS EXACTLY LIKE A TORN CAPTURE, BY
+CONSTRUCTION** — `NewEvent` seeds `+63` from the slot index, so a slot
+reaped and re-minted into the same `(class, model)` lands on precisely
+the value its predecessor was walking, i.e. the tear signature. The
+per-entity LCG `+4` is what settles identity (`NewEvent` re-seeds it),
+and the census now skips a slot whose `rand` changed. Measured on
+mc1l42: boundaries t=6612..6623 were ALL called torn on re-minted
+`(9,9)` beam nodes while the global-LCG clause passed at every tick;
+the recording is gapless and untorn. TORN went **105 → 0**, and the
+take's first divergence moved from t=6624 (15/14 missing/extra, 1,486
+field rows) to **t=6618, one row**. The general lesson: an instrument
+that degrades exactly where the game gets busy will hide its worst bugs
+under its own noise floor.
+
+⭐ Worked example, mc1l42 t=6624: the shadow said the free run was
+bit-identical to the recording on every modelled lane AND the free
+stack at t=6623, `--start` bisection put the birth of the divergence in
+tick 6618, and the state dump then showed `Gen::exhausted` jumping
+0 → 74 in that single tick — i.e. the ENTITY POOL IS FULL and both
+engines are dropping spawns. Neither of the other instruments could
+have said that.
 
 `--pose-only` is the tier-2 chain: the FLIGHT state chains while the
 world context re-imports per pair — it isolates the mover +

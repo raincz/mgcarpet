@@ -136,19 +136,12 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     let mut pose_chan = crate::pose_lane::PoseLane::default();
     // THE RAW SHADOW (`MGC_RAW_SHADOW=1`): tally per-(class, model,
     // field) mismatches on the lanes the obs does NOT carry — `+70`,
-    // `+71`, `+58`. See `World::raw_shadow_mc1`: the importer restores
+    // `+71`, `+58`, `+44`. See `World::raw_shadow_mc1`: the importer restores
     // all three every pair, so a handler that reads one correctly and
     // WRITES it wrong is invisible to the graded diff and only ever
     // bites a free run. Off by default — it grades nothing, it only
     // reports, and it must not move the UNEXPLAINED headline.
-    let raw_shadow = std::env::var_os("MGC_RAW_SHADOW").is_some();
-    let mut shadow: BTreeMap<(u8, u8, &'static str), (u64, String)> = BTreeMap::new();
-    // The WORLD-level shadow lane: the free stack. Same blind spot,
-    // one size up — the recording carries it per tick, the importer
-    // installs it every pair, nothing grades it, and a wrong push/pop
-    // order only ever shows in a free run, as balanced same-(class,
-    // model) missing/extra rows once the allocators part ways.
-    let mut free_lane: (u64, u64, String) = (0, 0, String::new());
+    let mut shadow = crate::shadow::Shadow::from_env()?;
     let mut printed_import = false;
     // The measured-terrain accumulator (format-2 channel): a pair
     // (pt → t) must run on terrain AT pt, so each record's block is
@@ -408,89 +401,12 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         pose,
                     };
                     let port = world.obs_project_mc1(&pin);
-                    if raw_shadow {
-                        for g in world.raw_shadow_mc1() {
-                            if g.slot == report.human_slot {
-                                continue;
-                            }
-                            let Some(w) = st.ents.get(g.slot as usize) else {
-                                continue;
-                            };
-                            // Only compare a slot the recording agrees
-                            // is the SAME entity — a slot-desync would
-                            // otherwise report every field on it.
-                            if w.class64 != g.class || w.model65 != g.model {
-                                continue;
-                            }
-                            for (name, a, b) in [
-                                ("f70", w.f70 as i64, g.f70 as i64),
-                                ("f71", w.f71 as i64, g.f71 as i64),
-                                // ⚠ COMPARE THE BYTE, NOT THE NUMBER.
-                                // The recording's `+58` is signed and
-                                // the port widens it to i16, but the
-                                // port's own decrements wrap as u8 — so
-                                // retail's -6 and the port's 250 are
-                                // the SAME byte and only the sign
-                                // interpretation differs. Masking keeps
-                                // this lane honest; the sign question
-                                // is its own (ungraded) lead.
-                                ("f58", w.f58 as i64 & 0xFF, g.f58 as i64 & 0xFF),
-                            ] {
-                                if a != b {
-                                    let e = shadow
-                                        .entry((g.class, g.model, name))
-                                        .or_insert((0, String::new()));
-                                    e.0 += 1;
-                                    if e.1.is_empty() {
-                                        e.1 =
-                                            format!("t={pt} slot {}: retail {a} port {b}", g.slot);
-                                    }
-                                }
-                            }
-                        }
-                        // The free stack, against the projection the
-                        // importer ITSELF would install from state@N+1
-                        // — same filter, so any difference is the
-                        // port's own allocator order, never the
-                        // importer's census. A fallback pair started
-                        // from a scanned list, not retail's, so it has
-                        // nothing to say and is skipped.
+                    if let Some(sh) = shadow.as_mut() {
+                        sh.compare_ents_mc1(&world, &st, report.human_slot, pt);
+                        // A fallback pair started from a SCANNED free
+                        // list, not retail's, so it has nothing to say.
                         if report.stack_fallback.is_none() {
-                            let pool = st.ents.len();
-                            let want: Vec<u16> = st
-                                .free_stack
-                                .iter()
-                                .copied()
-                                .filter(|&s| {
-                                    (s as usize) < pool
-                                        && s != report.human_slot
-                                        && st.ents[s as usize].class64 == 0
-                                })
-                                .collect();
-                            let got = world.free_stack_mc1();
-                            free_lane.1 += 1;
-                            if want != got {
-                                free_lane.0 += 1;
-                                if free_lane.2.is_empty() {
-                                    // Depth from the TOP is what
-                                    // matters: the next spawn pops the
-                                    // end, so depth 0 diverging is a
-                                    // slot handed out wrong THIS tick.
-                                    let depth = want
-                                        .iter()
-                                        .rev()
-                                        .zip(got.iter().rev())
-                                        .position(|(a, b)| a != b);
-                                    free_lane.2 = format!(
-                                        "t={pt} len retail {} port {}, top retail {:?} port {:?}, first top-diff depth {}",
-                                        want.len(),
-                                        got.len(),
-                                        want.last(),
-                                        got.last(),
-                                        depth.map_or("none (prefix)".into(), |d| d.to_string()),
-                                    );
-                                }
-                            }
+                            sh.compare_free_mc1(&world, &st, report.human_slot, pt);
                         }
                     }
                     stats.absorb_rng(pst.rand, obs.rng, port.rng);
@@ -618,30 +534,10 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     }
     print!("{}", stats.render(args, roster.as_ref()));
     print!("{}", pose_chan.render());
-    if raw_shadow {
-        let total: u64 = shadow.values().map(|v| v.0).sum();
-        println!("  RAW SHADOW (ungraded lanes +70/+71/+58): {total} mismatches");
-        for ((c, m), ()) in shadow
-            .keys()
-            .map(|(c, m, _)| ((*c, *m), ()))
-            .collect::<std::collections::BTreeSet<_>>()
-        {
-            for name in ["f70", "f71", "f58"] {
-                if let Some((n, ex)) = shadow.get(&(c, m, name)) {
-                    println!("    ({c:>3},{m:>3}) {name}: {n}  e.g. {ex}");
-                }
-            }
-        }
-        println!(
-            "    free stack: {} / {} pairs mismatched{}",
-            free_lane.0,
-            free_lane.1,
-            if free_lane.2.is_empty() {
-                String::new()
-            } else {
-                format!("  e.g. {}", free_lane.2)
-            }
-        );
+    if let Some(sh) = shadow.as_ref() {
+        // Pair mode's question is "which family is worst", so the
+        // report keeps the map's own (class, model, field) order.
+        print!("{}", sh.render(false));
     }
     Ok(stats.clean_pairs == stats.pairs)
 }

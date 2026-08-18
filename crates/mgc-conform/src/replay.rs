@@ -122,9 +122,20 @@ impl Chain {
 fn step_mc1(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand) {
     let falling = world.player_falling();
     let dead = world.player_dead();
+    // Only the COMMAND handler stops at death (sub_46840 is skipped
+    // from state 2 on): casts, thrust and strafe die with it, but the
+    // STICK lives in the input pass and keeps feeding the filters all
+    // the way down — `World::step_player_flight` carries the law and
+    // the freeze that goes with it (`Mc1Input::no_command`). The dead
+    // arm needs no zeroed registers here: retail's state-3 dispatch
+    // simply never moves.
     let (inp, cmd) = if falling || dead {
         (
-            Mc1Input::default(),
+            Mc1Input {
+                stick_x: inp.stick_x,
+                stick_y: inp.stick_y,
+                ..Mc1Input::default()
+            },
             PlayerCommand {
                 respawn: cmd.respawn,
                 ..PlayerCommand::default()
@@ -133,11 +144,6 @@ fn step_mc1(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand
     } else {
         (inp, cmd)
     };
-    if dead {
-        ch.s.act_speed = 0;
-        ch.s.tgt_speed = 0;
-        ch.s.strafe = 0;
-    }
     let thrust = if inp.speed_up {
         1.0
     } else if inp.speed_down {
@@ -161,14 +167,31 @@ fn step_mc1(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand
         dead,
     };
     world.tick_flight(&mut drive, cmd);
-    // Respawn (sub_44D30): castle, one tile up, flight state re-armed,
-    // heading preserved (the app's from_tiles reset — tick_ctr and the
-    // private LCG restart with it).
-    if let Some((x, z)) = world.take_respawn() {
-        let g = world.ground_height_tiles(x, z);
-        let yaw = ch.s.yaw;
-        ch.s = Mc1State::from_tiles(x, z, g + 1.0, 0.0);
-        ch.s.yaw = yaw;
+    // Respawn (sub_44D30 :54868-83): position at the castle one tile
+    // up, then EXACTLY THREE flight registers cleared — `v_12` (target
+    // speed), `v_16` (strafe) and the knock triple `v_22/24/26`. The
+    // actual speed `+126`, the entity's `+63` tick counter and its
+    // private LCG are NOT touched, and the heading is kept: mc1l42
+    // t=17398 respawns at `tgt 0 / act -80 / strafe 0`, then servos
+    // −64, −48, −32, −16 over the next four ticks with `f63` running
+    // 90, 91, 92 straight through. A full `from_tiles` reset restarted
+    // the counter and the LCG (retail 810782015, ours 0) and snapped
+    // the speed to zero a tick early.
+    if let Some((x, z, alt)) = world.take_respawn() {
+        ch.s.x = (x.rem_euclid(256.0) * 256.0) as u16;
+        ch.s.y = (z.rem_euclid(256.0) * 256.0) as u16;
+        // ...AT THE SEAT'S OWN Z, not a tile above it. mc1l42 t=17398
+        // respawns on z = 3776 with the site's own terrain reading
+        // exactly 3776 (`MGC_CELL_TRACE` (123,13): height 118), so the
+        // `+256` read off `tempZ._axis_2d.y++` (:54848) is not what
+        // the engine lands on. The z now comes from the SEAT the sim
+        // teleported to (:54858-61 copies the castle's whole
+        // position), rather than being re-derived from the ground
+        // here — one implementation, shared with the app, which used
+        // to derive `ground + 1.0` and land 256 units high.
+        ch.s.z = (alt * 256.0) as i16;
+        ch.s.tgt_speed = 0;
+        ch.s.strafe = 0;
     }
     if let Some((x, z, alt)) = world.take_teleport() {
         ch.s.x = (x.rem_euclid(256.0) * 256.0) as u16;
@@ -266,10 +289,9 @@ fn step_mc2(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand
         ch.s.yaw = ((ch.s.yaw as i32 + d.clamp(-16, 16)) & 0x7FF) as u16;
     }
     world.tick(ch.pose(), cmd);
-    if let Some((x, z)) = world.take_respawn() {
-        let g = world.ground_height_tiles(x, z);
+    if let Some((x, z, alt)) = world.take_respawn() {
         let yaw = ch.s.yaw;
-        ch.s = Mc1State::from_tiles(x, z, g + 1.0, 0.0);
+        ch.s = Mc1State::from_tiles(x, z, alt, 0.0);
         ch.s.yaw = yaw;
     }
     if let Some((x, z, alt)) = world.take_teleport() {
@@ -308,6 +330,9 @@ fn mc1_mover_input(mb: u32, stick: (i16, i16)) -> Mc1Input {
         speed_down: mb & 2 != 0,
         strafe_left: mb & 4 != 0,
         strafe_right: mb & 8 != 0,
+        // Cleared at the carpet's dispatch on the death fall
+        // (`World::step_player_flight`).
+        no_command: false,
     }
 }
 
@@ -661,6 +686,41 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     );
     let (mut world, pristine) = crate::verify::build_world(&args.baked, &game, level)?;
     let mut csv = open_csv(args)?;
+    let mut shadow = crate::shadow::Shadow::from_env()?;
+    let state_dump: Option<(u64, String)> = std::env::var("MGC_STATE_DUMP").ok().and_then(|s| {
+        let (t, path) = s.split_once(':')?;
+        Some((t.parse().ok()?, path.to_string()))
+    });
+    // `MGC_STATE_DUMP=<t>:<path>` writes the sectioned whole-world dump
+    // once, at the first tick at or after `t` — an ANCHOR tick counts,
+    // so a run seeded at `t` dumps retail's own imported state and a
+    // run that walked there dumps the port's. Diffing the two is how a
+    // free-run break gets attributed when the entity pool, the free
+    // list and every graded field are already bit-identical.
+    let tear_trace: Option<(u64, u64)> = std::env::var("MGC_TEAR_TRACE").ok().and_then(|s| {
+        let (a, b) = s.split_once(':')?;
+        Some((a.parse().ok()?, b.parse().ok()?))
+    });
+    let mut state_dumped = false;
+    let mut dump_state = |world: &World, t: u64| -> Result<(), String> {
+        let Some(spec) = state_dump.as_ref() else {
+            return Ok(());
+        };
+        if t < spec.0 || state_dumped {
+            return Ok(());
+        }
+        state_dumped = true;
+        println!("  STATE DUMP at t={t} -> {}", spec.1);
+        let mut out = String::new();
+        for (name, bytes) in world.debug_state_sections() {
+            let _ = write!(out, "{name}\t{}\t", bytes.len());
+            for b in &bytes {
+                let _ = write!(out, "{b:02x}");
+            }
+            out.push('\n');
+        }
+        std::fs::write(&spec.1, out).map_err(|e| format!("state dump: {e}"))
+    };
     let mut timg = (!args.no_terrain)
         .then(|| {
             rec.header
@@ -807,6 +867,7 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     );
                 }
             }
+            dump_state(&world, tick.t)?;
             st_prev = Some((tick.t, st));
             continue;
         }
@@ -1106,6 +1167,54 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 }
                 println!("{line}");
             }
+            // `MGC_TEAR_TRACE=<t0>:<t1>` — WHY a boundary is called
+            // torn. `capture_clean_mc1` is a HEURISTIC (a `+63` step
+            // census plus the one-step LCG test), not a record of
+            // missing data: a gapless recording can still be declared
+            // ungradeable. This splits the verdict into its two
+            // clauses and names the suspects, so a false tear can be
+            // told from a real one.
+            if let Some((t0, t1)) = tear_trace {
+                if tick.t >= t0 && tick.t <= t1 {
+                    let mut suspects: Vec<(u16, u8, u8, u8, u8, bool)> = Vec::new();
+                    for re in &obs.entities {
+                        let prev = &pst.ents[re.slot as usize];
+                        if prev.class64 == 0 || prev.class64 != re.class || prev.model65 != re.model
+                        {
+                            continue;
+                        }
+                        if matches!(re.tick_byte.wrapping_sub(prev.f63), 0 | 2) {
+                            // A slot REAPED AND RE-MINTED as the same
+                            // (class, model) is a different entity, and
+                            // its `+63` is the fresh alloc value — the
+                            // per-entity LCG says which.
+                            suspects.push((
+                                re.slot,
+                                re.class,
+                                re.model,
+                                prev.f63,
+                                re.tick_byte,
+                                re.rand != prev.rand,
+                            ));
+                        }
+                    }
+                    let lcg_ok = pst.rand.wrapping_mul(9377).wrapping_add(9439) == obs.rng;
+                    let reminted = suspects.iter().filter(|s| s.5).count();
+                    println!(
+                        "  TEAR t={} verdict={} suspects={} (re-minted {}) lcg_one_step={} {:?}",
+                        tick.t,
+                        if capture_clean(&pst, &obs) {
+                            "GRADED"
+                        } else {
+                            "TORN"
+                        },
+                        suspects.len(),
+                        reminted,
+                        lcg_ok,
+                        &suspects[..suspects.len().min(6)]
+                    );
+                }
+            }
             // Grade at the boundary (capture-clean pairs only — a torn
             // snapshot grades nothing, the chain runs on regardless).
             if capture_clean(&pst, &obs) {
@@ -1117,6 +1226,17 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     pose: ch.pose(),
                 };
                 let port = world.obs_project_mc1(&pin);
+                // THE RAW SHADOW IN A FREE RUN. Pair mode's copy of
+                // this catches a one-tick WRITE bug; here the port has
+                // been carrying its own state since the anchor, so the
+                // first tick a lane parts is the first tick the port's
+                // HISTORY parts from retail's — the only instrument
+                // that can explain a `--segmented` break whose pair
+                // diff at the same tick is CLEAN.
+                if let Some(sh) = shadow.as_mut() {
+                    sh.compare_ents_mc1(&world, &st, slot, tick.t);
+                    sh.compare_free_mc1(&world, &st, slot, tick.t);
+                }
                 let mut pd = compare(&obs, &port, slot);
                 append_hand_diffs(&mut pd, &st, &port, pst.local_player as usize);
                 let dump = args.dump == Some(pt)
@@ -1139,6 +1259,7 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             }
         }
         stats.seg().end = tick.t;
+        dump_state(&world, tick.t)?;
         if let Some(t) = reset_at.take() {
             let (ch, human_slot, _) = anchor_mc1(&mut world, &pristine, &timg, &st, t)?;
             chain = Some((ch, human_slot));
@@ -1155,6 +1276,11 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
         "{}",
         stats.render(if args.pose_only { "pose-only" } else { "world" })
     );
+    if let Some(sh) = shadow.as_ref() {
+        // The free run's question is "what broke FIRST", so the lanes
+        // are ordered by the tick they part, not by family.
+        print!("{}", sh.render(true));
+    }
     Ok(stats.clean())
 }
 

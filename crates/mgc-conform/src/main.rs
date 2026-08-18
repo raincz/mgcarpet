@@ -17,6 +17,7 @@ mod jsondiff;
 mod pose_lane;
 mod replay;
 mod roster;
+mod shadow;
 mod verify;
 mod verify_mc2;
 

@@ -2056,17 +2056,31 @@ impl Gen {
 
     fn militia_chase_body(&mut self, i: usize, base: u8, ctx: &MobCtx) {
         let tgt = self.ent[i].f146;
-        let (tx, ty, tz) = if tgt == PLAYER_TARGET {
-            (ctx.px, ctx.py, ctx.pz)
+        // ⭐ THE LOST TEST IS A VERDICT, NOT AN EXIT — it is taken here
+        // and applied only BELOW THE RE-BEAR, because `sub_1BB20` has
+        // no body of its own: it is `sub_1A120(a1x, 24, sub_1A990)`
+        // (:22696), and the shared chase reads the target's axis
+        // unguarded, moves, re-bears every 4th tick and only THEN
+        // tests `+12 < 0 || (+17 & 4)` (:21654-61). So a militiaman
+        // whose target dies still turns onto the corpse on his exit
+        // tick — the same law [`Gen::mob_chase`] already carries, and
+        // the one place in the family that had kept the early return.
+        // mc1l2 t=8283: the rival wizard slot 300 is mid-death-fall at
+        // `act_life -280`, retail's militia posts `+34 = 691` on the
+        // way out and ours held its stale 693 for another tick.
+        let (tx, ty, tz, lost) = if tgt == PLAYER_TARGET {
+            (ctx.px, ctx.py, ctx.pz, ctx.pdead)
         } else {
             let t = tgt as usize;
-            if t == 0 || t >= self.ent.len() || self.ent[t].class64 == 0 || self.ent[t].act_life < 0
-            {
+            // Port guard only: retail dereferences +146 whatever it
+            // names (a freed slot reads its husk).
+            if t == 0 || t >= self.ent.len() {
                 self.ent[i].tick70 = base + 1;
                 return;
             }
             let c = &self.ent[t];
-            (c.x, c.y, c.z)
+            let lost = c.class64 == 0 || c.act_life < 0 || c.flags & 0x400 != 0;
+            (c.x, c.y, c.z, lost)
         };
         // Retail runs the movement core (sub_196E0 :21654, via
         // sub_1A120) every alive tick — at chase speed 0 it only
@@ -2086,6 +2100,10 @@ impl Gen {
             // 1710 on the very tick the re-bear posts 1027; snapping
             // +30 = +34 here jumped the whole 365).
             self.ent[i].f34 = Self::angle_between(e.x, e.y, tx, ty);
+        }
+        if lost {
+            self.ent[i].tick70 = base + 1;
+            return;
         }
         let e = &self.ent[i];
         let row = &BEHAVIOR[e.row156 as usize];
@@ -3705,9 +3723,35 @@ impl Gen {
                 if role == 3 {
                     // Pack-member death (:21746): the leader retargets
                     // the killer and rejoins the hunt.
+                    //
+                    // ⚠ THE HANDOFF WRITES THROUGH `+52` BLIND. Retail
+                    // takes `v3x = &pool[a1x->+52]` (:21702) with no
+                    // class, model, life or flags test — the only gate
+                    // on the whole path is `+52 != 0` (:21695) — and
+                    // then stamps whatever record now occupies that
+                    // slot. The port's `class64 == 5` conjunct was
+                    // invented, and it cost mc1l2 its last graded row:
+                    // at t=8290 the militiaman at slot 285 dies still
+                    // pointing at slot 287, which had been reaped and
+                    // re-minted as a `(10,0)` FIRE. Retail stamps the
+                    // fire — `+146 = 295` (the human), `+52 = 0`,
+                    // `+70 = 24+2 = 26` — and the ascending walk then
+                    // reaches 287 and dispatches it as class-10 state
+                    // 26 (`sub_263C0` :28949: `+26++`, pre-decrement,
+                    // soft kill) instead of a fire. `f26 = 1` is that
+                    // dispatch, not a fourth write.
+                    //
+                    // The bound is memory safety, not behaviour:
+                    // retail indexes a fixed 1000-record C array with a
+                    // raw u16 and would read garbage where the port's
+                    // `Vec` would panic. Do NOT re-introduce a
+                    // behavioural test here.
                     let l = self.ent[i].f52 as usize;
-                    if l != 0 && self.ent[l].class64 == 5 {
-                        self.ent[l].f146 = self.ent[i].f38;
+                    if l != 0 && l < self.ent.len() {
+                        // :21746 reads `+40`; the lethal branch of the
+                        // inbox has just copied it into `+38`
+                        // (:21737-38), so the two are equal here.
+                        self.ent[l].f146 = self.ent[i].f40;
                         self.ent[l].f52 = 0;
                         self.ent[l].tick70 = base + 2;
                     }
@@ -3822,9 +3866,13 @@ impl Gen {
                         }
                         3 => {
                             // PACK: leader and member both retarget
-                            // (:21742-65).
+                            // (:21755-65) — the SAME blind write
+                            // through `+52` as the lethal arm above,
+                            // and retail clears the PARTNER's `+52`
+                            // (:21758) as well as its own.
                             let l = self.ent[i].f52 as usize;
-                            if l != 0 && self.ent[l].class64 == 5 {
+                            if l != 0 && l < self.ent.len() {
+                                self.ent[l].f52 = 0;
                                 self.ent[l].f146 = src;
                                 self.ent[l].tick70 = base + 2;
                             }

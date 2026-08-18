@@ -360,12 +360,38 @@ pub fn recover_pair_mc2(
 /// consumer's chain runs on regardless). Tear witnesses: entities
 /// whose per-tick byte did not advance exactly once across the pair,
 /// and the global LCG not being exactly one step ahead of N's.
+///
+/// ⚠⚠ **A SLOT THAT WAS REAPED AND RE-MINTED IS NOT A TEAR WITNESS.**
+/// The `+63` census assumes the record at a slot is the SAME entity at
+/// both ends of the pair, and `class`/`model` equality does not
+/// establish that: a mass-spawn burst recycles slots into the same
+/// `(class, model)` constantly. Worse, the collision is SYSTEMATIC
+/// rather than chance — `NewEvent` seeds `+63` from the slot index
+/// (:43883), so a re-minted record lands on exactly the value its
+/// predecessor had been walking, i.e. a delta of 0, i.e. a "tear".
+///
+/// The per-entity LCG (`+4`) settles it: `NewEvent` re-seeds it
+/// (`slot + global rand`, :43882), so `rand` changing across the pair
+/// means a DIFFERENT entity and the `+63` comparison is meaningless.
+///
+/// Measured on mc1l42's kraken clash, where this mattered: boundaries
+/// t=6612..6623 were all called TORN on 3-7 suspects, **every one of
+/// them a re-minted `(9,9)` beam node**, while the global-LCG clause —
+/// the strong witness — passed at every single tick. The recording is
+/// gapless and untorn there; the heuristic went blind for twelve ticks
+/// precisely because the level was spawning hard, which is where the
+/// grading is worth most. Un-blinding it moves mc1l42's first
+/// divergence from t=6624 (a mass-spawn slot desync, six ticks
+/// downstream and nearly unreadable) to t=6618 (one entity, one flag).
 pub fn capture_clean_mc1(pst: &RetailMc1, retail: &ObsMc1) -> bool {
     let mut tear_suspects = 0u32;
     for re in &retail.entities {
         let prev = &pst.ents[re.slot as usize];
         if prev.class64 == 0 || prev.class64 != re.class || prev.model65 != re.model {
             continue;
+        }
+        if re.rand != prev.rand {
+            continue; // re-minted slot: a different entity, not a tear
         }
         if matches!(re.tick_byte.wrapping_sub(prev.f63), 0 | 2) {
             tear_suspects += 1;

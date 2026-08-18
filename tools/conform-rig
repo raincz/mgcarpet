@@ -8,9 +8,17 @@
 # level's conformance-fix commit, so the divergences it reports are
 # exactly the ones the fix closed:
 #
-#     l0 → 3d99885 (dbb3f9b^, before "Sprint to mc1l0 full fidelity")
-#     l1 → dbb3f9b (39e6646^, before "mc1l1 sprint")
-#     l2 → 39e6646 (ba15c26^, before "mc1l2 parity")
+#     l0   → 3d99885 (dbb3f9b^, before "Sprint to mc1l0 full fidelity")
+#     l1   → dbb3f9b (39e6646^, before "mc1l1 sprint")
+#     l2   → 39e6646 (ba15c26^, before "mc1l2 parity")
+#     prev → 91cd596 (6c32ce2^, before the segmented-replay fix round)
+#
+# `prev` is the general-purpose one: "did THIS session move that
+# number?" is a question the reversion probe answers for free, and it
+# answered it twice on 2026-08-18c — mc1l1's three pair-mode rows read
+# identically at 91cd596 (so they are the ledgered capture/import
+# limitations, not a new regression), and mc1l5/mc1l32's raw counts
+# went DOWN. Re-point it at the new HEAD^ each session.
 #
 # At HEAD these three levels are certified, so verify-deltas on them is
 # silent and cannot tell a load-bearing tick from ballast. The pre-fix

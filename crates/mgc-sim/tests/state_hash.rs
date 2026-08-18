@@ -740,8 +740,21 @@ fn level_005_golden_state_hashes() {
         0x39d77410d2db3af5, // A
         0xe713b6beeb64afe7, // B
         0x8bc77e31d36b8627, // C
-        0x1a48e86a9927d082, // D: 64 ticks of two-hand fireball combat
-        0xbbac5ecf86319f32, // E: 100 aftermath ticks
+        // D/E re-pinned for THE SEGMENTED-REPLAY RESIDUE SESSION.
+        // Post-init and A..C hold byte-for-byte and OBSERVABLE holds
+        // at ALL SIX, which is the expected shape: every law that
+        // landed is a COMBAT-window field law and mc1l5 is the militia
+        // level. The m4 chase now takes its target-lost verdict BELOW
+        // the shared re-bear (`sub_1BB20` = `sub_1A120(a1x, 24, …)`,
+        // :21654-61), so a militiaman whose target dies turns onto the
+        // corpse on his exit tick — his `+34` moves, and nothing else
+        // does. Beside it: the (10,12) possess flash carrying its
+        // ctor's `+44 = -1536` into the ch1 claim it broadcasts (the
+        // amount MC1's intake never reads), and the class-12 ctor
+        // stamping its whole row (`+50`/`+136`/`+140` and both life
+        // words) on every grant, not spell 16 alone.
+        0x543905e32a2cedd3, // D: 64 ticks of two-hand fireball combat
+        0x560e567a77e90fbb, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,

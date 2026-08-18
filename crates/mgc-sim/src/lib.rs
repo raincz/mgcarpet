@@ -203,6 +203,9 @@ fn mc1_input(input: &FlightInput) -> flight::Mc1Input {
         speed_down: down,
         strafe_left: left,
         strafe_right: right,
+        // Set world-side, at the carpet's dispatch — only the death
+        // fall clears it (`World::step_player_flight`).
+        no_command: false,
     }
 }
 
@@ -632,23 +635,42 @@ impl Simulation {
         };
         let mut input = *input;
         if falling || dead {
+            // ⚠ ONLY THE COMMAND DIES. `sub_46840` is skipped from
+            // state 2 on, but the STICK lives in the input pass and
+            // keeps steering a dying carpet all the way down — retail
+            // aims and rolls through the whole fall (mc1l42
+            // t=17307-17344). The freeze that goes with it (the speed
+            // target and the strafe register) is the mover's own,
+            // `Mc1Input::no_command`, set at the carpet's dispatch.
             input = FlightInput {
                 respawn: input.respawn,
+                stick_x: input.stick_x,
+                stick_y: input.stick_y,
                 ..FlightInput::default()
             };
         }
-        // A DEAD wizard is PINNED at the grave (retail sub_463B0 :55575
-        // zeros the speeds and only turns the camera toward the killer).
-        // Kill the momentum BEFORE the move so nothing drifts the
-        // viewport off the corpse: the MC1/MC2 carpet speeds AND the
-        // enhanced mover's float velocity (its speed state) — the latter
-        // is what kept sliding the camera along the terrain post-death.
-        // FALLING is left alone: retail's death fall keeps the
+        // A DEAD wizard is PINNED at the grave. Retail's state-3
+        // dispatch (`sub_463B0` :55575) runs NO MOVE AT ALL — that,
+        // not a zeroed speed, is what pins the corpse, and it is why
+        // the record still reads −80/−80/36 in the frozen registers
+        // from the death tick to the respawn. The faithful walk models
+        // it world-side ([`World::step_player_flight`]); the ENHANCED
+        // tier has no such dispatch, so it keeps the momentum kill —
+        // the float velocity above all, which is what used to slide
+        // the camera along the terrain after touchdown.
+        // FALLING is left alone either way: the death fall keeps its
         // horizontal glide down to touchdown.
+        let faithful_dead = self.thrust_model == ThrustModel::Mc1
+            && self
+                .world
+                .as_ref()
+                .is_some_and(|w| w.verbs().flight != verbs::FlightVerb::Mc2);
         if dead {
-            self.carpet.act_speed = 0;
-            self.carpet.tgt_speed = 0;
-            self.carpet.strafe = 0;
+            if !faithful_dead {
+                self.carpet.act_speed = 0;
+                self.carpet.tgt_speed = 0;
+                self.carpet.strafe = 0;
+            }
             self.flyer.vx = 0.0;
             self.flyer.vy = 0.0;
             self.flyer.vz = 0.0;
@@ -855,7 +877,13 @@ impl Simulation {
                 if d > 1024 {
                     d -= 2048;
                 }
-                let step = d.clamp(-16, 16);
+                // Cap `0x16` = TWENTY-TWO (`sub_422A0_425E0(+30, +34,
+                // 5, 0x16)`, :55578 — the helper is
+                // `sign(delta)·min(|delta|, cap)` and its `a3` is
+                // dead). mc1l42 t=17390-96 walks the grey-screen turn
+                // in exact −22 steps; sixteen was a hex-read slip, and
+                // the MC2 twin was already ledgered at 22.
+                let step = d.clamp(-22, 22);
                 self.carpet.yaw = ((self.carpet.yaw as i32 + step) & 0x7FF) as u16;
                 self.flyer.yaw += step as f32 * RAD;
             }
@@ -968,27 +996,54 @@ impl Simulation {
                 };
                 w.tick(pose, pcmd);
             }
-            // Respawn (sub_44D30): reposition at the castle, one
-            // tile up (:54845-63 z = ground+256), flight state
-            // zeroed (thrust target, strafe, knock — :54878-83),
-            // heading preserved.
-            if let Some((x, z)) = w.take_respawn() {
-                let ground = w.ground_height_tiles(x, z);
+            // Respawn (sub_44D30): reposition at the castle's FULL
+            // position (:54858-61), flight state zeroed (thrust
+            // target, strafe, knock — :54878-83), heading preserved.
+            //
+            // ⚠ The altitude is the SEAT'S OWN z, handed over by the
+            // sim — not `ground + 1.0`. The `tempZ._axis_2d.y++` at
+            // :54848 is not what the engine lands on: mc1l42 t=17398
+            // respawns on 3776 with the site's terrain reading exactly
+            // 3776, and the old re-derivation put the carpet 256 units
+            // high. That was the last pose divergence in the take, and
+            // `mgc-conform replay` could not see it because its pose
+            // channel GATES the death/respawn domain — the app's own
+            // `--replay-check` is what caught it.
+            if let Some((x, z, alt)) = w.take_respawn() {
                 let yaw_i = self.carpet.yaw;
                 let f = &mut self.flyer;
                 f.x = x;
                 f.z = z;
-                f.y = ground + 1.0;
+                f.y = alt;
                 f.vx = 0.0;
                 f.vy = 0.0;
                 f.vz = 0.0;
-                self.carpet = flight::Mc1State::from_tiles(f.x, f.z, f.y, f.yaw);
-                // Heading preserved: under the faithful tier the
-                // INTEGER yaw is authoritative — keep it over
-                // `from_tiles`' float re-quantization (the replay
-                // driver's law).
                 if self.thrust_model == ThrustModel::Mc1 {
-                    self.carpet.yaw = yaw_i;
+                    // ⭐ THE RESPAWN CLEARS EXACTLY THREE REGISTERS
+                    // (:54868-83) — `v_12` (target speed), `v_16`
+                    // (strafe) and the knock triple, which the world
+                    // side already zeroes. The actual speed `+126`,
+                    // the `+63` tick counter, the private LCG, the
+                    // stick filters and the STALE `v_28` effective
+                    // pitch are NOT touched, and the heading is kept.
+                    //
+                    // A full `from_tiles` here restarted the counter
+                    // and the LCG and wiped `v_28`: mc1l42 t=17398
+                    // reads eff_pitch 7 where the port gave 0. This is
+                    // the same surgical form the replay verifier's own
+                    // driver runs (`replay::step_mc1`) — the two must
+                    // stay one law, and they had drifted apart, which
+                    // is exactly what let the app's `--replay-check`
+                    // see a divergence `mgc-conform replay` could not.
+                    let s = &mut self.carpet;
+                    s.x = (f.x.rem_euclid(256.0) * 256.0) as u16;
+                    s.y = (f.z.rem_euclid(256.0) * 256.0) as u16;
+                    s.z = (alt * 256.0) as i16;
+                    s.tgt_speed = 0;
+                    s.strafe = 0;
+                    s.yaw = yaw_i;
+                } else {
+                    self.carpet = flight::Mc1State::from_tiles(f.x, f.z, f.y, f.yaw);
                 }
                 // Ruling 6: death/respawn resets the pinned desired
                 // altitude to the spawn offset (ground + one tile).

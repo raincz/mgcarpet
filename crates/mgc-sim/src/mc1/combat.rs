@@ -1532,7 +1532,30 @@ impl Gen {
             }
         }
         let miss_stamp = (!self.is_hidden_worlds()).then_some(MC1_MISS_STAMP);
-        if let Some(fx) = self.spawn_effect(f69, x, y, z) {
+        // ⭐ RETAIL'S DESPAWN SITS INSIDE THE CHILD-ALLOCATION GUARD.
+        // Every class-9 detonation arm has the shape
+        // `if ((fx = sub_373F0_377B0(...))) { …score…; sub_41E80(a1); }`
+        // — m8 :63193/:63203, generic :62762/:62772, m0 :62925/:62931,
+        // m1 :63002/:63008, :63933/:63934 — so a detonation that
+        // CANNOT ALLOCATE its effect does not spawn, does not score
+        // and DOES NOT DIE: it re-detonates next tick. That it is
+        // deliberate rather than an artifact is settled twenty lines
+        // away in the same function, where the WATER arm (:63175-81)
+        // guards its splash spawn and then kills UNCONDITIONALLY.
+        //
+        // ⚠ THE GUARD IS ON THE ALLOCATION, NOT ON THE OPTION. Retail's
+        // `sub_373F0_377B0` (:43917) also nulls on an UNREGISTERED ctor
+        // row, and `spawn_effect`'s `_` arm nulls on a `+69` this port
+        // has not modelled — a port gap, not retail's law. Gating on
+        // `is_some()` would make any projectile with an unmodelled
+        // `+69` IMMORTAL, detonating and scoring every tick forever.
+        // `Gen::exhausted` is bumped once per failed `new_event` and
+        // nowhere else, so it is the honest witness; sample it AFTER
+        // the magnet flash above, or a starved flash would mask a
+        // later unmodelled `+69`.
+        let starved0 = self.exhausted;
+        let child = self.spawn_effect(f69, x, y, z);
+        if let Some(fx) = child {
             let e = &mut self.ent[fx];
             e.id24 = owner;
             e.f30 = yaw;
@@ -1586,7 +1609,9 @@ impl Gen {
             }
         }
         let _ = ctx;
-        self.ent[i].flags |= 0x400;
+        if child.is_some() || self.exhausted == starved0 {
+            self.ent[i].flags |= 0x400;
+        }
     }
 
     /// Class-9 flight dispatch by state (str_25573C :4838).
@@ -3212,11 +3237,29 @@ impl Gen {
                 // graded obs `chase`, so leaving it at 0 was a floor
                 // under the certified run.
                 let miss_stamp = (!self.is_hidden_worlds()).then_some(MC1_MISS_STAMP);
+                // ⭐ AND THE CHILD INHERITS THE BOLT'S `+44`. It is the
+                // last line of the same five-line explode block the
+                // `+146` stamp above comes from (`v20[22] = *(a1+44)`,
+                // :62770 / :63201), so the effect ctor's own potency is
+                // OVERWRITTEN by the casting spell's damage: the crater
+                // bowl's ctor writes 200 (sub_3A9A0 :46775) and every
+                // player-cast crater then runs on Crater's 6000
+                // (SPELLS[9].damage). The digger broadcasts +44 whole
+                // on its FIRST tick and +44/25 thereafter
+                // (`Gen::tick_digger`), so the port's un-inherited 200
+                // paid 200 + 8/tick where retail pays 6000 + 240/tick —
+                // mc1l42 t=20161: nine griffons carry retail mail
+                // (6000, 331) and land on life 4000, the port's on
+                // 9800. Ungraded (the obs carries no +44), so it read
+                // clean in pair mode for the whole campaign and only
+                // ever broke the free run.
+                let bolt_f44 = self.ent[i].f44;
                 if let Some(c) = self.spawn_creator(11, x, y, z) {
                     let e = &mut self.ent[c];
                     e.id24 = own;
                     e.f30 = yaw;
                     e.f32 = pitch;
+                    e.f44 = bolt_f44;
                     e.f146 = match hit {
                         Some(MailTarget::Pool(j)) => j as u16,
                         Some(MailTarget::Player) => PLAYER_TARGET,
@@ -3738,12 +3781,17 @@ impl Gen {
             self.ent[i].flags |= 0x400;
             return false;
         }
-        // :28437 — the anim step runs before the ch1 write. The ch1
-        // amount carries the claim's FORCE flag (MC2 EF:4200
-        // `dword_0x64_100`; consumers never read a ch1 damage) — the
-        // (10,12) flash is always the weak claim.
+        // :28437 — the anim step runs before the ch1 write, and the
+        // broadcast amount is the flash's OWN `+44` (`sub_120B0(a1x,
+        // 1, +44)`), i.e. the ctor's 64000. MC1's ch1 intake reads
+        // the SOURCE alone (:29439-48), so the amount is inert here;
+        // it is the MC2 twin that reads it as the claim's FORCE flag
+        // (EF:4200 `dword_0x64_100`), and MC2 has its own writers —
+        // this handler only reaches an MC2 world down the MC1-spell
+        // fallback, where every arm is already approximate.
         self.anim_advance(i);
-        self.area_write(i, 1, 0, ctx, false, false);
+        let amt = self.ent[i].f44 as u32;
+        self.area_write(i, 1, amt, ctx, false, false);
         false
     }
 
@@ -4163,15 +4211,19 @@ impl Gen {
             }
             // sub_3AA10 (:46790): the POSSESS detonation flash —
             // an 8-tick ch1 claim broadcast over 512-unit extents.
-            // The original's +44 = -1536 is a mana-drain amount the
-            // claim readers never consume (they act on the SENDER
-            // field alone); our u16 +44 carries 0 — the drain joins
-            // the mana-economy track.
+            // `+44 = -1536` (:46804) is a SIGNED word in a u16 field,
+            // i.e. 64000, and the recording reads exactly that on
+            // every flash in the corpus (2,654 raw-shadow rows across
+            // mc1l0/l1/l2/l42 against the port's 0). Nothing consumes
+            // the amount — MC1's ch1 intake reads the SOURCE alone
+            // (:29439-48) and the flash tick re-broadcasts it eight
+            // times — so this is a field-value law, not a behaviour
+            // one; carry it because the record does.
             12 => {
                 let e = &mut self.ent[s];
                 e.tick70 = 12;
                 e.max_life = 8;
-                e.f44 = 0;
+                e.f44 = (-1536i16) as u16;
                 // Corpus: every fresh flash record reads flags 0x5 —
                 // the ctor sets bit 1 like the (10,19) plume's.
                 e.flags = (e.flags & !8) | 1;

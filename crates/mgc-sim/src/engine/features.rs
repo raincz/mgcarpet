@@ -1639,6 +1639,30 @@ impl Gen {
             .collect();
     }
 
+    /// `sub_37220_375E0` (:43825), MC1's own FREE/RECYCLE REBUILD —
+    /// the twin of the MC2 call above, and the one the port had no
+    /// runtime caller for. A descending 999→1 pool scan pushing every
+    /// INACTIVE slot, so the stack top (and therefore the next
+    /// `new_event`) is the LOWEST free slot in the pool rather than
+    /// whatever the incremental stack last freed.
+    ///
+    /// Only two of retail's twelve call sites are runtime — the death
+    /// LANDING (:55487) and the RESPAWN (:54842); the rest are level
+    /// load, save-restore and the mana-spill allocator's retry. Both
+    /// are observable: mc1l42's grave takes slot 109 against our 117,
+    /// and its five re-minted spell tokens 110-117 against our
+    /// 136-320, purely because retail re-sorted the stack first.
+    ///
+    /// `pinned` is the conformance import's human-carpet slot — a
+    /// zeroed husk in our pool, a live wizard in retail's, and never
+    /// allocatable (0 = native play, where the human owns no slot).
+    pub(crate) fn mc1_rebuild_free(&mut self, pinned: u16) {
+        self.free = (1..self.ent.len() as u16)
+            .rev()
+            .filter(|&s| s != pinned && self.ent[s as usize].class64 == 0)
+            .collect();
+    }
+
     /// `sub_49F90`'s victim half (Level.cpp:1284-1301): a DESCENDING
     /// 999→1 pool scan pushing every live record whose flags meet
     /// `mask`, so the stack top — the next sacrifice — is the

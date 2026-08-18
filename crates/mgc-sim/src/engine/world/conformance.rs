@@ -56,6 +56,14 @@ pub struct ImportReport {
 }
 
 /// One entity's ungraded raw lanes — see [`World::raw_shadow_mc1`].
+///
+/// EVERY per-entity field the port models and `EntObsMc1` does not
+/// carry. The four the lane started with (`+70`/`+71`/`+58`/`+44`)
+/// each paid for themselves, and the rest are the same blind spot: the
+/// recording holds them, [`World::retail_import_mc1`] restores them
+/// every pair, and the graded diff can never see a WRITE go wrong. The
+/// cost of widening is a longer report, and the report is per-(class,
+/// model, field) — noise stays legible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RawShadowMc1 {
     pub slot: u16,
@@ -67,6 +75,61 @@ pub struct RawShadowMc1 {
     pub f71: u8,
     /// `+58`.
     pub f58: i16,
+    /// `+44` — damage/potency. Ungraded like the rest, and the lane a
+    /// spawn ctor writes ONCE: an effect born with the wrong potency
+    /// reads clean in pair mode forever (the importer restores it
+    /// every pair) and only bites a free run, as the victims' life
+    /// diverging one tick after the broadcast.
+    pub f44: u16,
+    /// `+20`/`+22` — the tile-list links. Rebuilt every tick from the
+    /// walk order, so a mismatch is a CHAIN-ORDER divergence: the
+    /// membership laws this campaign keeps finding (tick-top chain,
+    /// ball list, bucket[0]) all land here first.
+    pub next20: u16,
+    pub prev22: u16,
+    /// `+26` — the generic counter (crater ring, wall run length,
+    /// trigger rearm, acquire latch).
+    pub f26: i16,
+    pub f28: u16,
+    pub f36: u16,
+    /// `+38`/`+40` — killer-id and attacker latches.
+    pub f38: u16,
+    pub f40: u16,
+    /// `+46` — vertical velocity.
+    pub f46: i16,
+    /// `+50` — the damage-response countdown.
+    pub f50: i16,
+    /// `+52`/`+54` — the multipart chain links (head / tail), and
+    /// `+56` the follow distance. Named in the ledger as an obs blind
+    /// spot since mc1l2.
+    pub f52: u16,
+    pub f54: u16,
+    pub f56: u16,
+    /// `+59` — the awake re-probe delay.
+    pub f59: u8,
+    /// `+68`/`+69` — the class/model this record detonates into.
+    pub f68: u8,
+    pub f69: u8,
+    /// `+78`..`+84` — the sprite half-height and the collision extents.
+    pub f78: u16,
+    pub f80: u16,
+    pub f82: u16,
+    pub f84: u16,
+    /// `+86`/`+88`/`+89` — sprite stats row, animation frame, frame count.
+    pub type86: u16,
+    pub frame88: u8,
+    pub frames89: u8,
+    /// `+90..+126` — the six damage mailboxes {amount, source}.
+    pub mail: [(u32, u16); 6],
+    /// `+128`/`+130` — target speed and acceleration.
+    pub f128: i16,
+    pub f130: i16,
+    /// `+144` — the mana-ball owner.
+    pub f144: u16,
+    /// `+150`/`+152`/`+154` — teleport destination and build-site z.
+    pub dest_x: u16,
+    pub dest_y: u16,
+    pub site_z: i16,
 }
 
 /// The pinned human context the projection needs: where the carpet
@@ -809,6 +872,82 @@ impl World {
     /// This is the shadow diff that catches the WRITE. Join it against
     /// the recorded state@N+1 in pair mode and every ungraded write bug
     /// in the take surfaces in one pass.
+    /// THE WHOLE-WORLD DUMP, sectioned — the instrument of last resort
+    /// when two runs of the PORT disagree and no schema-shaped lane can
+    /// say why.
+    ///
+    /// The raw shadow and the free-stack lane cover everything the
+    /// RECORDING holds; this covers everything the PORT holds, which is
+    /// strictly more (the terrain planes, the tile heads, the wizard
+    /// registers, the THING table, the player column). Diff two of
+    /// these and the first differing section names the state that
+    /// parted — the only way to attribute a free-run break whose entity
+    /// pool, free list and every graded field are bit-identical.
+    ///
+    /// Sections rather than one blob because a byte offset into a
+    /// 400 KB stream is not an answer; a section name is.
+    pub fn debug_state_sections(&self) -> Vec<(&'static str, Vec<u8>)> {
+        use crate::snapshot::Writer;
+        let one = |f: &dyn Fn(&mut Writer)| {
+            let mut w = Writer::new();
+            f(&mut w);
+            w.into_buf()
+        };
+        vec![
+            ("terrain.height", one(&|w| w.put(&self.g.t.height))),
+            ("terrain.tile_type", one(&|w| w.put(&self.g.t.tile_type))),
+            ("terrain.shading", one(&|w| w.put(&self.g.t.shading))),
+            ("terrain.angle", one(&|w| w.put(&self.g.t.angle))),
+            ("terrain.ceiling", one(&|w| w.put(&self.g.t.ceiling))),
+            ("map_entity", one(&|w| w.put(&self.g.map_entity))),
+            ("ent", one(&|w| w.put(&self.g.ent))),
+            ("free", one(&|w| w.put(&self.g.free))),
+            ("rand", one(&|w| w.put(&self.g.rand))),
+            ("pseudo", one(&|w| w.put(&self.g.pseudo))),
+            ("spawn_count", one(&|w| w.put(&self.g.spawn_count))),
+            ("player_mail", one(&|w| w.put(&self.g.player_mail))),
+            ("player_knock", one(&|w| w.put(&self.g.player_knock))),
+            ("player_aggro", one(&|w| w.put(&self.g.player_aggro))),
+            ("rival_wanted", one(&|w| w.put(&self.g.rival_wanted))),
+            ("erupting", one(&|w| w.put(&self.g.erupting))),
+            ("plume", one(&|w| w.put(&self.g.plume))),
+            ("kills.shots.hits", {
+                let mut w = Writer::new();
+                w.put(&self.g.kills);
+                w.put(&self.g.shots);
+                w.put(&self.g.hits);
+                w.into_buf()
+            }),
+            ("player_danger", one(&|w| w.put(&self.g.player_danger))),
+            ("banked_houses", one(&|w| w.put(&self.g.banked_houses))),
+            ("exhausted", one(&|w| w.put(&self.g.exhausted))),
+            ("misfits", one(&|w| w.put(&self.g.misfits))),
+            // The two wizard registers are maps, not `Snap` values —
+            // rendered as text, which diffs just as well.
+            (
+                "mc1_guard_reg",
+                format!("{:?}", self.g.mc1_guard_reg.0).into_bytes(),
+            ),
+            (
+                "mc1_balloon_reg",
+                format!("{:?}", self.g.mc1_balloon_reg.0).into_bytes(),
+            ),
+            ("thing_table", one(&|w| w.put(&self.table))),
+            ("player", one(&|w| w.put(&self.player))),
+            ("rivals", one(&|w| w.put(&self.rivals))),
+            ("kill_tally", one(&|w| w.put(&self.kill_tally))),
+            ("human_pose", one(&|w| w.put(&self.human_pose))),
+            ("rival_deaths", one(&|w| w.put(&self.rival_deaths))),
+            ("duel", one(&|w| w.put(&self.duel))),
+            ("mc1_ring", one(&|w| w.put(&self.mc1_ring))),
+            ("mc1_v14", one(&|w| w.put(&self.mc1_v14))),
+            ("prev_fire", one(&|w| w.put(&self.prev_fire))),
+            ("accel_veto", one(&|w| w.put(&self.accel_veto))),
+            ("win_pct", one(&|w| w.put(&self.win_pct))),
+            ("placeholders", one(&|w| w.put(&self.placeholders))),
+        ]
+    }
+
     pub fn raw_shadow_mc1(&self) -> Vec<RawShadowMc1> {
         (1..self.g.ent.len() as u16)
             .filter_map(|slot| {
@@ -820,6 +959,36 @@ impl World {
                     f70: e.tick70,
                     f71: e.f71,
                     f58: e.f58,
+                    f44: e.f44,
+                    next20: e.next20,
+                    prev22: e.prev22,
+                    f26: e.f26,
+                    f28: e.f28,
+                    f36: e.f36,
+                    f38: e.f38,
+                    f40: e.f40,
+                    f46: e.f46,
+                    f50: e.f50,
+                    f52: e.f52,
+                    f54: e.f54,
+                    f56: e.f56,
+                    f59: e.f59,
+                    f68: e.f68,
+                    f69: e.f69,
+                    f78: e.f78,
+                    f80: e.f80,
+                    f82: e.f82,
+                    f84: e.f84,
+                    type86: e.type86,
+                    frame88: e.frame88,
+                    frames89: e.frames89,
+                    mail: e.mail,
+                    f128: e.f128,
+                    f130: e.f130,
+                    f144: e.f144,
+                    dest_x: e.dest_x,
+                    dest_y: e.dest_y,
+                    site_z: e.site_z,
                 })
             })
             .collect()

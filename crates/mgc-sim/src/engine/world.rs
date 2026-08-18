@@ -680,7 +680,7 @@ pub struct World {
     /// frame walk crosses it. Native play keeps 0 and runs the pass
     /// post-walk (retail allocates the carpet above the level's
     /// entities, so post-walk IS its slot position). HASH-EXCLUDED.
-    mc1_carpet_slot: u16,
+    pub(crate) mc1_carpet_slot: u16,
     /// The wizard entity's hand-flag bits (+16 & 0x300): every cast
     /// arm clears both and sets the firing hand's (:55886-95, 0x100
     /// left / 0x200 right); the token-fire muzzle placer reads them
@@ -752,6 +752,20 @@ pub struct World {
     /// during a boost only the RESISTING press can arm it (the
     /// boosted target sits outside the ±80 bounds test).
     mc1_v14: bool,
+    /// THE FALL TRAIL'S SPAWN ALTITUDE — the carpet's POST-MOVE,
+    /// PRE-GRAVITY z, published by whichever pass integrated the fall
+    /// this tick, or `None` when nothing did (pair mode, where the
+    /// pose is pinned and the recorded `+46` is the only handle on the
+    /// step). Retail throws the (10,1) spreader at the stale global
+    /// scratch `word_AE454_AE444` that `sub_455D0` left behind, so the
+    /// value is captured, never re-derived: subtracting the gravity
+    /// step off the settled z agrees only while the ground floor stays
+    /// out of it, and the TOUCHDOWN tick is exactly where it does not
+    /// (mc1l42 t=17344 — retail 1911, the clamp-blind reconstruction
+    /// 1950). The old `strict_retail` discriminator was wrong twice
+    /// over: the free replay is BOTH a retail import and an
+    /// integrating driver.
+    mc1_fall_pre_z: Option<i16>,
     /// The human player's spell/mana state (spells cast through the
     /// per-hand dispatcher, sub_46B00_46E40 :55851).
     pub(crate) player: Player,
@@ -867,7 +881,7 @@ pub struct World {
     accel_veto: (bool, bool),
     /// A respawn fired this tick: the sim moves the carpet there
     /// (tile units) and resets the flight state.
-    pending_respawn: Option<(f32, f32)>,
+    pending_respawn: Option<(f32, f32, f32)>,
     /// Castle-less death confirmed: the level restarts (the
     /// original's lost + level-over flags, :48620-33).
     pending_restart: bool,
@@ -1474,6 +1488,7 @@ impl World {
             pending_speed_zero: false,
             pending_speed_base: None,
             mc1_v14: false,
+            mc1_fall_pre_z: None,
             player: Player::default(),
             win_pct: 0,
             win_streak: 0,
@@ -2295,9 +2310,23 @@ impl World {
         // and whose fire lives in its token tick. 16 Create Castle
         // adds the +48 hard-gate (:55903-06), the one audible
         // command-site refusal.
+        //
+        // ⭐ 1 HEAL IS ONE OF THEM. `sub_46B00_46E40` contains NO mana
+        // write on any path — the branch is on the manifestation's
+        // `+65` (= the spell id): heal is `< 0x10`, not 2, so it takes
+        // LABEL_20, and with `+62` (charge_flag) clear it falls to the
+        // silent `+140 < +136` gate and LABEL_32's bare arm. The DEBIT
+        // is the token's alone ([`Self::mc1_heal_token_tick`],
+        // sub_56270 :65117-21), and so is the cast sound (25, :65110,
+        // the burst's first tick only). Charging + sounding here as
+        // well paid heal's 1000 TWICE on the arm tick and chimed twice
+        // — mc1l42's free run reads it exactly: t=10669, retail
+        // 9700 → 8700, the port 9700 → 7700, and again at every re-cast
+        // in the burst (10673, 10676, 10684 …), nine of the take's
+        // twenty-two reset clusters.
         if matches!(
             id,
-            0 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 16 | 17 | 18 | 19 | 20 | 22
+            0 | 1 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 16 | 17 | 18 | 19 | 20 | 22
         ) {
             if !edge {
                 return;
@@ -2525,6 +2554,34 @@ impl World {
         self.player.life_rate = fresh;
     }
 
+    /// THE CARPET HAS ONE PRIVATE LCG (`+4`), and under a driven walk
+    /// it lives in TWO places: the chain's `Mc1State::rand` (which the
+    /// mover's flutter draw spends) and the pooled carpet entity the
+    /// world's own handlers draw from — the death scatter's three
+    /// draws per jar above all ([`Self::player_land`]). They are the
+    /// same register in retail, so the driven dispatch publishes the
+    /// chain's value into the pool once the mover has run and reads
+    /// back whatever the rest of the dispatch spent. Without it the
+    /// scatter drew off a value frozen at the last anchor: mc1l42's
+    /// five jars landed a whole map away (x 116.5 against retail's
+    /// 29.4) and the graded `rand` lane parted at the landing tick.
+    /// No pooled carpet (native play) or no drive (pair mode, where
+    /// the importer restores both) — no-op.
+    fn publish_carpet_rand(&mut self, s: &crate::flight::Mc1State) {
+        let cs = self.mc1_carpet_slot as usize;
+        if cs != 0 && cs < self.g.ent.len() {
+            self.g.ent[cs].rand = s.rand;
+        }
+    }
+
+    /// The read-back half of [`Self::publish_carpet_rand`].
+    fn adopt_carpet_rand(&mut self, s: &mut crate::flight::Mc1State) {
+        let cs = self.mc1_carpet_slot as usize;
+        if cs != 0 && cs < self.g.ent.len() {
+            s.rand = self.g.ent[cs].rand;
+        }
+    }
+
     fn step_player_flight(&mut self, d: &mut FlightDrive<'_>) -> PlayerPose {
         // The speed-token writes land at the TOKEN's walk slot, below
         // the carpet — re-read them here, the carpet's own dispatch
@@ -2552,6 +2609,49 @@ impl World {
                 d.s.z = (a * 256.0) as i16;
             }
         }
+        // DEAD (sub_463B0 :55575-91) — the state-3 dispatch, and it
+        // runs NO MOVE AT ALL: retail's carpet leaves `sub_455D0`
+        // behind the moment it lands, which is what actually pins the
+        // corpse. So the speed and strafe registers are never zeroed
+        // either; mc1l42 reads `-80 / -80 / 36` frozen from the death
+        // tick through the respawn, and the only thing that changes is
+        // the yaw servo below.
+        //
+        // The servo's cap is `0x16` = TWENTY-TWO, not sixteen
+        // (`sub_422A0_425E0(+30, +34, 5, 0x16)`; its `a3` argument is
+        // dead — the helper is `sign(delta) * min(|delta|, cap)`).
+        // mc1l42 t=17390-96 steps the grey-screen turn −22 a tick and
+        // then +3 onto the bearing, which no 16-cap can produce.
+        // `+32` (aim pitch) and BOTH stick filters are forced to 0
+        // (:55583-89 — the servo writes +32 and the next statement
+        // zeroes it); `eff_pitch` is deliberately left stale.
+        if d.dead {
+            if let Some((kx, kz)) = self.killer_pos() {
+                let tx = (kx.rem_euclid(256.0) * 256.0) as u16;
+                let ty = (kz.rem_euclid(256.0) * 256.0) as u16;
+                let target = Gen::angle_between(d.s.x, d.s.y, tx, ty);
+                let mut delta = (target as i32 - d.s.yaw as i32) & 0x7FF;
+                if delta > 1024 {
+                    delta -= 2048;
+                }
+                d.s.yaw = ((d.s.yaw as i32 + delta.clamp(-22, 22)) & 0x7FF) as u16;
+            }
+            d.s.aim_pitch = 0;
+            d.s.roll_f = 0;
+            d.s.pitch_f = 0;
+            // The walk still CLOCKS the entity (:52406 bumps `+63`
+            // after every handler, whatever the state); only the
+            // flutter draw stops, because that lives in the move
+            // retail no longer runs. mc1l42 t=17345 catches the
+            // difference on its own: retail 37, ours 36.
+            d.s.tick_ctr = d.s.tick_ctr.wrapping_add(1);
+            self.publish_carpet_rand(d.s);
+            return conformance::integer_pose(d.s);
+        }
+        // FALLING (sub_45FC0 :55463): `sub_455D0` alone — the command
+        // handler never runs, so the mover keeps steering on the live
+        // stick while the speed target and strafe freeze.
+        d.inp.no_command = d.falling;
         d.over = self.accel_override();
         // The knock is sampled AT the move (:55204-18 sits inside
         // sub_455D0), not at drive build: the mailbox block just ran
@@ -2581,25 +2681,15 @@ impl World {
         // detected by the tick tail's Falling arm at this same pose.
         if d.falling {
             let dz = self.death_fall_step();
+            // Publish the pre-gravity z for the trail spawn below —
+            // this is the one place that still holds it.
+            self.mc1_fall_pre_z = Some(d.s.z);
             let g = self.ground_z_engine(d.s.x, d.s.y);
             d.s.z = (d.s.z as i32 + dz as i32)
                 .max(g as i32 + 128)
                 .min(i16::MAX as i32) as i16;
         }
-        // Dead (sub_463B0): the grey-screen camera turns toward the
-        // killer while it waits for Space.
-        if d.dead
-            && let Some((kx, kz)) = self.killer_pos()
-        {
-            let tx = (kx.rem_euclid(256.0) * 256.0) as u16;
-            let ty = (kz.rem_euclid(256.0) * 256.0) as u16;
-            let target = Gen::angle_between(d.s.x, d.s.y, tx, ty);
-            let mut delta = (target as i32 - d.s.yaw as i32) & 0x7FF;
-            if delta > 1024 {
-                delta -= 2048;
-            }
-            d.s.yaw = ((d.s.yaw as i32 + delta.clamp(-16, 16)) & 0x7FF) as u16;
-        }
+        self.publish_carpet_rand(d.s);
         conformance::integer_pose(d.s)
     }
 
@@ -3099,6 +3189,11 @@ impl World {
                 // the port grew a (10,1) trail retail has no room for).
                 if !alive {
                     self.mc1_mortality_pass(player, cmd);
+                }
+                // Whatever the rest of this dispatch spent on the
+                // carpet's own LCG goes back to the chain.
+                if let Some(d) = drive.as_deref_mut() {
+                    self.adopt_carpet_rand(d.s);
                 }
             }
             if self.g.ent[i].class64 == 0 {
@@ -4176,12 +4271,18 @@ impl World {
                 // human (the pose is pinned), so the recorded +46 IS
                 // this tick's applied step; natively the fall already
                 // consumed and decremented it in `step_player_flight`.
-                let applied = if self.strict_retail {
-                    self.player.fall_speed
-                } else {
-                    (self.player.fall_speed + 2).min(0)
-                };
-                let tz = player.z.wrapping_sub(applied);
+                // Whoever integrated the fall hands over the axis it
+                // moved through ([`Self::step_player_flight`]); a
+                // pinned pair, where nothing moves the human at all,
+                // reconstructs it from the recorded `+46` instead.
+                let tz = self.mc1_fall_pre_z.take().unwrap_or_else(|| {
+                    let applied = if self.strict_retail {
+                        self.player.fall_speed
+                    } else {
+                        (self.player.fall_speed + 2).min(0)
+                    };
+                    player.z.wrapping_sub(applied)
+                });
                 // Retail's ctor decorations are exactly `flags |= 0x80`
                 // and `+24 = the wizard's own +24` (:55480-82) — no
                 // damage-suppression bit. Ours also raised 0x10000,
@@ -4212,6 +4313,13 @@ impl World {
     /// hand it the player's loose mana balls (possess the grave to
     /// reclaim them), then wait for Space.
     fn player_land(&mut self, player: PlayerPose) {
+        // :55487 — the touchdown REBUILDS THE FREE LIST before it
+        // throws anything ([`Gen::mc1_rebuild_free`]), so the grave and
+        // everything allocated after it come off a freshly sorted
+        // stack: mc1l42's grave lands on slot 109, ours on 117 without
+        // this line.
+        let pinned = self.mc1_carpet_slot;
+        self.g.mc1_rebuild_free(pinned);
         self.g.player_mail = [(0, 0); 6];
         // Jar scatter (:55519-47): the 24 slots remember the MODELS
         // (re-instantiated on respawn); the manifestation entities
@@ -4243,7 +4351,7 @@ impl World {
                 .map(|s| self.player.owned[s] as usize)
                 .collect()
         };
-        for m in order {
+        for (idx, m) in order.into_iter().enumerate() {
             if m == 0 || m >= self.g.ent.len() || self.g.ent[m].class64 != 12 {
                 continue;
             }
@@ -4254,6 +4362,13 @@ impl World {
                 continue;
             }
             self.player.death_owned[s] = true;
+            // :55523 — the LIST ENTRY becomes the entity's MODEL. The
+            // list holds pool slots while the wizard lives and models
+            // from the landing until the respawn re-mints them, which
+            // is the state `death_regrant` reads them back in.
+            if let Some(e) = self.mc1_acq.get_mut(idx) {
+                *e = self.g.ent[m].model65 as u16;
+            }
             // The var_916 bank (:55531-35): blue-granted spells come
             // back unrestricted on respawn even if the scattered jar
             // expires meanwhile.
@@ -4347,6 +4462,12 @@ impl World {
     /// respawn at the castle; castle-less in single player = the
     /// lost + level-over flags — the level restarts.
     fn player_respawn(&mut self) {
+        // :54842 — the respawn's FIRST statement is the same rebuild
+        // the landing runs, and it is what puts retail's re-minted
+        // spell tokens on the slots the scatter just freed (mc1l42
+        // t=17398: 110-117 against our 136-320).
+        let pinned = self.mc1_carpet_slot;
+        self.g.mc1_rebuild_free(pinned);
         let Some(c) = self.player_castle() else {
             self.player.lost = true;
             self.pending_restart = true;
@@ -4358,7 +4479,15 @@ impl World {
         // then `sub_41C70_41FB0`), and every field the rest of the
         // routine stamps from the wizard's own axis reads THIS pose.
         let seat = (e.x, e.y, e.z);
-        self.pending_respawn = Some((e.x as f32 / 256.0, e.y as f32 / 256.0));
+        // ⭐ THE RESPAWN LANDS AT THE SEAT'S OWN Z, NOT A TILE ABOVE IT.
+        // Retail moves the carpet to the castle's FULL position
+        // (:54858-61), and the `tempZ._axis_2d.y++` at :54848 is not
+        // what the engine lands on: mc1l42 t=17398 respawns on
+        // z = 3776 with the site's terrain reading exactly 3776
+        // (`MGC_CELL_TRACE` (123,13) = height 118, 118 * 32 = 3776).
+        // The app used to re-derive `ground + 1.0` here and put the
+        // carpet 256 units high — the take's last pose divergence.
+        self.pending_respawn = Some((e.x as f32 / 256.0, e.y as f32 / 256.0, e.z as f32 / 256.0));
         // Type_160 re-arm (:54866-83) + HP/mana reset (:55019-32).
         // The respawn screen-mode chime (case 0xF runs sub_3DC90(0)
         // :48640 → sound 14).
@@ -4414,7 +4543,27 @@ impl World {
     /// `None` = the Alive-arm retry, which has no fresh seat.
     fn death_regrant(&mut self, seat: Option<(u16, u16, i16)>) {
         let strict = self.strict_retail;
+        // RE-MINT ORDER IS THE ACQUISITION LIST'S (:54888-905 walks
+        // `Type_160+532`, whose entries the landing left holding each
+        // token's MODEL), and it is observable through the allocator:
+        // mc1l42 t=17398 re-mints onto slots 110/112/114/115/117 in
+        // pickup order 0, 3, 1, 16, 2 — ascending spell id put model 1
+        // where retail has model 3. Anything the list does not name
+        // (a blue grant, a pre-list world) falls in behind it, in the
+        // old order.
+        let mut order: Vec<usize> = Vec::with_capacity(SPELL_COUNT);
+        for &e in self.mc1_acq.iter() {
+            let s = e as usize;
+            if s < SPELL_COUNT && self.player.death_owned[s] && !order.contains(&s) {
+                order.push(s);
+            }
+        }
         for s in 0..SPELL_COUNT {
+            if self.player.death_owned[s] && !order.contains(&s) {
+                order.push(s);
+            }
+        }
+        for s in order {
             if !self.player.death_owned[s] {
                 continue;
             }
@@ -4422,6 +4571,21 @@ impl World {
                 continue;
             };
             self.player.death_owned[s] = false;
+            // :54897 — the re-minted token's slot goes back into the
+            // acquisition list, at the entry the landing left holding
+            // its model, so the list keeps its PICKUP ORDER across a
+            // death and the next scatter walks it the same way.
+            // ⚠ APPROX: retail re-mints IN LIST ORDER (:54888-905)
+            // while this loop runs ascending spell id, so the pool
+            // slots the two hand out can differ — the ORDER the
+            // scatter observes is what this restores.
+            if let Some(e) = self
+                .mc1_acq
+                .iter_mut()
+                .find(|e| **e == s as u16 && s < SPELL_COUNT)
+            {
+                *e = m as u16;
+            }
             // :54895-96 — the token is stamped back onto the wizard
             // (+42, our f144, which `grant_spell` already writes) and
             // its OWNED bit goes back up. A strict pool carries
@@ -4623,7 +4787,11 @@ impl World {
                 (x, y, (self.g.ground_z(x, y) as i16).saturating_add(256))
             }
         };
-        self.pending_respawn = Some((dest.0 as f32 / 256.0, dest.1 as f32 / 256.0));
+        self.pending_respawn = Some((
+            dest.0 as f32 / 256.0,
+            dest.1 as f32 / 256.0,
+            dest.2 as f32 / 256.0,
+        ));
         self.human_pose = dest;
         // The carpet is back in action 0, so `sub_5D530` — and with it
         // the cave-ambient tail's global draw — runs again THIS frame.
@@ -4722,6 +4890,27 @@ impl World {
         })
     }
 
+    /// Append a fresh owned token to the ACQUISITION LIST
+    /// (`Type_160+532`) — retail's pickup scans the 24 entries and
+    /// writes the token's pool slot into the FIRST EMPTY one
+    /// (:64854), which is what makes the list a pickup ORDER and what
+    /// the death scatter walks. The port had no writer at all: the
+    /// list only ever arrived through a conformance import, so a free
+    /// run's list froze at its anchor and every spell acquired after
+    /// it was invisible to the scatter — mc1l42 t=17344 threw three of
+    /// the five jars retail throws (slots 102 and 103, picked up long
+    /// after the anchor, stayed owned tokens sitting on the castle).
+    /// A slot already listed is not re-appended (retail's `break` on
+    /// finding the model, :64831).
+    fn mc1_acq_push(&mut self, slot: u16) {
+        if slot == 0 || self.mc1_acq.contains(&slot) {
+            return;
+        }
+        if let Some(e) = self.mc1_acq.iter_mut().find(|e| **e == 0) {
+            *e = slot;
+        }
+    }
+
     fn grant_spell(&mut self, spell: SpellId) -> Option<usize> {
         // MC1 class-12 manifestations never exist on the MC2 column
         // (the native book owns spells there; the dev/plausible
@@ -4755,17 +4944,24 @@ impl World {
             // resolve the human's token and the castle hand stays
             // buzzed forever (mc1l0 t=2174).
             e.f144 = PLAYER_TARGET;
-            // The spell-16 cost-cache seed (sub_3C060 → sub_3BF70
-            // :48026/:47996): +136 = the ctor price 1000, +140 =
-            // 1000/101 (the +50 count divisor — the HUD dot unit).
-            // Faithful field state either way; the retail arm of the
-            // `castle_recast_cost` patch READS this cache (and the
-            // castle tick's every-tick re-stamp), the patched arm
-            // live-derives and ignores it.
-            if spell.0 == 16 {
-                e.f136 = SPELLS[16].possess_mana as i32;
-                e.f140 = SPELLS[16].possess_mana as i32 / 101;
-            }
+            // THE CTOR STAMPS ITS WHOLE ROW, not just castle's
+            // (sub_3BF70 :47979-48012, one shared body per spell
+            // thunk): `+50` = the burst count, `+136` = the total
+            // mana price, `+140` = price/count (the HUD dot unit),
+            // and BOTH life words are zeroed over `NewEvent`'s 300
+            // default. Ours seeded the pair for spell 16 alone, so
+            // every other manifestation carried mana 0 / max_life 300
+            // — mc1l42's respawn reads retail's fireball token at
+            // `max_life 0, +136 200, +140 40` against exactly that.
+            // The retail arm of the `castle_recast_cost` patch READS
+            // the +136 cache (and the castle tick's re-stamp); the
+            // patched arm live-derives and ignores it.
+            let def = SPELLS[id];
+            e.f50 = def.count as i16;
+            e.f136 = def.possess_mana as i32;
+            e.f140 = def.possess_mana as i32 / def.count.max(1) as i32;
+            e.max_life = 0;
+            e.act_life = 0;
         }
         // The class-12 ctor sub_3BF70 (:47979-) gives EVERY jar sprite
         // type 77 + a 4x extent override; without it a death-scattered
@@ -4777,6 +4973,7 @@ impl World {
         };
         self.g.extents(m, h4, v4);
         self.player.owned[id] = m as u16;
+        self.mc1_acq_push(m as u16);
         // NO hand binding here: retail's level-init rebuild assigns the
         // hands from the OWNED SET in book order, not in grant order
         // (see `rebind_hands_canonical`). Binding incrementally here
@@ -4986,6 +5183,7 @@ impl World {
             // like pending_speed_zero above; both ARE snapshotted.
             pending_speed_base: _,
             mc1_v14: _,
+            mc1_fall_pre_z: _,
             player,
             rivals,
             mc2_rivals,
@@ -6795,6 +6993,7 @@ impl World {
                 self.g.ent[i].flags |= 1;
                 self.g.ent[i].tick70 = (spell * 3) as u8;
                 self.player.owned[spell] = i as u16;
+                self.mc1_acq_push(i as u16);
                 self.player.left = Some(SpellId(spell as u8));
                 // The port's owner tag (see `grant_spell`): without it
                 // the Gen-side charge-pin releases can't resolve this
@@ -6914,6 +7113,7 @@ impl World {
             e.f144 = PLAYER_TARGET;
         }
         self.player.owned[spell] = i as u16;
+        self.mc1_acq_push(i as u16);
         self.player.left = Some(SpellId(spell as u8)); // auto-equip LEFT
         // The pickup chime (:64848 — sound 18 at the wizard).
         self.g.snd_player(18);
@@ -7509,9 +7709,15 @@ impl World {
         }
     }
 
-    /// A respawn fired this tick: destination in tile units. The sim
-    /// moves the carpet there and resets the flight state.
-    pub fn take_respawn(&mut self) -> Option<(f32, f32)> {
+    /// A respawn fired this tick: the FULL destination axis in tile
+    /// units (x, y, z). The sim moves the carpet there and resets the
+    /// flight state.
+    ///
+    /// The z is carried rather than re-derived from the ground: retail
+    /// copies the seat's whole position, and the app's old
+    /// `ground + 1.0` put the carpet a tile high (mc1l42 t=17398,
+    /// retail 3776 / port 4032 — the take's last pose divergence).
+    pub fn take_respawn(&mut self) -> Option<(f32, f32, f32)> {
         self.pending_respawn.take()
     }
 
@@ -11762,6 +11968,9 @@ impl World {
             pending_speed_zero,
             pending_speed_base,
             mc1_v14,
+            // Not saved: a within-tick scratch, re-derived by the next
+            // mover pass (a restore never lands mid-dispatch).
+            mc1_fall_pre_z: _,
             player,
             rivals,
             mc2_rivals,
@@ -14644,6 +14853,136 @@ mod tests {
         w.g.mail_write(crate::mc1::combat::MailTarget::Player, 0, amt, src);
     }
 
+    /// THE CLASS-12 CTOR STAMPS ITS WHOLE ROW (`sub_3BF70`
+    /// :47979-48012, the one body every spell thunk shares): the burst
+    /// count in `+50`, the price in `+136`, price/count in `+140` and
+    /// BOTH life words zeroed over `NewEvent`'s 300. The port used to
+    /// seed the mana pair for spell 16 alone, which mc1l42's respawn
+    /// reads straight off — retail's re-minted fireball token is
+    /// `max_life 0, +136 200, +140 40`.
+    #[test]
+    fn a_granted_manifestation_carries_its_whole_ctor_row() {
+        let mut w = bare_creature_world(2);
+        let m = w
+            .grant_spell(crate::mc1::spells::SpellId(0))
+            .expect("granted");
+        let e = &w.g.ent[m];
+        assert_eq!((e.class64, e.model65), (12, 0), "a fireball token");
+        assert_eq!(e.f50, SPELLS[0].count as i16, "+50 = the burst count");
+        assert_eq!(e.f136, SPELLS[0].possess_mana as i32, "+136 = the price");
+        assert_eq!(e.f140, 40, "+140 = price/count, the HUD dot unit");
+        assert_eq!((e.max_life, e.act_life), (0, 0), "both life words zeroed");
+        assert_eq!(e.f44, SPELLS[0].damage as u16, "+44 = the row damage");
+    }
+
+    /// `sub_37220_375E0` (:43825): the free/recycle REBUILD is a
+    /// DESCENDING 999→1 scan, so the stack top — the next `new_event`
+    /// — is the LOWEST inactive slot in the pool, not whatever the
+    /// incremental stack last freed. Retail runs it at the death
+    /// landing (:55487) and the respawn (:54842), which is why
+    /// mc1l42's grave takes slot 109 and its re-minted spell tokens
+    /// 110-117.
+    #[test]
+    fn the_free_list_rebuild_hands_out_the_lowest_slot() {
+        let mut w = bare_creature_world(2);
+        // Allocate a run, then free the LOW ones: the incremental
+        // stack would hand back the last freed, retail's rebuild the
+        // lowest-numbered.
+        let mut got = Vec::new();
+        for _ in 0..8 {
+            let s = w.g.new_event().expect("pool has room");
+            w.g.ent[s].class64 = 10;
+            got.push(s);
+        }
+        got.sort_unstable();
+        let (lo, hi) = (got[0], got[7]);
+        w.g.free_entity(hi);
+        w.g.free_entity(lo);
+        let incremental = w.g.new_event().expect("pool has room");
+        assert_eq!(incremental, lo, "the incremental stack pops the last freed");
+        w.g.ent[incremental].class64 = 10;
+        w.g.free_entity(incremental);
+
+        w.g.mc1_rebuild_free(0);
+        let after = w.g.new_event().expect("pool has room");
+        assert_eq!(after, lo.min(hi), "the rebuild pops the LOWEST free slot");
+    }
+
+    /// The (10,12) possession flash carries its ctor's `+44 = -1536`
+    /// (`sub_3AA10` :46804) — a signed word in a u16 field, i.e.
+    /// 64000, and what the recording reads on every flash in the
+    /// corpus. Nothing consumes it (MC1's ch1 intake reads the SOURCE
+    /// alone), so this is a field-value law; it is carried because the
+    /// record carries it.
+    #[test]
+    fn the_possess_flash_carries_its_ctor_drain() {
+        let mut w = bare_creature_world(2);
+        let f =
+            w.g.spawn_effect(12, 100 << 8, 100 << 8, 3200)
+                .expect("spawned");
+        assert_eq!(w.g.ent[f].f44, (-1536i16) as u16);
+        assert_eq!(w.g.ent[f].max_life, 8);
+    }
+
+    /// THE PACK-DEATH HANDOFF WRITES THROUGH `+52` BLIND
+    /// (`sub_1A390` :21695-21752). The only gate on the whole path is
+    /// `+52 != 0` (:21695); the stamp then takes
+    /// `v3x = &pool[a1x->+52]` (:21702) with no class, model, life or
+    /// flags test and writes `+146`, `+52 = 0` and `+70 = a2 + 2` into
+    /// whatever record occupies that slot NOW.
+    ///
+    /// The port carried an invented `class64 == 5` conjunct, and it
+    /// cost mc1l2 its last graded row: at t=8290 the militiaman in
+    /// slot 285 dies still pointing at slot 287, which had been reaped
+    /// and re-minted as a `(10,0)` fire, and retail stamps the fire.
+    /// A pair fixture pins the mc1l2 exemplar
+    /// (`the-pack-death-handoff-writes-through-52-blind-s`); this is
+    /// the unit guard, because the law's whole content is the ABSENCE
+    /// of a test and nothing stops that test being re-added.
+    #[test]
+    fn the_pack_death_handoff_writes_through_f52_blind() {
+        let mut w = bare_creature_world(4);
+        // A militiaman (m4, family base 24) linked to a slot that is
+        // NOT a creature — exactly mc1l2's reaped-and-re-minted fire.
+        let mob =
+            w.g.spawn_creature(4, 100 << 8, 100 << 8, 3200)
+                .expect("spawned");
+        let fire =
+            w.g.spawn_effect(0, 100 << 8, 100 << 8, 3200)
+                .expect("spawned");
+        assert_eq!(w.g.ent[fire].class64, 10, "the partner is NOT class 5");
+        w.g.ent[mob].tick70 = 24 + 3; // pack role
+        w.g.ent[mob].f52 = fire as u16;
+        w.g.ent[mob].f58 = 16; // awake, so the inbox runs
+        // Kill it through the mailbox: the inbox's lethal branch is
+        // what arms the handoff.
+        w.g.ent[mob].mail[0] = (w.g.ent[mob].act_life as u32 + 1, 77);
+        let ctx = MobCtx {
+            px: 0x8000,
+            py: 0x8000,
+            pz: 3200,
+            pyaw: 0,
+            pmana: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        w.g.creature_tick(mob, &ctx);
+
+        assert_eq!(
+            w.g.ent[fire].f146, 77,
+            "the dying pack member stamps its partner's chase with the killer, \
+             whatever class the partner now is"
+        );
+        assert_eq!(w.g.ent[fire].f52, 0, "and clears the partner's own link");
+        assert_eq!(
+            w.g.ent[fire].tick70, 26,
+            "and re-states it to a2 + 2 = 26 — which is why the ascending walk \
+             then dispatches the fire as class-10 state 26"
+        );
+    }
+
     #[test]
     fn spawn_grace_absorbs_then_real_damage_knocks_and_kills() {
         let mut w = bare_creature_world(2);
@@ -14759,7 +15098,7 @@ mod tests {
                 ..Default::default()
             },
         );
-        let (rx, rz) = w.take_respawn().expect("respawn fired");
+        let (rx, rz, _ralt) = w.take_respawn().expect("respawn fired");
         // The castle grid-snaps to even tile parity; just confirm the
         // destination is the castle's tile neighborhood.
         assert!((rx - 140.0).abs() < 2.0 && (rz - 140.0).abs() < 2.0);
@@ -14800,6 +15139,14 @@ mod tests {
         // own slots, so the re-grant loop starves).
         let mut hogs = Vec::new();
         while let Some(h) = w.g.new_event() {
+            // Stamp a class on every hog: `NewEvent` hands out a
+            // ZEROED record and each real ctor classes it at once, so
+            // an unclassed slot is a state retail cannot be in — and
+            // the respawn's own free-list rebuild (`sub_37220`, which
+            // reads `+64 == 0` as FREE) would hand every one of them
+            // straight back and the starve under test would never
+            // happen.
+            w.g.ent[h].class64 = 10;
             hogs.push(h);
         }
         // Respawn AT THE CASTLE, far from the corpse — the scattered
@@ -27237,7 +27584,7 @@ mod tests {
             w.player.mana, 750,
             "mana = maxMana (1000) + the corpse's held manaRegen (−250)"
         );
-        let (rx, rz) = w.take_respawn().expect("the reset teleports");
+        let (rx, rz, _ralt) = w.take_respawn().expect("the reset teleports");
         assert_eq!(
             (rx as u16, rz as u16),
             (w.g.ent[castle].x >> 8, w.g.ent[castle].y >> 8),

@@ -2686,6 +2686,16 @@ impl World {
     /// grave, in-flight balls re-pointed, entity hidden, respawn
     /// timer armed.
     fn rival_death_impact(&mut self, ri: usize, i: usize) {
+        // :55487 — the touchdown REBUILDS THE FREE LIST first, so the
+        // grave and every jar it throws come off a freshly sorted
+        // stack. The class-3 fall handler `sub_45FC0` is SHARED with
+        // the human, so this is the same line `World::player_land`
+        // carries; mc1l2 t=8297→8298 catches it on the rival side
+        // (the record's free stack turns into the descending
+        // 33, 32, 31 … 19 run with a 79-deep recycle stack, and the
+        // next (10,40) lands on slot 18 against our 65).
+        let pinned = self.mc1_carpet_slot;
+        self.g.mc1_rebuild_free(pinned);
         // Kill credit (:55488-97): the killer wizard's tally.
         let killer = self.g.ent[i].f38;
         if let Some(k) = self.owner_slot_of_source(killer) {
@@ -2762,8 +2772,14 @@ impl World {
             self.g.move_relink(m, jx, jy, cz);
         }
         // The grave (10,40) + in-flight ball re-point (:55550-65).
-        let gz = self.g.ground_z(cx, cy) as i16;
-        if let Some(gv) = self.g.spawn_grave(cx, cy, gz) {
+        // The spawn axis is the CORPSE'S OWN `+72` (:55550 passes
+        // `a1 + 72` straight into the creator), i.e. the z the death
+        // fall clamped onto the ground+128 floor — not a fresh ground
+        // sample. mc1l2 t=8298 reads the rival's grave at 1198 with
+        // the ground under it at 1070, exactly one floor clearance
+        // apart. (The human's own landing already spawns at
+        // `player.z`, `World::player_land`.)
+        if let Some(gv) = self.g.spawn_grave(cx, cy, cz) {
             let me = self.rivals[ri].ent;
             for j in 1..self.g.ent.len() {
                 let e = &self.g.ent[j];
@@ -2826,6 +2842,11 @@ impl World {
     /// :55019-50): teleport to the castle, full life, base mana,
     /// grace 100, re-mint the remembered book, brain reset, truce.
     fn rival_respawn(&mut self, ri: usize, i: usize) {
+        // :54842 — `sub_44D30`'s first statement, whoever is
+        // respawning: the same rebuild, so the re-minted book takes
+        // the slots the scatter freed.
+        let pinned = self.mc1_carpet_slot;
+        self.g.mc1_rebuild_free(pinned);
         let Some(c) = self.rival_castle(self.rivals[ri].ent) else {
             return;
         };

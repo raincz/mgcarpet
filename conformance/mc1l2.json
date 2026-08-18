@@ -1,90 +1,102 @@
 {
-  "dir": "fixtures/mc1l2",
-  "pin_pose": "n1",
-  "fixtures": [
-    {
-      "t": 1,
-      "file": "the-commit-arms-the-token-fires-sub-56090-sub-55.mgcr",
-      "source": "mc1l2",
-      "note": "THE COMMIT ARMS, THE TOKEN FIRES (sub_56090/sub_55DD0/sub_55E80): a rival emission spawns UNTARGETED (+146 = 0 on every spawn boundary of this corpus; the bolt's own next-tick sub_54520 scan picks the victim) with +140 = cost/count (fireball 40), fired from the owner's settled pose the commit stamped (+32 pitch) - ledger 2026-08-16 mc1l2 RIVAL-WIZARD INTAKE."
-    },
-    {
-      "t": 107,
-      "file": "ai-life-regen-has-no-stall-gate-17990-18018-act.mgcr",
-      "source": "mc1l2",
-      "note": "AI LIFE REGEN HAS NO STALL GATE (:17990-18018): act_life += life_rate runs UNCONDITIONALLY through the applied-then-selected u16_341 register, so retail's rival heals +20 straight through a damage tick where the port's shared +383 stall register held it flat - ledger 2026-08-16 mc1l2 RIVAL-WIZARD INTAKE."
-    },
-    {
-      "t": 392,
-      "file": "the-m2-bee-is-the-only-class-5-ctor-that-narrows.mgcr",
-      "source": "mc1l2",
-      "note": "THE m2 BEE IS THE ONLY CLASS-5 CTOR THAT NARROWS +67 (sub_38370 :44744): a census of all sixteen class-5 constructors finds exactly one +67 write, so eight newborn bees read smodel 0 while every other model keeps NewEvent's 0xFF wildcard - ledger 2026-08-16 mc1l2 FREE REPLAY FAITHFUL."
-    },
-    {
-      "t": 570,
-      "file": "wrapper-pre-work-outlives-the-damage-prologue-th.mgcr",
-      "source": "mc1l2",
-      "note": "WRAPPER PRE-WORK OUTLIVES THE DAMAGE PROLOGUE: the prologue is not a handler's first act, it sits inside the shared core sub_1A120 (:21598-651), so m2's sting countdown and direct z step (:22342-54) still land on a hit tick instead of being aborted by the port's centralized intake - ledger 2026-08-16 mc1l2 RESIDUE CLOSED."
-    },
-    {
-      "t": 756,
-      "file": "attack-casts-gate-on-3-d-arrival-sub-13dd0-sub-1.mgcr",
-      "source": "mc1l2",
-      "note": "ATTACK CASTS GATE ON 3-D ARRIVAL (sub_13DD0 + sub_15470, sub_42340 = isqrt(dx2+dy2+dz2)): the cast attempt runs ONLY when arrived (3072) with burst >= 0 and the z-hover toward target+512 runs ONLY on a FAILED attempt - the port machine-gunned from 7,300 units out, minting extra (9,0) bolts while retail sat at charge 200 - ledger 2026-08-16 mc1l2 RIVAL-WIZARD INTAKE."
-    },
-    {
-      "t": 818,
-      "file": "wizard-ch0-intake-is-source-gated-with-amount-re.mgcr",
-      "source": "mc1l2",
-      "note": "WIZARD ch0 INTAKE IS SOURCE-GATED WITH AMOUNT RESIDUE (sub_46540 :55694+): every mailbox channel fires on its SOURCE word only and a consume clears ONLY the source, so Vodor's dead (1400, 0) letter must never be re-applied at an imported pair - retail 10000, port 8600 for thousands of ticks - ledger 2026-08-16 mc1l2 RIVAL-WIZARD INTAKE."
-    },
-    {
-      "t": 2301,
-      "file": "the-aim-lift-is-an-in-place-bracket-not-a-pure-f.mgcr",
-      "source": "mc1l2",
-      "note": "THE AIM LIFT IS AN IN-PLACE BRACKET, NOT A PURE FUNCTION (sub_524C0 :62509 / sub_524E0 :62514): it writes the MEASURED record's +76, computes, and writes back, so a lob whose +146 holds its OWN slot lifts itself and homing at yourself is a NO-OP (retail pitch 0, z held) where the pure form pitched straight up and climbed ~110/tick - ledger 2026-08-16 mc1l2 RESIDUE CLOSED."
-    },
-    {
-      "t": 2627,
-      "file": "the-rival-carpet-mana-ceiling-is-censused-from-1.mgcr",
-      "source": "mc1l2",
-      "note": "THE RIVAL CARPET MANA CEILING IS CENSUSED FROM +136: the AI book/economy pass writes each rival CARPET's own +136 into the wizard's mana ceiling (retail 1280, port 1420) - ledger 2026-08-16 mc1l2 RIVAL-WIZARD INTAKE law 5."
-    },
-    {
-      "t": 5175,
-      "file": "the-militia-has-no-house-rung-sub-1b5d0-22539-68.mgcr",
-      "source": "mc1l2",
-      "note": "THE MILITIA HAS NO HOUSE RUNG (sub_1B5D0 :22539-687): the port's ladder step - nearest house within 0x1000, house+26 += 1, militia+26 = 1 - was INVENTED; retail's only militia walk-in is the +146 ANCHOR arm no writer can reach, and a barren ladder falls straight to the unconditional pair-up - ledger 2026-08-16 mc1l2 RESIDUE CLOSED."
-    },
-    {
-      "t": 5674,
-      "file": "a-claimed-building-is-not-immune-to-its-owner-su.mgcr",
-      "source": "mc1l2",
-      "note": "A CLAIMED BUILDING IS NOT IMMUNE TO ITS OWNER (sub_29640 :31070): eleven lines with no owner comparison of any kind, so the human's own explosion takes his claimed house 2000 -> 1600 where the port's invented src == +144 early return held it at full - ledger 2026-08-16 mc1l2 FREE REPLAY FAITHFUL."
-    },
-    {
-      "t": 8266,
-      "file": "the-bolt-ctor-census-models-0-12-and-16-19-write.mgcr",
-      "source": "mc1l2",
-      "note": "THE BOLT CTOR CENSUS: models 0-12 and 16-19 write +140 = 50 and m13/m14/m15 DO NOT (:46256+ carries no such write), so a (9,13) seeker reads 0 there, not 50 - ledger 2026-08-16 mc1l2 RESIDUE CLOSED law 2."
-    },
-    {
-      "t": 8284,
-      "file": "a-dying-wizard-spends-the-killing-blow-s-knockba.mgcr",
-      "source": "mc1l2",
-      "note": "A DYING WIZARD SPENDS THE KILLING BLOW'S KNOCKBACK: the shared intake arms v_24/v_22 on EVERY sourced letter including the fatal one (:55714-19, before the death return at :55726), and the state-2 fall's shared mover sub_455D0 (:55204-19) is the only place a rival cashes it - the corpse drifts along that bearing at 4/tick decay instead of dropping in place - ledger 2026-08-16 mc1l2 RESIDUE CLOSED."
-    },
-    {
-      "t": 8563,
-      "file": "the-mc1-free-stack-import-must-not-chain-the-rec.mgcr",
-      "source": "mc1l2",
-      "note": "THE MC1 FREE-STACK IMPORT MUST NOT CHAIN THE RECYCLE STACK (:43867-83 vs :43885-908): NewEvent pops free first and reaches the recycle SACRIFICE arm only on exhaustion, so chaining the two inverted the pop priority and threw the recorded slot order away for the lowest-free fallback - retail slot 374 against the port's slot 18 - ledger 2026-08-16 mc1l2 RESIDUE CLOSED."
-    },
-    {
-      "t": 9796,
-      "file": "m12-seek-scores-houses-in-3-d-25241-49-via-sub-4.mgcr",
-      "source": "mc1l2",
-      "note": "m12 SEEK SCORES HOUSES IN 3-D (:25241-49 via sub_42340) as a truncated isqrt under strict <, where the m4 militia's own scan (:22628-31) is dx2 + dy2 with no z term - they are different laws and no longer share a helper - ledger 2026-08-16 mc1l2 RESIDUE CLOSED law 11."
-    }
-  ]
+ "dir": "fixtures/mc1l2",
+ "pin_pose": "n1",
+ "fixtures": [
+  {
+   "t": 1,
+   "file": "the-commit-arms-the-token-fires-sub-56090-sub-55.mgcr",
+   "source": "mc1l2",
+   "note": "THE COMMIT ARMS, THE TOKEN FIRES (sub_56090/sub_55DD0/sub_55E80): a rival emission spawns UNTARGETED (+146 = 0 on every spawn boundary of this corpus; the bolt's own next-tick sub_54520 scan picks the victim) with +140 = cost/count (fireball 40), fired from the owner's settled pose the commit stamped (+32 pitch) - ledger 2026-08-16 mc1l2 RIVAL-WIZARD INTAKE."
+  },
+  {
+   "t": 107,
+   "file": "ai-life-regen-has-no-stall-gate-17990-18018-act.mgcr",
+   "source": "mc1l2",
+   "note": "AI LIFE REGEN HAS NO STALL GATE (:17990-18018): act_life += life_rate runs UNCONDITIONALLY through the applied-then-selected u16_341 register, so retail's rival heals +20 straight through a damage tick where the port's shared +383 stall register held it flat - ledger 2026-08-16 mc1l2 RIVAL-WIZARD INTAKE."
+  },
+  {
+   "t": 392,
+   "file": "the-m2-bee-is-the-only-class-5-ctor-that-narrows.mgcr",
+   "source": "mc1l2",
+   "note": "THE m2 BEE IS THE ONLY CLASS-5 CTOR THAT NARROWS +67 (sub_38370 :44744): a census of all sixteen class-5 constructors finds exactly one +67 write, so eight newborn bees read smodel 0 while every other model keeps NewEvent's 0xFF wildcard - ledger 2026-08-16 mc1l2 FREE REPLAY FAITHFUL."
+  },
+  {
+   "t": 570,
+   "file": "wrapper-pre-work-outlives-the-damage-prologue-th.mgcr",
+   "source": "mc1l2",
+   "note": "WRAPPER PRE-WORK OUTLIVES THE DAMAGE PROLOGUE: the prologue is not a handler's first act, it sits inside the shared core sub_1A120 (:21598-651), so m2's sting countdown and direct z step (:22342-54) still land on a hit tick instead of being aborted by the port's centralized intake - ledger 2026-08-16 mc1l2 RESIDUE CLOSED."
+  },
+  {
+   "t": 756,
+   "file": "attack-casts-gate-on-3-d-arrival-sub-13dd0-sub-1.mgcr",
+   "source": "mc1l2",
+   "note": "ATTACK CASTS GATE ON 3-D ARRIVAL (sub_13DD0 + sub_15470, sub_42340 = isqrt(dx2+dy2+dz2)): the cast attempt runs ONLY when arrived (3072) with burst >= 0 and the z-hover toward target+512 runs ONLY on a FAILED attempt - the port machine-gunned from 7,300 units out, minting extra (9,0) bolts while retail sat at charge 200 - ledger 2026-08-16 mc1l2 RIVAL-WIZARD INTAKE."
+  },
+  {
+   "t": 818,
+   "file": "wizard-ch0-intake-is-source-gated-with-amount-re.mgcr",
+   "source": "mc1l2",
+   "note": "WIZARD ch0 INTAKE IS SOURCE-GATED WITH AMOUNT RESIDUE (sub_46540 :55694+): every mailbox channel fires on its SOURCE word only and a consume clears ONLY the source, so Vodor's dead (1400, 0) letter must never be re-applied at an imported pair - retail 10000, port 8600 for thousands of ticks - ledger 2026-08-16 mc1l2 RIVAL-WIZARD INTAKE."
+  },
+  {
+   "t": 2301,
+   "file": "the-aim-lift-is-an-in-place-bracket-not-a-pure-f.mgcr",
+   "source": "mc1l2",
+   "note": "THE AIM LIFT IS AN IN-PLACE BRACKET, NOT A PURE FUNCTION (sub_524C0 :62509 / sub_524E0 :62514): it writes the MEASURED record's +76, computes, and writes back, so a lob whose +146 holds its OWN slot lifts itself and homing at yourself is a NO-OP (retail pitch 0, z held) where the pure form pitched straight up and climbed ~110/tick - ledger 2026-08-16 mc1l2 RESIDUE CLOSED."
+  },
+  {
+   "t": 2627,
+   "file": "the-rival-carpet-mana-ceiling-is-censused-from-1.mgcr",
+   "source": "mc1l2",
+   "note": "THE RIVAL CARPET MANA CEILING IS CENSUSED FROM +136: the AI book/economy pass writes each rival CARPET's own +136 into the wizard's mana ceiling (retail 1280, port 1420) - ledger 2026-08-16 mc1l2 RIVAL-WIZARD INTAKE law 5."
+  },
+  {
+   "t": 5175,
+   "file": "the-militia-has-no-house-rung-sub-1b5d0-22539-68.mgcr",
+   "source": "mc1l2",
+   "note": "THE MILITIA HAS NO HOUSE RUNG (sub_1B5D0 :22539-687): the port's ladder step - nearest house within 0x1000, house+26 += 1, militia+26 = 1 - was INVENTED; retail's only militia walk-in is the +146 ANCHOR arm no writer can reach, and a barren ladder falls straight to the unconditional pair-up - ledger 2026-08-16 mc1l2 RESIDUE CLOSED."
+  },
+  {
+   "t": 5674,
+   "file": "a-claimed-building-is-not-immune-to-its-owner-su.mgcr",
+   "source": "mc1l2",
+   "note": "A CLAIMED BUILDING IS NOT IMMUNE TO ITS OWNER (sub_29640 :31070): eleven lines with no owner comparison of any kind, so the human's own explosion takes his claimed house 2000 -> 1600 where the port's invented src == +144 early return held it at full - ledger 2026-08-16 mc1l2 FREE REPLAY FAITHFUL."
+  },
+  {
+   "t": 8266,
+   "file": "the-bolt-ctor-census-models-0-12-and-16-19-write.mgcr",
+   "source": "mc1l2",
+   "note": "THE BOLT CTOR CENSUS: models 0-12 and 16-19 write +140 = 50 and m13/m14/m15 DO NOT (:46256+ carries no such write), so a (9,13) seeker reads 0 there, not 50 - ledger 2026-08-16 mc1l2 RESIDUE CLOSED law 2."
+  },
+  {
+   "t": 8282,
+   "file": "the-m4-chase-takes-its-lost-verdict-below-the-re.mgcr",
+   "source": "mc1l2",
+   "note": "THE m4 CHASE TAKES ITS LOST VERDICT BELOW THE RE-BEAR (sub_1BB20 :22696 = sub_1A120(a1x, 24, sub_1A990) :21654-61): the militia has no chase body of its own, so the shared core moves, re-bears every 4th tick and only THEN tests the target's +12 < 0 - a militiaman whose wizard is mid-death-fall still turns onto the corpse on his exit tick (retail +34 = 691, the port's early return held its stale 693) - ledger 2026-08-18 SEGMENTED-REPLAY RESIDUE."
+  },
+  {
+   "t": 8284,
+   "file": "a-dying-wizard-spends-the-killing-blow-s-knockba.mgcr",
+   "source": "mc1l2",
+   "note": "A DYING WIZARD SPENDS THE KILLING BLOW'S KNOCKBACK: the shared intake arms v_24/v_22 on EVERY sourced letter including the fatal one (:55714-19, before the death return at :55726), and the state-2 fall's shared mover sub_455D0 (:55204-19) is the only place a rival cashes it - the corpse drifts along that bearing at 4/tick decay instead of dropping in place - ledger 2026-08-16 mc1l2 RESIDUE CLOSED."
+  },
+  {
+   "t": 8289,
+   "file": "the-pack-death-handoff-writes-through-52-blind-s.mgcr",
+   "source": "mc1l2",
+   "note": "THE PACK-DEATH HANDOFF WRITES THROUGH +52 BLIND (sub_1A390 :21695-21752): the only gate on the whole path is +52 != 0, and the stamp takes v3x = &pool[+52] with no class, model, life or flags test - so a militiaman that dies still pointing at a slot which has been reaped and re-minted stamps whatever is there now. At t=8290 slot 285 (m4, family base 24) dies and stamps the (10,0) FIRE at slot 287 with +146 = 295 (the human), +52 = 0 and +70 = 26, and the ascending walk then dispatches 287 as class-10 state 26 instead of a fire. The port's class64 == 5 conjunct was invented - ledger 2026-08-18c mc1l2 CERTIFIED."
+  },
+  {
+   "t": 8563,
+   "file": "the-mc1-free-stack-import-must-not-chain-the-rec.mgcr",
+   "source": "mc1l2",
+   "note": "THE MC1 FREE-STACK IMPORT MUST NOT CHAIN THE RECYCLE STACK (:43867-83 vs :43885-908): NewEvent pops free first and reaches the recycle SACRIFICE arm only on exhaustion, so chaining the two inverted the pop priority and threw the recorded slot order away for the lowest-free fallback - retail slot 374 against the port's slot 18 - ledger 2026-08-16 mc1l2 RESIDUE CLOSED."
+  },
+  {
+   "t": 9796,
+   "file": "m12-seek-scores-houses-in-3-d-25241-49-via-sub-4.mgcr",
+   "source": "mc1l2",
+   "note": "m12 SEEK SCORES HOUSES IN 3-D (:25241-49 via sub_42340) as a truncated isqrt under strict <, where the m4 militia's own scan (:22628-31) is dx2 + dy2 with no z term - they are different laws and no longer share a helper - ledger 2026-08-16 mc1l2 RESIDUE CLOSED law 11."
+  }
+ ]
 }

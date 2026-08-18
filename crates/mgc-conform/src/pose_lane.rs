@@ -199,6 +199,9 @@ impl PoseLane {
             speed_down: mb & 2 != 0,
             strafe_left: mb & 4 != 0,
             strafe_right: mb & 8 != 0,
+            // The pair shadow never steps a death fall (the domain
+            // is gated) — the command handler always runs here.
+            no_command: false,
         };
         let mut s = Mc1State {
             x: e0.x,
@@ -348,6 +351,9 @@ impl PoseLane {
             speed_down: mb & 2 != 0,
             strafe_left: mb & 4 != 0,
             strafe_right: mb & 8 != 0,
+            // The pair shadow never steps a death fall (the domain
+            // is gated) — the command handler always runs here.
+            no_command: false,
         };
         let mut s = Mc1State {
             x: e0.x,

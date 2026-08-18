@@ -1,102 +1,108 @@
 {
-  "dir": "fixtures/mc1l42",
-  "pin_pose": "n1",
-  "fixtures": [
-    {
-      "t": 4,
-      "file": "the-m8-hit-teleports-onto-the-victim-it-strikes.mgcr",
-      "source": "mc1l42",
-      "note": "THE m8 HIT TELEPORTS ONTO THE VICTIM IT STRIKES: sub_530C0 closes the victim arm with the same three-call bracket the generic flight uses - lift the victim's +76 by its own +78, relink the SEEKER there, put the lift back (:63154-56) - and the explosion child then carries that victim in +146 unconditionally (:63196-202), the human carpet included; the port kept the stepped point and stamped 0, which is why this was the take's first divergent pair - ledger 2026-08-17."
-    },
-    {
-      "t": 5,
-      "file": "the-m11-seeker-flies-newevent-s-wildcard-filter.mgcr",
-      "source": "mc1l42",
-      "note": "THE m11 SEEKER FLIES NEWEVENT'S WILDCARD FILTER: sub_1E380 is the one attack thunk that writes no +66/+67 at all (:24683-700) and its ctor sub_39E40 writes none either (:46104-28), so the genie's seeker rides NewEvent's own sClass = sModel = -1 (:43875-76) and collides with everything - the port's shared (3, 0xFF) placeholder made it a wizards-only ghost that flew through the map - ledger 2026-08-17."
-    },
-    {
-      "t": 525,
-      "file": "the-arrow-scans-from-its-pre-step-position-never.mgcr",
-      "source": "mc1l42",
-      "note": "THE ARROW SCANS FROM ITS PRE-STEP POSITION, NEVER the point it lands on: sub_54180 is the one class-9 flight handler that does not relink before it probes - every sibling commits the stepped point first, four via sub_41C70(a1, &scratch) (:62676, :62844, :63105, :63685) and the m9 beam via its raw +72/+76 store (:63249) - but the m13 bolt steps only the global scratch and hands sub_11980 an a1 still parked at the tick's start (:63801-05, HW twin byte-identical at hw:59890-93), so contact trails the flight by a full 384-unit step while the ground test runs on the endpoint; the port scanned the endpoint and every arrow in the take connected one tick early, taking the militia's 250 out of the human at t=525 on a shot retail flies clean through and never lands at all - ledger 2026-08-17."
-    },
-    {
-      "t": 2133,
-      "file": "the-genie-s-parting-shot-is-born-untargeted-sub.mgcr",
-      "source": "mc1l42",
-      "note": "THE GENIE'S PARTING SHOT IS BORN UNTARGETED: sub_1E720 (:24724) zeroes the caster's +146 on both break-off arms, and the spawn at :24697 stamps the seeker's +146 from that LIVE value while the launch bearing still rides the stale v9 resolved at :24633 - so the seeker carries no target and must acquire in its own first sub_530C0 tick, which is why retail's newborn at slot 378 reads flags 6 (bit 1 latched), +26 16 (sub_54520's entry clamp cutting the launch 20) and +30 == +34; the port passed the stale target for both and suppressed the acquire entirely, which was the free replay's wall - ledger 2026-08-17b."
-    },
-    {
-      "t": 2136,
-      "file": "the-genie-s-blink-phase-is-a-recorded-flags-bit.mgcr",
-      "source": "mc1l42",
-      "note": "THE GENIE'S BLINK PHASE IS A RECORDED FLAGS BIT: sub_1DE40 tests +16 byte[0] & 1 (:24336) and toggles it with ^ 1 (:24383), and because that bit is part of the recorded +16 word the port's private flags 0x2000 stand-in never survived an import - an imported genie read CLEAR forever, took the chase exit on every expiry and never blinked at all - ledger 2026-08-17."
-    },
-    {
-      "t": 3661,
-      "file": "the-genie-blink-jumps-whole-tiles-on-either-axis.mgcr",
-      "source": "mc1l42",
-      "note": "THE GENIE BLINK JUMPS WHOLE TILES ON EITHER AXIS: sub_1DE40's SET phase walks each of x and y by ((rand % 0x3C) << 8) + 12800 toroidally (:24345-48), so the genie jumps whole tiles while its sub-tile offset rides along, and the blink also clears the pending ch0 damage source (+94 = 0, :24339) - ledger 2026-08-17."
-    },
-    {
-      "t": 4418,
-      "file": "the-m8-seeker-misses-a-carpet-it-fully-overlaps.mgcr",
-      "source": "mc1l42",
-      "note": "THE m8 SEEKER MISSES A CARPET IT FULLY OVERLAPS: sub_11980 (:16988) is nothing but a mapEntityIndex chain walk plus sub_11950's AABB and it returns 0 on an empty walk (:17020-27) - there is no player arm anywhere in it - so the human is reachable ONLY through the tile chain and the probe's CELL WINDOW gates him; at this pair the seeker at slot 373 overlaps the carpet on ALL THREE axes by a wide margin (dx 88, dy 168, dz 4 against 194/194/175) and retail still does not hit, because the carpet's truncated link cell sits outside the seeker's rounded-centre ring, and a pure-AABB port must fail here - ledger 2026-08-17b."
-    },
-    {
-      "t": 6274,
-      "file": "the-kraken-resets-its-dive-clock-on-a-wizard-hit.mgcr",
-      "source": "mc1l42",
-      "note": "THE KRAKEN RESETS ITS DIVE CLOCK ON A WIZARD HIT: m6's own chase handler writes `+26 = -10` beside the retarget on the non-lethal class-3 branch (sub_1C4F0 :23192-94), ten ticks of quiet before the next surface wake - the port retargeted and returned, leaving +26 wherever the dive had got to - ledger 2026-08-17."
-    },
-    {
-      "t": 6453,
-      "file": "a-kraken-growl-tick-already-lays-its-first-bolt.mgcr",
-      "source": "mc1l42",
-      "note": "A KRAKEN GROWL TICK ALREADY LAYS ITS FIRST BOLT: sub_1C4F0's burst block sits BELOW the cadence gate, so :23241 writes +71 = 5 and :23243-44 immediately spends a charge and lays a beam on the same tick - a burst is five bolts starting on the arming tick, not four starting the tick after, and the opening bolt is the one whose 8*steps+1 chain is 81 entities wide; the port tested +71 > 0 above the gate and laid NOTHING on any arming tick - 82 missing and zero extra at the take's first burst, 75 percent of its whole divergence (the out-of-range drop-out is LABEL_30 :23239, a backward jump to :23211 = state 0x25 then return, so it never reaches the block) - ledger 2026-08-17."
-    },
-    {
-      "t": 6606,
-      "file": "the-beam-dies-off-the-tile-chain-it-never-joined.mgcr",
-      "source": "mc1l42",
-      "note": "THE BEAM DIES OFF THE TILE CHAIN IT NEVER JOINED: sub_535E0 unlinks the zigzag at :63311 and flies it on raw +72/+76 writes, so its death flags carry no link bit and no later scan that tick can see it; the (10,23) endpoint ctor MASKS then SETS (sub_3AE80 :47076-79, `+16 &= 0xFFFDFFF7` then `+18 |= 2`), dropping NewEvent's hittable bit 3 the port kept; and the endpoint's +146 comes from a FRESH probe taken after the chain is laid (:63422), not from the flight loop's break - ledger 2026-08-17."
-    },
-    {
-      "t": 17150,
-      "file": "the-fleet-picks-in-register-order-not-slot-order.mgcr",
-      "source": "mc1l42",
-      "note": "THE FLEET PICKS IN REGISTER ORDER, NOT SLOT ORDER: the dispatcher walks the owner wizard's 3-slot balloon register at Type_160 + 52 + 2*i (:56329-95) rather than scanning the pool, so the pick order is SPAWN order and index 0 claims first, and sub_46CA0 is handed the other two register slots' current targets through a double indirection (:56371-80) as the exclusion set; the port's ascending pool scan got the right SET in the wrong ORDER, so balloons 991 and 107 claimed each other's balls and the tether bit and +146 back-link landed on the wrong ball - the register was in the recording all along, just never decoded - ledger 2026-08-17b."
-    },
-    {
-      "t": 17330,
-      "file": "the-death-fall-trails-fire-one-gravity-step-high.mgcr",
-      "source": "mc1l42",
-      "note": "THE DEATH FALL TRAILS FIRE ONE GRAVITY STEP HIGH: sub_45FC0 spawns one (10,1) per fall tick at the GLOBAL scratch axis the mover left behind (:55478-83) - the carpet's post-move, PRE-gravity pose, one gravity step above where the tick ends - and decorates it with `flags |= 0x80` and the wizard's +24 and nothing else; the port spawned at the settled pose and also raised 0x10000 - ledger 2026-08-17."
-    },
-    {
-      "t": 17346,
-      "file": "a-corpse-is-mana-deaf-and-stamps-no-jar-markers.mgcr",
-      "source": "mc1l42",
-      "note": "A CORPSE IS MANA DEAF AND STAMPS NO JAR MARKERS: sub_45C90's mana step and both clamps sit inside `if (actLife >= 0)` (:55381) so a dead wizard holds his purse and his last delta untouched until the respawn re-mints them; the jar poll walks bucket[0] and tests `!model65 && actLife >= 0` before consulting the acquisition table (:64784-86), so a corpse stamps no already-known bit; and the (10,40) grave his landing raised keeps crediting the re-pointed balls' purse every tick because the census reset walks only the PLAYER TABLE (:56911-19, :56861-63) - a retail artifact, faithfully reproduced - ledger 2026-08-17."
-    },
-    {
-      "t": 20150,
-      "file": "the-crater-launches-on-the-caster-s-own-raw-aim.mgcr",
-      "source": "mc1l42",
-      "note": "THE CRATER LAUNCHES ON THE CASTER'S OWN RAW AIM: there is no per-spell launch-pitch table - meteor (:65402-04), volcano (:65477-80) and crater (:65533-34) all copy the caster's +32 verbatim, so the down-arc is the player's own aim and the port's fixed 0x60 bias put every lob 96 units of pitch low; the launch boost lands on +126 ALONE while +128 keeps the ctor 384; sub_54520's entry clamp caps +26 at 16 ABOVE the model switch (:63975-76) so it fires even on the models that acquire nothing; and the cast banks the caster's charge meter into the bolt and zeroes it (:65536-37) - ledger 2026-08-17."
-    },
-    {
-      "t": 20155,
-      "file": "the-launch-boost-decays-two-speed-on-every-tick.mgcr",
-      "source": "mc1l42",
-      "note": "THE LAUNCH BOOST DECAYS TWO SPEED ON EVERY TICK: retail's generic flight servo walks +126 back toward the ctor's +128 by 2 a tick (:63565-67), which the port never ran in proj_payload_tick because it had pinned +128 to the boosted value - a frozen speed, and a constant lag of exactly 2 from the first tick of every crater to the last - ledger 2026-08-17."
-    },
-    {
-      "t": 20158,
-      "file": "the-crater-grounding-step-spends-no-life-at-all.mgcr",
-      "source": "mc1l42",
-      "note": "THE CRATER GROUNDING STEP SPENDS NO LIFE AT ALL: retail's end test short-circuits `ground > z || --life < 0 || hit` (the castle ball's :63586-90 twin), so the touchdown tick keeps the z the polar step put it at - under the terrain - and never reaches the decrement; the port clamped to the ground and burned the life - ledger 2026-08-17."
-    }
-  ]
+ "dir": "fixtures/mc1l42",
+ "pin_pose": "n1",
+ "fixtures": [
+  {
+   "t": 4,
+   "file": "the-m8-hit-teleports-onto-the-victim-it-strikes.mgcr",
+   "source": "mc1l42",
+   "note": "THE m8 HIT TELEPORTS ONTO THE VICTIM IT STRIKES: sub_530C0 closes the victim arm with the same three-call bracket the generic flight uses - lift the victim's +76 by its own +78, relink the SEEKER there, put the lift back (:63154-56) - and the explosion child then carries that victim in +146 unconditionally (:63196-202), the human carpet included; the port kept the stepped point and stamped 0, which is why this was the take's first divergent pair - ledger 2026-08-17."
+  },
+  {
+   "t": 5,
+   "file": "the-m11-seeker-flies-newevent-s-wildcard-filter.mgcr",
+   "source": "mc1l42",
+   "note": "THE m11 SEEKER FLIES NEWEVENT'S WILDCARD FILTER: sub_1E380 is the one attack thunk that writes no +66/+67 at all (:24683-700) and its ctor sub_39E40 writes none either (:46104-28), so the genie's seeker rides NewEvent's own sClass = sModel = -1 (:43875-76) and collides with everything - the port's shared (3, 0xFF) placeholder made it a wizards-only ghost that flew through the map - ledger 2026-08-17."
+  },
+  {
+   "t": 525,
+   "file": "the-arrow-scans-from-its-pre-step-position-never.mgcr",
+   "source": "mc1l42",
+   "note": "THE ARROW SCANS FROM ITS PRE-STEP POSITION, NEVER the point it lands on: sub_54180 is the one class-9 flight handler that does not relink before it probes - every sibling commits the stepped point first, four via sub_41C70(a1, &scratch) (:62676, :62844, :63105, :63685) and the m9 beam via its raw +72/+76 store (:63249) - but the m13 bolt steps only the global scratch and hands sub_11980 an a1 still parked at the tick's start (:63801-05, HW twin byte-identical at hw:59890-93), so contact trails the flight by a full 384-unit step while the ground test runs on the endpoint; the port scanned the endpoint and every arrow in the take connected one tick early, taking the militia's 250 out of the human at t=525 on a shot retail flies clean through and never lands at all - ledger 2026-08-17."
+  },
+  {
+   "t": 2133,
+   "file": "the-genie-s-parting-shot-is-born-untargeted-sub.mgcr",
+   "source": "mc1l42",
+   "note": "THE GENIE'S PARTING SHOT IS BORN UNTARGETED: sub_1E720 (:24724) zeroes the caster's +146 on both break-off arms, and the spawn at :24697 stamps the seeker's +146 from that LIVE value while the launch bearing still rides the stale v9 resolved at :24633 - so the seeker carries no target and must acquire in its own first sub_530C0 tick, which is why retail's newborn at slot 378 reads flags 6 (bit 1 latched), +26 16 (sub_54520's entry clamp cutting the launch 20) and +30 == +34; the port passed the stale target for both and suppressed the acquire entirely, which was the free replay's wall - ledger 2026-08-17b."
+  },
+  {
+   "t": 2136,
+   "file": "the-genie-s-blink-phase-is-a-recorded-flags-bit.mgcr",
+   "source": "mc1l42",
+   "note": "THE GENIE'S BLINK PHASE IS A RECORDED FLAGS BIT: sub_1DE40 tests +16 byte[0] & 1 (:24336) and toggles it with ^ 1 (:24383), and because that bit is part of the recorded +16 word the port's private flags 0x2000 stand-in never survived an import - an imported genie read CLEAR forever, took the chase exit on every expiry and never blinked at all - ledger 2026-08-17."
+  },
+  {
+   "t": 3661,
+   "file": "the-genie-blink-jumps-whole-tiles-on-either-axis.mgcr",
+   "source": "mc1l42",
+   "note": "THE GENIE BLINK JUMPS WHOLE TILES ON EITHER AXIS: sub_1DE40's SET phase walks each of x and y by ((rand % 0x3C) << 8) + 12800 toroidally (:24345-48), so the genie jumps whole tiles while its sub-tile offset rides along, and the blink also clears the pending ch0 damage source (+94 = 0, :24339) - ledger 2026-08-17."
+  },
+  {
+   "t": 4418,
+   "file": "the-m8-seeker-misses-a-carpet-it-fully-overlaps.mgcr",
+   "source": "mc1l42",
+   "note": "THE m8 SEEKER MISSES A CARPET IT FULLY OVERLAPS: sub_11980 (:16988) is nothing but a mapEntityIndex chain walk plus sub_11950's AABB and it returns 0 on an empty walk (:17020-27) - there is no player arm anywhere in it - so the human is reachable ONLY through the tile chain and the probe's CELL WINDOW gates him; at this pair the seeker at slot 373 overlaps the carpet on ALL THREE axes by a wide margin (dx 88, dy 168, dz 4 against 194/194/175) and retail still does not hit, because the carpet's truncated link cell sits outside the seeker's rounded-centre ring, and a pure-AABB port must fail here - ledger 2026-08-17b."
+  },
+  {
+   "t": 6274,
+   "file": "the-kraken-resets-its-dive-clock-on-a-wizard-hit.mgcr",
+   "source": "mc1l42",
+   "note": "THE KRAKEN RESETS ITS DIVE CLOCK ON A WIZARD HIT: m6's own chase handler writes `+26 = -10` beside the retarget on the non-lethal class-3 branch (sub_1C4F0 :23192-94), ten ticks of quiet before the next surface wake - the port retargeted and returned, leaving +26 wherever the dive had got to - ledger 2026-08-17."
+  },
+  {
+   "t": 6453,
+   "file": "a-kraken-growl-tick-already-lays-its-first-bolt.mgcr",
+   "source": "mc1l42",
+   "note": "A KRAKEN GROWL TICK ALREADY LAYS ITS FIRST BOLT: sub_1C4F0's burst block sits BELOW the cadence gate, so :23241 writes +71 = 5 and :23243-44 immediately spends a charge and lays a beam on the same tick - a burst is five bolts starting on the arming tick, not four starting the tick after, and the opening bolt is the one whose 8*steps+1 chain is 81 entities wide; the port tested +71 > 0 above the gate and laid NOTHING on any arming tick - 82 missing and zero extra at the take's first burst, 75 percent of its whole divergence (the out-of-range drop-out is LABEL_30 :23239, a backward jump to :23211 = state 0x25 then return, so it never reaches the block) - ledger 2026-08-17."
+  },
+  {
+   "t": 6606,
+   "file": "the-beam-dies-off-the-tile-chain-it-never-joined.mgcr",
+   "source": "mc1l42",
+   "note": "THE BEAM DIES OFF THE TILE CHAIN IT NEVER JOINED: sub_535E0 unlinks the zigzag at :63311 and flies it on raw +72/+76 writes, so its death flags carry no link bit and no later scan that tick can see it; the (10,23) endpoint ctor MASKS then SETS (sub_3AE80 :47076-79, `+16 &= 0xFFFDFFF7` then `+18 |= 2`), dropping NewEvent's hittable bit 3 the port kept; and the endpoint's +146 comes from a FRESH probe taken after the chain is laid (:63422), not from the flight loop's break - ledger 2026-08-17."
+  },
+  {
+   "t": 6617,
+   "file": "the-class-9-despawn-sits-inside-the-child-alloca.mgcr",
+   "source": "mc1l42",
+   "note": "THE CLASS-9 DESPAWN SITS INSIDE THE CHILD-ALLOCATION GUARD (sub_530C0 :63193/:63203, and the same shape at sub_52770 :62762/:62772, sub_52B30 :62925/:62931, sub_52ED0 :63002/:63008, sub_54480 :63933/:63934): a detonation that CANNOT ALLOCATE its effect does not spawn, does not score and DOES NOT DIE - it re-detonates next tick. That it is deliberate is settled twenty lines away, where the same function's WATER arm (:63175-81) guards its splash spawn and then kills unconditionally. At t=6618 the pool is COMPLETELY FULL (recorded free stack 0 at 6617/6618/6619) and the genie's (9,8) mana-steal seeker in slot 997 strikes the carpet: retail cannot mint the (10,25) flash, so the seeker lives on at flags 4 for fourteen more ticks where the port soft-killed it, and that one extra freed slot in a starved pool shifted every later allocation into the t=6624 mass-spawn desync. The guard is on the ALLOCATION, not on the Option - ledger 2026-08-18c mc1l42 CERTIFIED."
+  },
+  {
+   "t": 17150,
+   "file": "the-fleet-picks-in-register-order-not-slot-order.mgcr",
+   "source": "mc1l42",
+   "note": "THE FLEET PICKS IN REGISTER ORDER, NOT SLOT ORDER: the dispatcher walks the owner wizard's 3-slot balloon register at Type_160 + 52 + 2*i (:56329-95) rather than scanning the pool, so the pick order is SPAWN order and index 0 claims first, and sub_46CA0 is handed the other two register slots' current targets through a double indirection (:56371-80) as the exclusion set; the port's ascending pool scan got the right SET in the wrong ORDER, so balloons 991 and 107 claimed each other's balls and the tether bit and +146 back-link landed on the wrong ball - the register was in the recording all along, just never decoded - ledger 2026-08-17b."
+  },
+  {
+   "t": 17330,
+   "file": "the-death-fall-trails-fire-one-gravity-step-high.mgcr",
+   "source": "mc1l42",
+   "note": "THE DEATH FALL TRAILS FIRE ONE GRAVITY STEP HIGH: sub_45FC0 spawns one (10,1) per fall tick at the GLOBAL scratch axis the mover left behind (:55478-83) - the carpet's post-move, PRE-gravity pose, one gravity step above where the tick ends - and decorates it with `flags |= 0x80` and the wizard's +24 and nothing else; the port spawned at the settled pose and also raised 0x10000 - ledger 2026-08-17."
+  },
+  {
+   "t": 17346,
+   "file": "a-corpse-is-mana-deaf-and-stamps-no-jar-markers.mgcr",
+   "source": "mc1l42",
+   "note": "A CORPSE IS MANA DEAF AND STAMPS NO JAR MARKERS: sub_45C90's mana step and both clamps sit inside `if (actLife >= 0)` (:55381) so a dead wizard holds his purse and his last delta untouched until the respawn re-mints them; the jar poll walks bucket[0] and tests `!model65 && actLife >= 0` before consulting the acquisition table (:64784-86), so a corpse stamps no already-known bit; and the (10,40) grave his landing raised keeps crediting the re-pointed balls' purse every tick because the census reset walks only the PLAYER TABLE (:56911-19, :56861-63) - a retail artifact, faithfully reproduced - ledger 2026-08-17."
+  },
+  {
+   "t": 20150,
+   "file": "the-crater-launches-on-the-caster-s-own-raw-aim.mgcr",
+   "source": "mc1l42",
+   "note": "THE CRATER LAUNCHES ON THE CASTER'S OWN RAW AIM: there is no per-spell launch-pitch table - meteor (:65402-04), volcano (:65477-80) and crater (:65533-34) all copy the caster's +32 verbatim, so the down-arc is the player's own aim and the port's fixed 0x60 bias put every lob 96 units of pitch low; the launch boost lands on +126 ALONE while +128 keeps the ctor 384; sub_54520's entry clamp caps +26 at 16 ABOVE the model switch (:63975-76) so it fires even on the models that acquire nothing; and the cast banks the caster's charge meter into the bolt and zeroes it (:65536-37) - ledger 2026-08-17."
+  },
+  {
+   "t": 20155,
+   "file": "the-launch-boost-decays-two-speed-on-every-tick.mgcr",
+   "source": "mc1l42",
+   "note": "THE LAUNCH BOOST DECAYS TWO SPEED ON EVERY TICK: retail's generic flight servo walks +126 back toward the ctor's +128 by 2 a tick (:63565-67), which the port never ran in proj_payload_tick because it had pinned +128 to the boosted value - a frozen speed, and a constant lag of exactly 2 from the first tick of every crater to the last - ledger 2026-08-17."
+  },
+  {
+   "t": 20158,
+   "file": "the-crater-grounding-step-spends-no-life-at-all.mgcr",
+   "source": "mc1l42",
+   "note": "THE CRATER GROUNDING STEP SPENDS NO LIFE AT ALL: retail's end test short-circuits `ground > z || --life < 0 || hit` (the castle ball's :63586-90 twin), so the touchdown tick keeps the z the polar step put it at - under the terrain - and never reaches the decrement; the port clamped to the ground and burned the life - ledger 2026-08-17."
+  }
+ ]
 }

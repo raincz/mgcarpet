@@ -158,6 +158,15 @@ pub struct Mc1Input {
     /// Left/Right strafe (command bits 4/8).
     pub strafe_left: bool,
     pub strafe_right: bool,
+    /// THE DEATH-FALL DISPATCH SKIPS THE COMMAND HANDLER. Retail's
+    /// carpet runs `sub_46840` + `sub_455D0` only from states 0/1; the
+    /// falling arm `sub_45FC0` (:55463) calls `sub_455D0` ALONE, so the
+    /// speed target and the strafe register FREEZE at their last values
+    /// while the STICK keeps feeding the filters — the stick words live
+    /// in the input pass, which never stops. mc1l42 t=17306-17344 reads
+    /// exactly that: `tgt`/`act` pinned at −80 and `strafe` frozen at 36
+    /// for the whole fall, with roll/pitch/yaw still moving.
+    pub no_command: bool,
 }
 
 /// What the move reports back to the sim boundary.
@@ -202,40 +211,49 @@ pub fn mc1_move(
     }
 
     // ---- sub_46840 (:55760-:55821): command integration, pre-move ----
+    // ⚠ THE WHOLE BLOCK IS SKIPPED ON THE DEATH FALL (`no_command`):
+    // retail dispatches state 2 to `sub_45FC0`, which calls `sub_455D0`
+    // without it, so the target speed and the strafe register freeze
+    // where the last live tick left them — including the strafe's
+    // 4/tick release decay, which is why a carpet that dies mid-strafe
+    // keeps sliding sideways all the way down.
+    //
     // Up/Down step the target ±16/tick held, clamp ±80 (:55766-80).
     // A press that MOVES the target arms the v_14 latch (:55780) —
     // during a boost only the RESISTING press passes the bounds test
     // (the boosted target sits outside the ±80 band), and the latch is
     // what ends the burst at the token's next pass (:65146-50).
     let mut dir: i16 = 0;
-    if inp.speed_up && st.tgt_speed < 80 {
-        dir = 1;
-    }
-    if inp.speed_down && st.tgt_speed > -80 {
-        dir = -1;
-    }
-    if dir != 0 {
-        st.tgt_speed = (st.tgt_speed + 16 * dir).clamp(-80, 80);
-    }
-    // Strafe: ±16/tick held clamp ±80 (:55783-96); released, decay
-    // 4/tick toward 0 with a sign-flip snap (:55800-19). The bit
-    // tests are SEQUENTIAL (:55783-86) — both strafes held resolves
-    // to RIGHT, never to release (pose-channel-measured on mc1l0
-    // t=3189/3305: retail steps +16 under the 0xE move byte).
-    let mut sdir: i16 = 0;
-    if inp.strafe_left {
-        sdir = -1;
-    }
-    if inp.strafe_right {
-        sdir = 1;
-    }
-    if sdir != 0 {
-        st.strafe = (st.strafe + 16 * sdir).clamp(-80, 80);
-    } else if st.strafe != 0 {
-        let s = st.strafe.signum();
-        st.strafe -= 4 * s;
-        if st.strafe.signum() != s {
-            st.strafe = 0;
+    if !inp.no_command {
+        if inp.speed_up && st.tgt_speed < 80 {
+            dir = 1;
+        }
+        if inp.speed_down && st.tgt_speed > -80 {
+            dir = -1;
+        }
+        if dir != 0 {
+            st.tgt_speed = (st.tgt_speed + 16 * dir).clamp(-80, 80);
+        }
+        // Strafe: ±16/tick held clamp ±80 (:55783-96); released, decay
+        // 4/tick toward 0 with a sign-flip snap (:55800-19). The bit
+        // tests are SEQUENTIAL (:55783-86) — both strafes held resolves
+        // to RIGHT, never to release (pose-channel-measured on mc1l0
+        // t=3189/3305: retail steps +16 under the 0xE move byte).
+        let mut sdir: i16 = 0;
+        if inp.strafe_left {
+            sdir = -1;
+        }
+        if inp.strafe_right {
+            sdir = 1;
+        }
+        if sdir != 0 {
+            st.strafe = (st.strafe + 16 * sdir).clamp(-80, 80);
+        } else if st.strafe != 0 {
+            let s = st.strafe.signum();
+            st.strafe -= 4 * s;
+            if st.strafe.signum() != s {
+                st.strafe = 0;
+            }
         }
     }
 
@@ -922,6 +940,55 @@ mod tests {
 
     fn step(st: &mut Mc1State, inp: &Mc1Input) -> Mc1Moved {
         mc1_move(st, inp, None, None, &flat_ground, &open_gate)
+    }
+
+    /// THE DEATH FALL SKIPS THE COMMAND HANDLER (`no_command`).
+    /// Retail dispatches a falling carpet to `sub_45FC0`, which calls
+    /// `sub_455D0` ALONE — so the speed target and the strafe register
+    /// freeze where the last live tick left them (no ±16 step, and no
+    /// 4/tick release decay either) while the STICK, which lives in
+    /// the input pass and never stops, keeps feeding the filters.
+    /// mc1l42 t=17306-17344 measures both halves at once: `tgt`/`act`
+    /// pinned at −80 and `strafe` frozen at 36 for the whole fall,
+    /// with roll/pitch/yaw still moving under the player's hand.
+    #[test]
+    fn the_death_fall_freezes_the_speed_target_and_the_strafe() {
+        let live = |no_command: bool| {
+            let mut st = Mc1State {
+                tgt_speed: -80,
+                act_speed: -80,
+                strafe: 36,
+                ..Default::default()
+            };
+            // A stick that is still moving, and a speed press + no
+            // strafe key: the command block would step the target and
+            // decay the strafe, the move block would filter the stick.
+            let inp = Mc1Input {
+                stick_x: 40,
+                stick_y: 40,
+                speed_up: true,
+                no_command,
+                ..Default::default()
+            };
+            step(&mut st, &inp);
+            st
+        };
+        let cmd = live(false);
+        assert_eq!(cmd.tgt_speed, -64, "the live command steps the target");
+        assert_eq!(cmd.strafe, 32, "and decays the released strafe 4/tick");
+
+        let fall = live(true);
+        assert_eq!(fall.tgt_speed, -80, "the falling target FREEZES");
+        assert_eq!(fall.strafe, 36, "and so does the strafe register");
+        assert_eq!(
+            fall.act_speed, -80,
+            "the actual speed still chases its (frozen) target"
+        );
+        assert_eq!(
+            (fall.roll_f, fall.pitch_f),
+            (cmd.roll_f, cmd.pitch_f),
+            "the stick filters run either way — sub_455D0 always does"
+        );
     }
 
     /// The barrel roll from level flight: two lock-break pulses (the
