@@ -171,17 +171,27 @@ fn accelerate_channel_holds() {
     );
 }
 
-/// 23 Rapid Fireball: one emission per held tick (the firehose).
+/// 23 Repeat Fireballs is a LAUNCHER (mc1l4 t=5376): the press tick
+/// only ARMS the token (sub_46B00's bare LABEL_32 flow), the token
+/// fires one ball per lap from its own tick (sub_58240 = fireball's
+/// sub_56090), and the held re-issue re-arms every tick — so N held
+/// ticks yield N−1 emissions, first ball one tick after the press.
 #[test]
 fn firehose_fires_every_held_tick() {
     let (mut w, pose) = armed_world();
     equip(&mut w, pose, 23);
+    tick_full(&mut w, pose, true);
+    assert_eq!(
+        projectiles(&w),
+        0,
+        "the press tick ARMS only — the token fires next lap (the cast-phase law)"
+    );
     for _ in 0..5 {
         tick_full(&mut w, pose, true);
     }
     assert!(
         projectiles(&w) >= 5,
-        "5 held ticks yield 5 emissions (got {})",
+        "6 held ticks yield 5 emissions (got {})",
         projectiles(&w)
     );
 }

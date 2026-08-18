@@ -375,7 +375,19 @@ impl World {
         let n = pool.min(st.ents.len());
         let mut active = 0usize;
         let mut bad_rows = 0usize;
-        for slot in 1..n {
+        // ⭐ SLOT 0 IS IMPORTED TOO, AND IT IS NOT DECORATION. The
+        // SCRATCH record is real recorded state (the demolish fake
+        // collapse stamps it: mc1l3 carries `x 41472 y 40960 z 352
+        // id24 579 flags 0x400 class64 0` from t=417 on), and retail's
+        // blind dereferences STEER OFF IT — `sub_1A120` forms
+        // `&pool[+146]` with no validity test (:21655) and re-bears
+        // off it before the lost test, so a pack survivor handed
+        // `+146 = 0` aims at slot 0's coordinates. Skipping it left an
+        // isolated fixture world computing 724 where retail records
+        // 275. Nothing dispatches it — the walk runs 1..999 and slot 0
+        // is class 0, so it joins no chain — and it is excluded from
+        // the `active` census below for the same reason.
+        for slot in 0..n {
             let r = &st.ents[slot];
             if slot == human_slot as usize {
                 self.g.ent[slot] = Ent::default();
@@ -2285,7 +2297,11 @@ fn import_ent_mc2(r: &RetailEntMc2, slot: u16, row156: u8, tr: &dyn Fn(u16) -> u
         } else {
             r.f36
         },
-        f58: r.b39 as i16,
+        // `as u8` first, same law as the MC1 importer above:
+        // `byte_0x39_57` is an `int8_t` (global_types.h:351) whose
+        // ctor sentinel is −6 (Events.cpp:576/602), and the port's
+        // canonical form for it is the unsigned byte.
+        f58: r.b39 as u8 as i16,
         // The (3,2) castle's BUILD SUB-STATE lives in @0x2E
         // (word_0x2E_46 → f59, docs/traces/mc2-castle-builder.md §2);
         // @0x3A is dead for castles, and importing its 0 parked every
@@ -2490,25 +2506,31 @@ fn zero_control(player: u16) -> ControlMc1 {
 /// (flags & 4) is cleared — the caller relinks through `Gen::link` so
 /// the tile lists stay consistent.
 fn import_ent(r: &RetailEntMc1, row156: u8, tr: &dyn Fn(u16) -> u16) -> Ent {
-    // The castle (3,2) keeps its macro-state in retail's JOB byte +70
-    // (4 = settled, 5 = transforming, 6 = full build — sub_46DB0
-    // :55978 / sub_46F10 :56043) with the transform sub-state in +48;
-    // the port's `castle_tick` fuses both into f59 (0 = level-up
-    // commit, 1/6 = painter/leveler waits, 2/3/5 = finish/repaint/
-    // handoff, 4 = settled). Retail's +59 byte is dead for castles —
-    // importing it verbatim parked every settled castle in f59 = 0 and
-    // re-upgraded it one level per tick (the phantom-upgrade family,
-    // docs/CONFORMANCE-FINDINGS.md entry 3). Retail's pure-wait +48
-    // values 1 and 4 both land on the port's painter-wait state 1.
+    // The castle (3,2) keeps its MACRO state in retail's job byte +70
+    // (4 = settled, 5 = transforming, 6 = leveler — the three dispatch
+    // rows at :4673-75), which `tick70` carries verbatim below, and
+    // its TRANSFORM SUB-STATE in +48, which the port keeps in f59
+    // (0 = level-up commit, 1/6 = painter/leveler waits, 2/3/5 =
+    // finish/repaint/handoff). Retail's +59 byte is itself dead for
+    // castles — importing it verbatim parked every settled castle in
+    // f59 = 0 and re-upgraded it one level per tick (the phantom-
+    // upgrade family, docs/CONFORMANCE-FINDINGS.md entry 3).
+    //
+    // Retail's pure-wait +48 values 1 and 4 are the same wait (the
+    // level-up painter's and the repaint painter's) and both land on
+    // our state 1. Outside +70 == 5 the sub-state is DEAD — every
+    // entry into the transform machine writes +48 first (:55988,
+    // :56010, :56469) — so it imports as 0 and the raw-shadow f59
+    // lane stays quiet on the settled castles that make up almost
+    // every captured tick.
     let f59 = if r.class64 == 3 && r.model65 == 2 {
-        match r.f70 {
-            4 => 4,
-            5 => match r.f48 {
+        if r.f70 == 5 {
+            match r.f48 {
                 1 | 4 => 1,
                 s => (s as u8).min(6),
-            },
-            6 => 0,
-            _ => 4,
+            }
+        } else {
+            0
         }
     } else {
         r.f59
@@ -2569,7 +2591,15 @@ fn import_ent(r: &RetailEntMc1, row156: u8, tr: &dyn Fn(u16) -> u16) -> Ent {
         f52: tr(r.f52),
         f54: tr(r.f54),
         f56: r.f56,
-        f58: r.f58 as i16,
+        // ⚠ `as u8` FIRST. `+58` is an `int8_t` in retail (Basic.h:394)
+        // and the recorder lifts it as `i8`, so the never-woken
+        // sentinel 0xFA arrives as −6 — while `Gen::new_event` mints
+        // it as 250. Two representations of ONE byte inside the port
+        // is how `f58 <= 0` in the MC2 aim scan came to mean opposite
+        // things for an imported and a native record. Canonical form
+        // is the UNSIGNED byte, which is what `mob_awake_pass`'s
+        // `& 0xFF` countdown and the raw shadow's mask already assume.
+        f58: r.f58 as u8 as i16,
         f59,
         f63: r.f63,
         class64: r.class64,

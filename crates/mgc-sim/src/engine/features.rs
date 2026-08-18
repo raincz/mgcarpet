@@ -460,6 +460,16 @@ pub(crate) struct Ent {
     /// pre-pass, re-armed to 16 (segments 18) while the player is
     /// within 24 tiles. Spawn staggers the initial value by the spawn
     /// ordinal. NewEvent default 0xFA.
+    ///
+    /// ⚠ RETAIL'S FIELD IS AN `int8_t` (MC1 Basic.h:394, MC2
+    /// global_types.h:351) and both allocators mint the never-woken
+    /// sentinel as `-6` (:43880/:43905, Events.cpp:576/602) — the
+    /// SAME byte as this widened field's 0xFA. The port's canonical
+    /// form is the UNSIGNED byte, so importers narrow the recorder's
+    /// `i8` through `as u8` and every predicate is retail's own
+    /// truthiness on the byte (`if (byte_0x39_57)`), never a sign
+    /// test. Two representations of one byte is what made the MC2 aim
+    /// scan's gate read opposite ways for imported and native records.
     pub(crate) f58: i16,
     /// Awake re-probe delay (offset 59).
     pub(crate) f59: u8,
@@ -643,6 +653,9 @@ pub(crate) struct Gen {
     pub(crate) free: Vec<u16>,
     /// Tick-start mana-ball roster (see [`TickChain`]).
     pub(crate) ball_chain: TickChain,
+    /// Tick-start CLASS-3 roster — bucket[0], `var_u32_36462[0]`
+    /// (see [`TickChain`]; the case-3 arm of the same sweep, :52253).
+    pub(crate) wiz_chain: TickChain,
     /// Tick-start per-model class-5 roster chains (see [`MobChains`]).
     pub(crate) mob_chains: MobChains,
     /// MC2's recycle-victim stack — the allocator's FALLBACK once
@@ -1278,6 +1291,21 @@ impl Gen {
             }
         }
     }
+
+    /// The CLASS-3 arm of the same sweep (:52253-62) — bucket[0], for
+    /// tests that drive a bare `Gen`. Membership is sampled ONCE, at
+    /// the tick top: `actLife >= 0 && (flags & 0x10) == 0`.
+    #[cfg(test)]
+    pub(crate) fn rebuild_wiz_chain(&mut self) {
+        self.wiz_chain.list.clear();
+        self.wiz_chain.cut = usize::MAX;
+        for s in 1..self.ent.len() {
+            let e = &self.ent[s];
+            if e.class64 == 3 && e.act_life >= 0 && e.flags & 0x10 == 0 {
+                self.wiz_chain.list.push(s as u16);
+            }
+        }
+    }
 }
 
 /// One sound request: engine sound id (the SNDS bank-0 index), the
@@ -1342,6 +1370,7 @@ impl Gen {
             slot_gen: SlotGens(vec![0; chassis.pool_slots]),
             free: (1..chassis.pool_slots as u16).rev().collect(),
             ball_chain: TickChain::default(),
+            wiz_chain: TickChain::default(),
             mob_chains: MobChains::default(),
             mc2_recycle: Mc2Recycle::default(),
             mc1_guard_reg: Mc1GuardReg::default(),
@@ -1522,6 +1551,11 @@ impl Gen {
         // closer-scoring 714 its own predecessor lob chases).
         if let Ok(pos) = self.ball_chain.list.binary_search(&(idx as u16)) {
             self.ball_chain.cut = self.ball_chain.cut.min(pos + 1);
+        }
+        // …and for bucket[0], the class-3 roster: the same `->next`
+        // link, the same wipe.
+        if let Ok(pos) = self.wiz_chain.list.binary_search(&(idx as u16)) {
+            self.wiz_chain.cut = self.wiz_chain.cut.min(pos + 1);
         }
         // The same severed-chain law for the per-model class-5 roster
         // chains ([`MobChains`]): the memset below wipes +0, so any
@@ -2455,7 +2489,13 @@ impl Gen {
                 e.f82 = 768;
                 e.f84 = 768;
             }
-            // sub_3B690: building/castle spawner (fix-up follows).
+            // sub_3B690 (:47501): the DWELLING (fix-up follows). The
+            // ctor's last line is `sub_36FA0_37360(event, 177)`
+            // (:47517) — the sprite-stats stamp, which is what puts
+            // `+86 = 177` and the frame count on every house. The port
+            // spawned it art-less: the corpus' authored m45s all read
+            // `type86 = 177, frames89 = 1` while the port's own built
+            // ones read 0/0.
             45 => {
                 e.tick70 = 51;
                 e.max_life = 30;
@@ -2465,6 +2505,7 @@ impl Gen {
                 e.f28 = 33;
                 let (x, y, z) = (e.x, e.y, e.z);
                 self.link(i, x, y, z);
+                self.set_sprite(i, 177);
             }
             // sub_3ABE0 (:46946): the earthquake crevice walker —
             // life 128, step 256, RANDOM initial heading off its own
@@ -2593,7 +2634,18 @@ impl Gen {
         let def = self.assets.build_tab[bt as usize % self.assets.build_tab.len()];
         let (bw, bh) = (def.w as u16, def.h as u16);
         self.ent[i].f26 = 2;
-        self.ent[i].f128 = ((bw * bh) >> 4) as i16;
+        // The OCCUPANCY CAP (+128, :43705) — `f128 > f26` is what lets
+        // a feeder walk in the door. It is the footprint area over
+        // FOUR, corpus-measured across every authored dwelling in the
+        // MC1 takes: rows 25 (9x9 → 20), 26 (9x11 → 24), 30 (13x15 →
+        // 48) and 53 (8x8 → 16) all fit `(w * h) >> 2` exactly and
+        // nothing else. ⚠ The `sub_36DF0_371B0` lift reads `>> 4`,
+        // which is 4x too tight on every one of those rows — a
+        // transcription slip of the same family as its `36462`
+        // chain-head write, and the recording outranks it. Under the
+        // shift the port's own villages capped at a quarter of retail's
+        // and turned feeders away from houses retail admits.
+        self.ent[i].f128 = ((bw * bh) >> 2) as i16;
         // Snap to the tile origin.
         let (px, py, pz) = (
             self.ent[i].x & 0xFF00,
@@ -2616,6 +2668,17 @@ impl Gen {
         }
         let z = 32 * self.avg4(cx, cy, bh as u8, bw as u8) as i32;
         let e = &mut self.ent[i];
+        // sub_37150_37510 (:43798) — ALL FOUR extent words, the
+        // `+78 = 0xE000` z-center marker included: a dwelling's
+        // collision/aim column is centered 8192 BELOW its record z,
+        // exactly like the castle's. The port set the other three and
+        // left +78 at the sprite row's, which put the AIM POINT of
+        // every self-built house at its roof instead of its footing —
+        // and the possess lob's ±0x71 PITCH cone is the consumer:
+        // mc1l5 t=4227, lob 363 (pitch 2017) bends onto house 365
+        // where retail, aiming at −6432 instead of 1760, misses the
+        // cone by 240 units and flies straight.
+        e.f78 = 0xE000;
         e.f80 = ((bw << 8).wrapping_add(1280)) >> 1;
         e.f82 = ((bh << 8).wrapping_add(1280)) >> 1;
         e.f84 = 0x4000;
@@ -3947,18 +4010,29 @@ impl Gen {
     /// ball touching the castle empties into the store while the
     /// store sits below capacity (the whole ball lands; overflow is
     /// the ejector's business).
+    ///
+    /// ⭐ It walks the TICK-TOP BALL CHAIN (`dword_AE408 + 36466` =
+    /// `var_u32_36462[1]`, the same roster the rival's ball pick reads
+    /// at :18878), NOT the pool, and it returns on the FIRST match —
+    /// so WHICH ball a castle drinks is decided by chain order, and a
+    /// ball minted mid-tick is invisible until the next rebuild. The
+    /// pool scan this replaced picked by SLOT INDEX and drank the
+    /// wrong ball whenever two owned balls straddled the tower:
+    /// mc1l5 t=2499, castle 312 takes ball 283's 140 in retail and
+    /// ball 295's 2250 in the port (20400 vs 22510).
+    ///
+    /// ⚠ The predicate is `model65 == 39 && +144 == castle +24 &&
+    /// overlap` and NOTHING else — no class test and no `0x400` test
+    /// ("a soft kill is not a free"): the chain's own membership is
+    /// the filter, exactly as in the balloon dispatcher above.
     fn castle_absorb(&mut self, i: usize) {
         if self.ent[i].f140 >= self.ent[i].f136 {
             return;
         }
         let own = self.ent[i].id24;
-        for j in 1..self.ent.len() {
-            if self.ent[j].class64 == 10
-                && self.ent[j].model65 == 39
-                && self.ent[j].flags & 0x400 == 0
-                && self.ent[j].f144 == own
-                && self.ent_overlap(i, j)
-            {
+        for c in 0..self.ball_chain.visible_len() {
+            let j = self.ball_chain.list[c] as usize;
+            if self.ent[j].model65 == 39 && self.ent[j].f144 == own && self.ent_overlap(i, j) {
                 self.ent[i].f140 += self.ent[j].f140;
                 self.ent[j].flags |= 0x400;
                 // :56030-42 — retail returns after the FIRST absorbed
@@ -4358,18 +4432,43 @@ impl Gen {
         // pass's full heal precedes the damage: a balloon parked in
         // its castle ring is authentically near-invulnerable to chip
         // damage; they die in flight, or to a single lethal burst).
+        // ⭐ THE BALLOON HAS NO SELF-KILL. `sub_481D0` returns 2 and
+        // the walker (:52405) casts the handler to `void(*)(Ent*)` and
+        // DISCARDS the return — unlike the castle's twin `sub_47EC0`,
+        // whose 2 is consumed at :56003 as the `+70 = 6` park. A dead
+        // balloon is reaped by its own castle's FLEET DISPATCHER
+        // (`sub_47400` :56354-58: drop the cargo, soft-kill, clear the
+        // register slot), which runs only on the castle's EVEN `+63`
+        // pass (:56016) — so the corpse lingers one or TWO ticks
+        // depending on that parity, and the port must not shortcut it.
+        // mc1l5 slot 325 measures the whole sequence: lethal mail at
+        // t=492 (life 1600 → −1900) with flags still 0xc while castle
+        // 301 sits on the odd `+63 = 21`, then the reap at t=493 —
+        // flags 0x40c, `+144` 650 → 0, and the (10,39) cargo ball at
+        // slot 233 carrying the balloon's own `+140` of 1024 at its
+        // PRE-move t=492 axis. Killing it here spawned that ball a
+        // tick early and burned the balloon's LCG draw with it.
+        if self.ent[i].act_life < 0 {
+            return; // :56820-21 — a dead balloon never re-consumes
+        }
         if self.ent[i].mail[0].1 != 0 {
-            let amt = self.ent[i].mail[0].0;
-            self.ent[i].mail[0].1 = 0;
+            let (amt, src) = self.ent[i].mail[0];
             self.ent[i].act_life -= amt as i32;
-            // Balloon-under-attack flash (Type_160+393 = 4, :56826).
+            // Balloon-under-attack flash (Type_160+393 = 4, :56826) —
+            // ahead of the lethal test, so the killing blow flashes too.
             if self.ent[i].id24 == crate::mc1::mobs::PLAYER_TARGET {
                 self.balloon_alert = 4;
             }
-        }
-        if self.ent[i].act_life < 0 {
-            self.corpse_drop(i);
-            self.ent[i].flags |= 0x400;
+            if self.ent[i].act_life < 0 {
+                // :56829 — stamp the killer and leave. ⚠ Unlike the
+                // castle twin (:56696) this arm clears NEITHER `+94`
+                // nor `+90`: the record shows the letter (3500, 289)
+                // still standing at t=492 AND t=493, which is exactly
+                // what the early-out above then refuses to re-eat.
+                self.ent[i].f38 = src;
+                return;
+            }
+            self.ent[i].mail[0].1 = 0; // :56833 — the SURVIVE path only
         }
     }
 
@@ -4463,12 +4562,28 @@ impl Gen {
     /// it; positive life just resets to full.
     const CASTLE_HP: [u32; 8] = [40000, 20000, 40000, 40000, 60000, 60000, 80000, 80000];
 
-    /// sub_46F10 (:56043): the class-3 m2 CASTLE state machine
-    /// (sub-state f59 = the original's +48). Remaining housekeeping:
-    /// the overflow ejector, downgrade/respawn. The entity z (+76)
-    /// refreshes to live ground every tick (idle :56014 + wait
-    /// cases 1/4/6 :56073-78) — the flag rides the painted tower;
-    /// the build-site datum lives in f28 (+154).
+    /// The class-3 m2 CASTLE. Retail dispatches it through THREE
+    /// separate handlers keyed on the job byte `+70` — the rows at
+    /// :4673-75 are `{…, 4, sub_46DB0}`, `{…, 5, sub_46F10}`,
+    /// `{…, 6, sub_470E0}` — so `+70` is the MACRO state:
+    ///
+    ///   4 = SETTLED   (sub_46DB0 :55978) — the only damage processor
+    ///   5 = TRANSFORM (sub_46F10 :56043) — sub-state in `+48`
+    ///   6 = LEVELER   (sub_470E0 :56138) — the deferred downgrade
+    ///
+    /// `tick70` carries `+70` verbatim and `f59` carries the transform
+    /// sub-state `+48` (the port has no `+48` lane; `+59` is dead for
+    /// castles). ⚠ The two were long FUSED into `f59` alone, with
+    /// `f59 == 4` standing in for settled — which parked every port
+    /// castle at `tick70 = 5` forever and made the rival's upgrade
+    /// predicate (`castle.tick70 == 4`, mirroring :18428) unreachable
+    /// in every free run.
+    ///
+    /// Remaining housekeeping: the overflow ejector, downgrade/
+    /// respawn. The entity z (+76) refreshes to live ground on the
+    /// settled tick (:55997/:56014) and the pure waits (:56073-78) —
+    /// the flag rides the painted tower; the build-site datum lives
+    /// in f28 (+154).
     pub(crate) fn castle_tick(&mut self, i: usize, _patches: crate::patches::WorldPatches) {
         // ACTION 6, the LEVELER (sub_470E0 :56138). Lethal damage does
         // NOT downgrade on the tick it lands: `sub_47EC0` returning 2
@@ -4489,11 +4604,20 @@ impl Gen {
             self.castle_downgrade(i);
             return;
         }
-        // The ground refresh belongs to the established tick and the
-        // pure waits ONLY (:56013 + cases 1/4/6 :56073-78) — the
-        // action cases keep the stale z: the level-up commit tick
-        // still shows the ctor's raw-point ground (mc1l0 t=563:
-        // z 797 held while the corner reads 864).
+        // ⭐ SETTLED — `+70 = 4`, its OWN handler (sub_46DB0 :55978),
+        // not a case of the transform machine.
+        if self.ent[i].tick70 == 4 {
+            self.castle_settled_tick(i);
+            return;
+        }
+        // `+70 = 5`: the transform machine (sub_46F10 :56043), keyed
+        // on the sub-state. The ground refresh belongs to the pure
+        // waits ONLY (cases 1/4/6, :56073-78) — the action cases keep
+        // the stale z: the level-up commit tick still shows the ctor's
+        // raw-point ground (mc1l0 t=563: z 797 held while the corner
+        // reads 864). Retail's waits 1 and 4 are the same pure wait
+        // (the level-up painter's and the repaint painter's) and fold
+        // onto our 1.
         if matches!(self.ent[i].f59, 1 | 4 | 6) {
             let (x, y) = (self.ent[i].x, self.ent[i].y);
             self.ent[i].z = self.ground_z(x, y) as i16;
@@ -4605,8 +4729,15 @@ impl Gen {
                     self.ent[i].f59 = 6; // authentic wait state (:56132)
                 }
             }
-            // Leveler done → established (case 2 → sub_46DB0).
-            2 => self.ent[i].f59 = 4,
+            // Leveler done → SETTLED (case 2 :56078-81): the macro
+            // state hands back to `+70 = 4` and the sub-state re-arms
+            // to 0. The `sub_46D20(a1, 0)` between them is the
+            // owner's Create-Castle charge-pin RELEASE, censused by
+            // the caller in `World::step`.
+            2 => {
+                self.ent[i].tick70 = 4;
+                self.ent[i].f59 = 0;
+            }
             // Blast-shake expiry → the damage REPAINT (sub_47020
             // :56100-15): a painter at the CURRENT level with the
             // kill bit CLEAR — it re-stamps the tower and kills
@@ -4630,129 +4761,147 @@ impl Gen {
                     self.ent[i].f59 = 1; // wait for the repaint painter
                 }
             }
-            // Established (sub_46DB0 :55978): the blast-shake
-            // countdown FREEZES everything else while it runs
-            // (:55981-93 — the mailbox accrues, processing waits),
-            // then the ch0 damage intake (sub_47EC0 :56678), the ch5
-            // upgrade intake (:56690-95 — sender must be the owner,
-            // max level 7), and the every-other-tick block
-            // (:56016-37): overflow ejector, balloons, absorption.
-            4 => {
-                // The blast shake (:55983-99) is CHECK-then-decrement:
-                // the ==1 tick transitions to the repaint (f50 zeroed
-                // WITHOUT decrementing — the boundary shows 1 for a
-                // full tick), a >1 tick only counts down (that arm is
-                // the one the wrapper's pin census tags, pre50 >= 2).
-                // Decrement-first fired the repaint one boundary early
-                // — mc1l0 t=1294 vs 1295, the free-run entity-set
-                // fork's extra (10,42) painter.
-                if self.ent[i].f50 > 0 {
-                    if self.ent[i].f50 == 1 {
-                        self.ent[i].f50 = 0;
-                        self.ent[i].f59 = 3;
-                    } else {
-                        self.ent[i].f50 -= 1;
-                    }
-                    return;
-                }
-                // sub_47EC0's first line (:56683): already below
-                // zero → the leveler. This is also the demolish path
-                // — Shift+L writes life = −1 with no mail at all
-                // (:55846-50). Both lethal arms return 2 and :56003
-                // turns a 2 into `+70 = 6` — but sub_46DB0 does NOT
-                // return there: the owner echo and the whole
-                // f63-even block below still run on the death-notice
-                // tick (mc1l0 t=2310: the self-destructing castle at
-                // life −1 SPAWNS balloon 484 through the dispatcher,
-                // and the next tick's level-0 cull demolishes it —
-                // the port's early return dropped the spawn). The
-                // lethal arms skip only sub_47EC0's own tail (ch5
-                // stays in the box) and the 0x40 else-if.
-                let mut lethal = self.ent[i].act_life < 0;
-                if !lethal && self.ent[i].mail[0].1 != 0 {
-                    // sub_47EC0: HP -= pending ch0; lethal → the
-                    // one-level downgrade, deferred through action 6,
-                    // with the killer stamped into +38 (:56695-97).
-                    let (amt, src) = self.ent[i].mail[0];
-                    self.ent[i].mail[0].1 = 0;
-                    self.ent[i].act_life -= amt as i32;
-                    if self.ent[i].act_life < 0 {
-                        // The lethal arm clears only the SOURCE
-                        // (:56695-97) — the amount stands as residue,
-                        // and sub_12B50 single hits ACCUMULATE onto
-                        // it once the source is clear.
-                        self.ent[i].f38 = src;
-                        lethal = true;
-                    } else {
-                        self.ent[i].mail[0].0 = 0; // :56703
-                        if self.ent[i].id24 == crate::mc1::mobs::PLAYER_TARGET {
-                            // "Castle under attack" flash (Type_160+391=4).
-                            self.castle_alert = 4;
-                        }
-                    }
-                }
-                if lethal {
-                    self.ent[i].tick70 = 6;
-                } else {
-                    if self.ent[i].mail[5].1 != 0 {
-                        let sender = self.ent[i].mail[5].1;
-                        // The intake reads and clears ONLY the ch5
-                        // source word (:56707-11) — the amount is
-                        // never read and never cleared, so the
-                        // token's `10` stands as permanent residue
-                        // (mc1l0 t=1188+, castle 663 ch5 (10,0)).
-                        self.ent[i].mail[5].1 = 0;
-                        if sender == self.ent[i].id24 && self.ent[i].f26 < 7 {
-                            // sub_47EC0 :56707-11 — the inbox arms the
-                            // upgrade-request BIT (+16 |= 0x40), and the
-                            // settled tick's own check below launches it.
-                            self.ent[i].flags |= 0x40;
-                        }
-                    }
-                    // sub_46DB0 :56007-11 — the request bit sends the
-                    // settled castle into the level-up; the commit
-                    // clears it (:56475). Checked as a FLAG (not a
-                    // direct state write off the mail) so an imported
-                    // castle captured between request and commit
-                    // resumes correctly.
-                    if self.ent[i].flags & 0x40 != 0 {
-                        self.ent[i].f59 = 0;
-                    }
-                }
-                // Every settled tick echoes the owner into +144
-                // (sub_46DB0 :52080 `+144 = +24`) — the lane ball
-                // claims and the balloon fleet join on.
-                self.ent[i].f144 = self.ent[i].id24;
-                if self.ent[i].f63 & 1 == 0 {
-                    // The overflow ejector (sub_47130, called :56016):
-                    // banked houses + stored over capacity spill out
-                    // as owner-tagged wild-flying balls.
-                    self.castle_eject(i);
-                    // sub_37150 re-applied with the ejector every
-                    // other tick (sub_46DB0 :52083, level VERBATIM —
-                    // row 0 included): the extents + the +78=0xE000
-                    // z-center marker self-heal to the current level,
-                    // which keeps imported or stale castles
-                    // collision-correct.
-                    {
-                        let lvl = self.ent[i].f26;
-                        let def = self.assets.build_tab[lvl as usize % self.assets.build_tab.len()];
-                        let e = &mut self.ent[i];
-                        e.f78 = 0xE000;
-                        e.f80 = (((def.w as u16) << 8).wrapping_add(1280)) >> 1;
-                        e.f82 = (((def.h as u16) << 8).wrapping_add(1280)) >> 1;
-                        e.f84 = 0x4000;
-                    }
-                    self.castle_balloons(i);
-                    // Absorption sits inside the every-other-tick
-                    // block in the original too (:57023-32).
-                    self.castle_absorb(i);
-                }
-            }
             // 1 = waiting for a painter, 6 = waiting for the
             // leveler (the original's pure waits, :56073-78): the
             // mailbox and any pending lethal accrue untouched.
             _ => {}
+        }
+    }
+
+    /// SETTLED, `+70 = 4` (sub_46DB0 :55978) — the castle's own
+    /// handler, and the ONLY damage processor: the blast-shake
+    /// countdown FREEZES everything else while it runs (:55981-93 —
+    /// the mailbox accrues, processing waits), then the ch0 damage
+    /// intake (sub_47EC0 :56678), the ch5 upgrade intake (:56690-95 —
+    /// sender must be the owner, max level 7), and the every-other-
+    /// tick block (:56016-37): overflow ejector, balloons, absorption.
+    ///
+    /// Every exit from here is a `+70` write: the shake expiry and the
+    /// upgrade request hand off to the transform machine (`= 5`), a
+    /// lethal hands off to the leveler (`= 6`).
+    fn castle_settled_tick(&mut self, i: usize) {
+        {
+            // The blast shake (:55983-99) is CHECK-then-decrement:
+            // the ==1 tick transitions to the repaint (f50 zeroed
+            // WITHOUT decrementing — the boundary shows 1 for a
+            // full tick), a >1 tick only counts down (that arm is
+            // the one the wrapper's pin census tags, pre50 >= 2).
+            // Decrement-first fired the repaint one boundary early
+            // — mc1l0 t=1294 vs 1295, the free-run entity-set
+            // fork's extra (10,42) painter.
+            if self.ent[i].f50 > 0 {
+                if self.ent[i].f50 == 1 {
+                    // :55987-89 — `+70 = 5`, `+48 = 3`, `+50 = 0`,
+                    // and NO ground refresh on this tick (the else
+                    // arm below is the only one carrying :55997).
+                    self.ent[i].f50 = 0;
+                    self.ent[i].tick70 = 5;
+                    self.ent[i].f59 = 3;
+                } else {
+                    self.ent[i].f50 -= 1;
+                    let (x, y) = (self.ent[i].x, self.ent[i].y);
+                    self.ent[i].z = self.ground_z(x, y) as i16;
+                }
+                return;
+            }
+            {
+                let (x, y) = (self.ent[i].x, self.ent[i].y);
+                self.ent[i].z = self.ground_z(x, y) as i16; // :56014
+            }
+            // sub_47EC0's first line (:56683): already below
+            // zero → the leveler. This is also the demolish path
+            // — Shift+L writes life = −1 with no mail at all
+            // (:55846-50). Both lethal arms return 2 and :56003
+            // turns a 2 into `+70 = 6` — but sub_46DB0 does NOT
+            // return there: the owner echo and the whole
+            // f63-even block below still run on the death-notice
+            // tick (mc1l0 t=2310: the self-destructing castle at
+            // life −1 SPAWNS balloon 484 through the dispatcher,
+            // and the next tick's level-0 cull demolishes it —
+            // the port's early return dropped the spawn). The
+            // lethal arms skip only sub_47EC0's own tail (ch5
+            // stays in the box) and the 0x40 else-if.
+            let mut lethal = self.ent[i].act_life < 0;
+            if !lethal && self.ent[i].mail[0].1 != 0 {
+                // sub_47EC0: HP -= pending ch0; lethal → the
+                // one-level downgrade, deferred through action 6,
+                // with the killer stamped into +38 (:56695-97).
+                let (amt, src) = self.ent[i].mail[0];
+                self.ent[i].mail[0].1 = 0;
+                self.ent[i].act_life -= amt as i32;
+                if self.ent[i].act_life < 0 {
+                    // The lethal arm clears only the SOURCE
+                    // (:56695-97) — the amount stands as residue,
+                    // and sub_12B50 single hits ACCUMULATE onto
+                    // it once the source is clear.
+                    self.ent[i].f38 = src;
+                    lethal = true;
+                } else {
+                    self.ent[i].mail[0].0 = 0; // :56703
+                    if self.ent[i].id24 == crate::mc1::mobs::PLAYER_TARGET {
+                        // "Castle under attack" flash (Type_160+391=4).
+                        self.castle_alert = 4;
+                    }
+                }
+            }
+            if lethal {
+                self.ent[i].tick70 = 6;
+            } else {
+                if self.ent[i].mail[5].1 != 0 {
+                    let sender = self.ent[i].mail[5].1;
+                    // The intake reads and clears ONLY the ch5
+                    // source word (:56707-11) — the amount is
+                    // never read and never cleared, so the
+                    // token's `10` stands as permanent residue
+                    // (mc1l0 t=1188+, castle 663 ch5 (10,0)).
+                    self.ent[i].mail[5].1 = 0;
+                    if sender == self.ent[i].id24 && self.ent[i].f26 < 7 {
+                        // sub_47EC0 :56707-11 — the inbox arms the
+                        // upgrade-request BIT (+16 |= 0x40), and the
+                        // settled tick's own check below launches it.
+                        self.ent[i].flags |= 0x40;
+                    }
+                }
+                // sub_46DB0 :56007-11 — the request bit sends the
+                // settled castle into the level-up; the commit
+                // clears it (:56475). Checked as a FLAG (not a
+                // direct state write off the mail) so an imported
+                // castle captured between request and commit
+                // resumes correctly.
+                if self.ent[i].flags & 0x40 != 0 {
+                    self.ent[i].f59 = 0;
+                    self.ent[i].tick70 = 5;
+                }
+            }
+            // Every settled tick echoes the owner into +144
+            // (sub_46DB0 :52080 `+144 = +24`) — the lane ball
+            // claims and the balloon fleet join on.
+            self.ent[i].f144 = self.ent[i].id24;
+            if self.ent[i].f63 & 1 == 0 {
+                // The overflow ejector (sub_47130, called :56016):
+                // banked houses + stored over capacity spill out
+                // as owner-tagged wild-flying balls.
+                self.castle_eject(i);
+                // sub_37150 re-applied with the ejector every
+                // other tick (sub_46DB0 :52083, level VERBATIM —
+                // row 0 included): the extents + the +78=0xE000
+                // z-center marker self-heal to the current level,
+                // which keeps imported or stale castles
+                // collision-correct.
+                {
+                    let lvl = self.ent[i].f26;
+                    let def = self.assets.build_tab[lvl as usize % self.assets.build_tab.len()];
+                    let e = &mut self.ent[i];
+                    e.f78 = 0xE000;
+                    e.f80 = (((def.w as u16) << 8).wrapping_add(1280)) >> 1;
+                    e.f82 = (((def.h as u16) << 8).wrapping_add(1280)) >> 1;
+                    e.f84 = 0x4000;
+                }
+                self.castle_balloons(i);
+                // Absorption sits inside the every-other-tick
+                // block in the original too (:57023-32).
+                self.castle_absorb(i);
+            }
         }
     }
 
@@ -4889,11 +5038,13 @@ impl Gen {
         self.castle_balloons(i);
         if lvl > 0 {
             // 5 ticks, then the repaint re-stamps the smaller castle
-            // (:56158 +48=0/+50=5 → the state-4 countdown →
-            // sub-state 3). A dead castle skips the timer — the
-            // tick-top reap collects it first.
+            // (:56158-59 `+48 = 0` / `+50 = 5` → the settled
+            // countdown → back to `+70 = 5` at sub-state 3). The
+            // `+70 = 4` handback itself is :56145, already stamped by
+            // the caller before the teardown ran. A dead castle skips
+            // the timer — the tick-top reap collects it first.
             self.ent[i].f50 = 5;
-            self.ent[i].f59 = 4;
+            self.ent[i].f59 = 0;
         }
     }
 
@@ -5192,12 +5343,18 @@ impl Gen {
             self.ent[i].f40 = src;
             if self.ent[i].f26 > 2 {
                 self.ent[i].f26 -= 1;
-                let (x, y, f80) = {
+                let (x, y, z, f80) = {
                     let e = &self.ent[i];
-                    (e.x, e.y, e.f80)
+                    (e.x, e.y, e.z, e.f80)
                 };
                 let sx = x.wrapping_add(f80);
-                let z = self.ground_z(sx, y) as i16;
+                // The spawn axis is the HOUSE's whole position
+                // (:30791-92 copies pos, then only x += f80) — z is
+                // the house's own, NOT a ground probe. The newborn's
+                // birth-frame `creature_move` settles it (−128/tick):
+                // mc1l5 t=4458, house 19 at z=2560 pops slot 808 and
+                // retail's boundary reads 2432 where the port's
+                // ground-derived spawn read 1536.
                 self.spawn_creature(4, sx, y, z);
                 // The wanted arm rides INSIDE the occupied-house
                 // branch (sub_28DC0 :30790-97) and only marks a
@@ -5248,11 +5405,13 @@ impl Gen {
             4..=8 => 13,
             _ => 12,
         };
-        let (x, y) = {
+        let (x, y, z) = {
             let e = &self.ent[i];
-            (e.x.wrapping_add(e.f80), e.y)
+            (e.x.wrapping_add(e.f80), e.y, e.z)
         };
-        let z = self.ground_z(x, y) as i16;
+        // Same axis law as the defender pop-out (:30825-27 copies the
+        // house's position, x += f80): the emit spawns at the HOUSE's
+        // z, and the newborn's own first move settles it.
         self.spawn_creature(model, x, y, z);
     }
 
@@ -6097,6 +6256,7 @@ impl Gen {
             mc1_balloon_reg,
             // Rebuilt at every tick top — never saved.
             ball_chain: _,
+            wiz_chain: _,
             mob_chains: _,
         } = self;
         w.put(t);
@@ -6549,7 +6709,8 @@ mod tests {
             e.x = 0x8000;
             e.y = 0x8000;
             e.f26 = 0; // fresh: awaiting the first level-up
-            e.f59 = 0;
+            e.tick70 = 5; // the ctor's TRANSFORM state…
+            e.f59 = 0; // …at sub-state 0
         }
         // Drain the pool, keeping three slots to hand back one at a
         // time (one per transform stage under test).
@@ -6616,7 +6777,7 @@ mod tests {
             e.class64 = 3;
             e.model65 = 2;
             e.f26 = 1;
-            e.f59 = 4;
+            e.tick70 = 4; // SETTLED — the shake runs from sub_46DB0
             e.f50 = 5;
             e.x = 0x8000;
             e.y = 0x8000;
@@ -6624,14 +6785,317 @@ mod tests {
         for want in [4, 3, 2, 1] {
             g.castle_tick(i, crate::patches::WorldPatches::RETAIL);
             assert_eq!(g.ent[i].f50, want, "a countdown tick only decrements");
-            assert_eq!(g.ent[i].f59, 4, "no transition above 1");
+            assert_eq!(g.ent[i].tick70, 4, "no transition above 1");
         }
         g.castle_tick(i, crate::patches::WorldPatches::RETAIL);
         assert_eq!(g.ent[i].f50, 0, "the ==1 tick zeroes without decrementing");
         assert_eq!(
-            g.ent[i].f59, 3,
+            (g.ent[i].tick70, g.ent[i].f59),
+            (5, 3),
             "the repaint fires only after the f50=1 boundary was seen"
         );
+    }
+
+    /// ⭐ **A DWELLING WEARS THE CASTLE'S Z-CENTER MARKER, SPRITE ROW
+    /// 177, AND AN OCCUPANCY CAP OF AREA/4.** `sub_3B690` (:47501)
+    /// ends on `sub_36FA0_37360(event, 177)` and `sub_36DF0_371B0`
+    /// (:43705) hands the build row to `sub_37150_37510` (:43798),
+    /// which writes ALL FOUR extent words — `+78 = 0xE000` included.
+    ///
+    /// All three lanes are UNGRADED, so the corpus is the authority
+    /// and it is unanimous: every authored (10,45) in mc1l2 and mc1l3
+    /// reads `+78 = 57344`, `+86 = 177`, and `+128` = build-row
+    /// `(w * h) >> 2` — rows 25 (9x9 → 20), 26 (9x11 → 24), 53 (8x8 →
+    /// 16), 30 (13x15 → 48). The `>> 4` in the `sub_36DF0_371B0` lift
+    /// misses every one of them by exactly 4x.
+    ///
+    /// The consequence is a PITCH-CONE one: `+78` is the aim lift
+    /// (`sub_524C0` :52509 brackets the candidate in place), so a
+    /// house minted at +78 = 0 offers its ROOF as the aim point where
+    /// retail offers a point 8192 below its footing. mc1l5's free-run
+    /// horizon moves 4226 → 4441 on this and mc1l3's 710 → 1858.
+    #[test]
+    fn a_dwelling_carries_the_z_center_marker_sprite_and_area_cap() {
+        let mut g = Gen::new(
+            flat_land(8),
+            synthetic_assets(),
+            1,
+            ChassisParams::MC1,
+            VerbSet::MC1,
+        );
+        // The synthetic build table is uniformly 4x4.
+        let (bw, bh) = {
+            let d = g.assets.build_tab[3];
+            (d.w as u16, d.h as u16)
+        };
+        let i = g
+            .spawn_creator(45, 0x8000, 0x8000, 0)
+            .expect("the m45 ctor");
+        assert_eq!(
+            (g.ent[i].type86, g.ent[i].frames89 > 0),
+            (177, true),
+            "the ctor's sub_36FA0(event, 177) sprite stamp"
+        );
+        g.building_fixup(i, 3);
+        let e = &g.ent[i];
+        assert_eq!(e.f78, 0xE000, "sub_37150's z-center marker");
+        assert_eq!(
+            e.f128,
+            ((bw * bh) >> 2) as i16,
+            "the occupancy cap is the footprint area over FOUR"
+        );
+        assert_eq!(
+            (e.f80, e.f82, e.f84),
+            (
+                ((bw << 8).wrapping_add(1280)) >> 1,
+                ((bh << 8).wrapping_add(1280)) >> 1,
+                0x4000
+            ),
+            "the build-row extents overwrite the sprite row's"
+        );
+        assert_eq!(e.type86, 177, "the fixup leaves the art alone");
+        // The aim point a projectile's pitch cone sees is the FOOTING,
+        // 8192 below the record z — not the roof.
+        assert_eq!(e.aim_z(), e.z.wrapping_add(-8192i16), "aim lift");
+    }
+
+    /// ⭐ **THE CASTLE'S MACRO STATE LIVES IN THE JOB BYTE `+70`.**
+    /// Retail gives the (3,2) castle THREE dispatch rows (:4673-75) —
+    /// `+70 = 4` → sub_46DB0 (settled), `5` → sub_46F10 (the transform
+    /// machine, sub-state in `+48`), `6` → sub_470E0 (the leveler) —
+    /// so a settled castle reads 4 and only an ACTION reads 5. The
+    /// port long fused both levels into `f59` alone, which parked
+    /// every castle at `tick70 = 5` for the whole level and made the
+    /// rival's own upgrade predicate (`castle.tick70 == 4`, faithfully
+    /// mirroring :18428) unreachable in every free run.
+    ///
+    /// The lane is UNGRADED by the obs schema — the mc1l5 raw shadow
+    /// carried 20,165 `(3,2) f70` rows and no fixture could hold it —
+    /// so the round trip is pinned here instead.
+    #[test]
+    fn the_castle_macro_state_lives_in_the_job_byte() {
+        let mut g = Gen::new(
+            flat_land(8),
+            synthetic_assets(),
+            1,
+            ChassisParams::MC1,
+            VerbSet::MC1,
+        );
+        let i = g.new_event().unwrap();
+        {
+            let e = &mut g.ent[i];
+            e.class64 = 3;
+            e.model65 = 2;
+            e.id24 = 630;
+            e.f26 = 1;
+            e.f63 = 1; // odd → skip the ejector/fleet/absorb block
+            e.act_life = 20_000;
+            e.tick70 = 4; // SETTLED
+            e.x = 0x8000;
+            e.y = 0x8000;
+        }
+        g.castle_tick(i, crate::patches::WorldPatches::RETAIL);
+        assert_eq!(g.ent[i].tick70, 4, "an idle settled castle stays settled");
+
+        // The ch5 upgrade intake arms the request bit, and the settled
+        // tick launches the transform (:56007-11 `+48 = 0`, `+70 = 5`).
+        g.ent[i].mail[5] = (10, 630);
+        g.castle_tick(i, crate::patches::WorldPatches::RETAIL);
+        assert_eq!(
+            (g.ent[i].tick70, g.ent[i].f59),
+            (5, 0),
+            "the upgrade request hands the castle to the transform machine"
+        );
+
+        // Case 0 commits and waits; the sub-state moves, the macro
+        // state does NOT (sub_47960 :56469-70 writes both as 5/4).
+        g.castle_tick(i, crate::patches::WorldPatches::RETAIL);
+        assert_eq!(
+            (g.ent[i].tick70, g.ent[i].f59, g.ent[i].f26),
+            (5, 1, 2),
+            "the commit levels up and parks in the painter wait"
+        );
+
+        // Case 2 is the ONLY handback to settled (:56078-81).
+        g.ent[i].f59 = 2;
+        g.castle_tick(i, crate::patches::WorldPatches::RETAIL);
+        assert_eq!(
+            (g.ent[i].tick70, g.ent[i].f59),
+            (4, 0),
+            "the leveler's finish returns the castle to +70 = 4"
+        );
+
+        // A lethal from the settled tick parks the leveler, and the
+        // leveler hands +70 back to 4 on its next dispatch.
+        g.ent[i].act_life = -1;
+        g.castle_tick(i, crate::patches::WorldPatches::RETAIL);
+        assert_eq!(g.ent[i].tick70, 6, "the lethal notice parks the leveler");
+        g.castle_tick(i, crate::patches::WorldPatches::RETAIL);
+        assert_eq!(
+            (g.ent[i].tick70, g.ent[i].f59, g.ent[i].f50),
+            (4, 0, 5),
+            "the leveler returns to settled with the 5-tick repaint timer"
+        );
+    }
+
+    /// The ch0 broadcast's CASTLE PRE-PASS is the third walker of
+    /// bucket[0] (:17322-33), and it inherits the roster's law: a
+    /// castle already dead at the tick top takes NO area damage, and
+    /// one that dies mid-tick keeps taking it until the next rebuild.
+    /// The port's pool sweep had no life test at all and delivered to
+    /// both — 45 `(3,2) mail0.amt` raw-shadow rows inside mc1l4's
+    /// bit-exact window (t=1312 slot 436: retail 500, port 1050 — one
+    /// extra broadcast accumulated into a box retail left for the
+    /// spreader alone), and the castle that reads it dies 150 early.
+    ///
+    /// The pair channel cannot see this: the importer restores both
+    /// the mailbox and the roster every tick, so `verify-deltas` is
+    /// CLEAN at the pre-fix rig. Pinned here instead (the free run
+    /// carries it: mc1l4's horizon 1356 → 2722 boundaries).
+    #[test]
+    fn the_ch0_castle_pass_walks_bucket_zero() {
+        let mut g = mob_gen();
+        // A ground fire (10,0) sitting on top of a castle.
+        let castle = g.spawn_castle(0x4000, 0x4000).unwrap();
+        g.ent[castle].id24 = 7; // someone else's, so the +24 gate opens
+        let (cx, cy, cz) = (g.ent[castle].x, g.ent[castle].y, g.ent[castle].z);
+        let fire = g.spawn_effect(0, cx, cy, cz).unwrap();
+        let ctx = ctx_at(0x7F00, 0x7F00, 0);
+
+        // Dead at the TICK TOP → out of the roster → no ch0 at all.
+        g.ent[castle].act_life = -1;
+        g.rebuild_wiz_chain();
+        g.ent[castle].mail[0] = (0, 0);
+        g.area_write(fire, 0, 400, &ctx, false, false);
+        assert_eq!(
+            g.ent[castle].mail[0],
+            (0, 0),
+            "a castle dead at the tick top is not in bucket[0]"
+        );
+
+        // Alive at the tick top and killed MID-tick → still reachable,
+        // which is the same soft-kill law the rest of the roster wears.
+        g.ent[castle].act_life = 20_000;
+        g.rebuild_wiz_chain();
+        g.ent[castle].act_life = -1;
+        g.area_write(fire, 0, 400, &ctx, false, false);
+        assert_eq!(
+            g.ent[castle].mail[0].0, 400,
+            "the tick-top roster still delivers to it"
+        );
+    }
+
+    /// ⭐ The MC1 ball-merge owner contest (`sub_277D0` :29755-73)
+    /// weighs the two owners' `+136` — their mana CEILINGS — and the
+    /// human's carpet is out of pool, so its ceiling has to arrive
+    /// through `MobCtx`. With both sides reading 0 (the earlier
+    /// approximation) every contest fell to retail's else-arm and the
+    /// ABSORBED side won unconditionally. mc1l4 t=2723: ball 432's
+    /// `+144` lands on the human in retail and on Vodor in the port,
+    /// and the 9,500 of ceiling it carries moves with it. Free-run
+    /// horizon 2722 → 5375 boundaries; the pair channel is blind
+    /// (the importer restores `+144` every tick).
+    #[test]
+    fn the_ball_merge_contest_weighs_the_owners_mana_ceilings() {
+        use crate::mc1::mobs::PLAYER_TARGET;
+        // Returns (the survivor's resolved owner, the rival's tag).
+        let run = |human_ceiling: u32| -> (u16, u16) {
+            let mut g = mob_gen();
+            let a = g.spawn_mana_ball(0x4000, 0x4000, 0).unwrap();
+            let b = g.spawn_mana_ball(0x4000, 0x4000, 0).unwrap();
+            // A rival carpet whose own ceiling is fixed at 5,000.
+            let rival = g.spawn_class3(1, 0x2000, 0x2000, 0).unwrap();
+            g.ent[rival].f136 = 5_000;
+            g.ent[a].f144 = PLAYER_TARGET; // survivor: the human's
+            g.ent[b].f144 = rival as u16; // absorbed: the rival's
+            let mut ctx = ctx_at(0x7F00, 0x7F00, 0);
+            ctx.pmana_max = human_ceiling;
+            g.mc1_ball_owner_contest(a, b, &ctx);
+            (g.ent[a].f144, rival as u16)
+        };
+        let (won, _) = run(9_000);
+        assert_eq!(
+            won, PLAYER_TARGET,
+            "a strictly larger ceiling keeps the survivor's owner"
+        );
+        let (won, rival) = run(1_000);
+        assert_eq!(
+            won, rival,
+            "a smaller one hands the ball to the absorbed side"
+        );
+        let (won, rival) = run(5_000);
+        assert_eq!(won, rival, "and the tie goes the same way (<=)");
+    }
+
+    /// ⚠ **THE CLASS-10 FLASH FAMILY IS NOT UNIFORM IN ITS ANIMATION
+    /// STEP.** Three of the four flashes open their live arm with
+    /// `sub_42510_42850` — `sub_25760` (:28437, the possess claim),
+    /// `sub_26360` (:28937, the mana steal) and `sub_263C0` (:28959,
+    /// the duel tether) — and the BOLT HIT FLASH `sub_262D0` does
+    /// NOT: :28908-19 is its whole live arm, the ch0 write, sound 24,
+    /// the one-tick life pin and the fired flag, with no call. A
+    /// 2026-07-21 audit batch that corrected the family's `+26` bump
+    /// and pre-decrement life test read the anim step as uniform too
+    /// and added it here; the raw shadow priced the slip at 2,092
+    /// `(10,23) frame88` rows on mc1l42, `retail 0 port 1` on every
+    /// hit flash in the take.
+    ///
+    /// `frame88` is an UNGRADED lane (the importer restores it every
+    /// pair) and mc1l5's goldens are blind to it — measured, by
+    /// stubbing this change out against the same tree — so the round
+    /// trip is pinned here, against a sibling that must still step.
+    #[test]
+    fn the_bolt_hit_flash_has_no_animation_step() {
+        let mut g = Gen::new(
+            flat_land(8),
+            synthetic_assets(),
+            1,
+            ChassisParams::MC1,
+            VerbSet::MC1,
+        );
+        // action 23 = the bolt hit flash, action 25 = the mana-steal
+        // flash: same skeleton, same ch-write shape, opposite verdict.
+        let mk = |g: &mut Gen, action: u8| {
+            let i = g.new_event().unwrap();
+            let e = &mut g.ent[i];
+            e.class64 = 10;
+            e.model65 = 23;
+            e.tick70 = action;
+            e.act_life = 4;
+            e.frames89 = 8; // room to step
+            e.frame88 = 0;
+            e.x = 0x8000;
+            e.y = 0x8000;
+            i
+        };
+        let hit = mk(&mut g, 23);
+        let steal = mk(&mut g, 25);
+        let ctx = ctx_at(0x8000, 0x8000, 0);
+
+        g.effect_tick(hit, &ctx);
+        g.effect_tick(steal, &ctx);
+        assert_eq!(
+            g.ent[hit].frame88, 0,
+            "sub_262D0 has no sub_42510 call — the hit flash never steps"
+        );
+        assert_eq!(
+            g.ent[steal].frame88, 1,
+            "sub_26360 opens its live arm with one — the sibling still steps"
+        );
+        // The rest of the hit flash's live arm is untouched: `+26`
+        // counts every tick (:28905) and the fired flag pins the life
+        // to 1 (:28915-17).
+        assert_eq!(
+            (g.ent[hit].f26, g.ent[hit].flags & 2, g.ent[hit].act_life),
+            (1, 2, 1),
+            "the ch0 write still fires and pins the life"
+        );
+
+        // And it stays put across the whole burn, not just tick one.
+        for _ in 0..4 {
+            g.effect_tick(hit, &ctx);
+        }
+        assert_eq!(g.ent[hit].frame88, 0, "still zero at the end of the burn");
     }
 
     /// The balloon claim ticket is a RAW slot index — a collected
@@ -6826,7 +7290,6 @@ mod tests {
             e.id24 = 630;
             e.f26 = 1; // level 1: quota (1, 0)
             e.f136 = 1_000_000;
-            e.f59 = 4;
             e.f63 = 2; // even → the dispatcher pass
             e.act_life = -1; // the Shift+L demolish stamp (:55846-50)
             e.x = 0x4000;
@@ -6858,6 +7321,7 @@ mod tests {
             pz,
             pyaw: 0,
             pmana: 1000,
+            pmana_max: 1000,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -7247,6 +7711,80 @@ mod tests {
     /// balloon alike. `filter_admits` tests the human as (3, 0), so
     /// the hardcoded pair let a castle-aimed bolt hit the wizard
     /// flying past it.
+    /// ⭐⭐ **BUCKET[0] IS A TICK-TOP SNAPSHOT, AND ITS WALKERS CARRY NO
+    /// LIFE TEST.** The case-3 arm of the tick-top sweep (:52253-62)
+    /// samples `actLife >= 0 && (+16 & 0x10) == 0` ONCE and links the
+    /// survivors into `var_u32_36462[0]`; the two consumers — the m9
+    /// mound's castle hunt (:23752, `+65 == 2 && +24 != own`) and the
+    /// shared creature Scan A (:21519-42, `(+16 & 0x20) == 0`) — walk
+    /// that list and test nothing else. So a class-3 body that takes
+    /// its fatal hit MID-tick is still every later walker's answer for
+    /// the rest of that tick, and gone from the next one.
+    ///
+    /// mc1l4 t=1224 is the corpus receipt: castle 71 dies earlier in
+    /// the tick and all four (5,9) mounds still write its bearing
+    /// (`+34` holds 1174/1102/1114/1137) where the port's live-pool
+    /// scan lost it and fell to the two-draw wander jitter. The take's
+    /// free-run horizon moves 1016 → 1223 boundaries on this alone.
+    /// The lane is invisible to `level_005`'s goldens (measured: they
+    /// do not move), so the round trip is pinned here.
+    #[test]
+    fn bucket_zero_is_a_tick_top_snapshot() {
+        let mut g = mob_gen();
+        let mound = g.spawn_creature(9, 0x4000, 0x4000, 0).unwrap();
+        // Far enough that the hunt's range test FAILS — the mound keeps
+        // re-bearing from its lurk instead of promoting to chase, which
+        // is the arm this test is about.
+        let castle = g.spawn_castle(0x6000, 0x4000).unwrap();
+        g.ent[castle].id24 = 7; // a rival's — the mound may hunt it
+        let away = ctx_at(0x7F00, 0x7F00, 0);
+        g.ent[mound].tick70 = 55;
+        g.ent[mound].f26 = 200;
+        g.ent[mound].f58 = 0; // asleep: no wizard scan, castle arm only
+        g.ent[mound].f63 = 0; // on the cadence
+
+        // The roster is built while the castle lives…
+        g.rebuild_wiz_chain();
+        assert!(
+            g.wiz_chain.list.contains(&(castle as u16)),
+            "a live castle joins bucket[0]"
+        );
+        // …and THEN it dies, mid-tick, exactly as retail's does.
+        g.ent[castle].act_life = -1;
+        let rand_before = g.ent[mound].rand;
+        g.creature_tick(mound, &away);
+        assert_eq!(
+            g.ent[mound].rand, rand_before,
+            "the cadence found the castle on the stale roster — no wander draw"
+        );
+        assert_eq!(
+            g.ent[mound].f34,
+            Gen::angle_between(
+                g.ent[mound].x,
+                g.ent[mound].y,
+                g.ent[castle].x,
+                g.ent[castle].y
+            ),
+            "and it re-bore on the dead castle"
+        );
+        assert_eq!(g.ent[mound].tick70, 55, "still lurking — out of range");
+
+        // Next tick's rebuild drops it, and only then does the mound
+        // fall through to the two-draw jitter.
+        g.rebuild_wiz_chain();
+        assert!(
+            !g.wiz_chain.list.contains(&(castle as u16)),
+            "the dead castle leaves bucket[0] at the NEXT rebuild"
+        );
+        g.ent[mound].f63 = 0;
+        let rand_before = g.ent[mound].rand;
+        g.creature_tick(mound, &away);
+        assert_ne!(
+            g.ent[mound].rand, rand_before,
+            "with the roster empty the wander else-arm draws twice"
+        );
+    }
+
     #[test]
     fn a_mounds_castle_bolt_carries_the_castles_filter_not_the_wild_card() {
         let mut g = mob_gen();
@@ -7261,6 +7799,8 @@ mod tests {
         g.ent[mound].f26 = 200;
         g.ent[mound].f58 = 16;
         g.ent[mound].f63 = 0;
+        // The castle hunt walks BUCKET[0], the tick-top class-3 roster.
+        g.rebuild_wiz_chain();
         g.creature_tick(mound, &away);
         assert_eq!(g.ent[mound].tick70, 56, "surfaced at the castle");
         assert_eq!(

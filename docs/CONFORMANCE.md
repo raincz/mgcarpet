@@ -350,11 +350,13 @@ its note claims.
 | `conformance/mc1l0.json` | mc1l0 — CERTIFIED bit-exact (0..7097) | 18 |
 | `conformance/mc1l1.json` | mc1l1 — CERTIFIED bit-exact (0..10709) | 10 |
 | `conformance/mc1l2.json` | mc1l2 — CERTIFIED bit-exact (0..10588) | 16 |
-| `conformance/mc1l5.json` | mc1l5 — hit-arm trailer receipt | 1 |
+| `conformance/mc1l3.json` | mc1l3 — the scratch-record chase bearing | 1 |
+| `conformance/mc1l4.json` | mc1l4 — the rival speed-token + ball chain | 2 |
+| `conformance/mc1l5.json` | mc1l5 — hit-arm, `+144` census, soft-kill ×2 | 5 |
 | `conformance/mc1l32.json` | mc1l32 + the retired bee-height cut | 21 |
 | `conformance/mc1l42.json` | mc1l42 — CERTIFIED bit-exact (0..30878) | 17 |
 
-83 fixtures, **0.3 s**. The three certified MC1 levels were
+90 fixtures, **0.3 s**. The three certified MC1 levels were
 mined in one pass (2026-08-17) by the reversion probe above; every
 fixture cut there is measured non-vacuous against its level's own
 pre-fix binary. ⚠ Their files are ~120-180 KB each rather than

@@ -85,6 +85,12 @@ pub(crate) struct MobCtx {
     /// The player's castable pool (+140) — the genie's mana hunt
     /// (:24523-46) takes the first wizard holding ANY mana.
     pub(crate) pmana: u32,
+    /// The human wizard's mana CEILING (+136). Retail's ball-merge
+    /// owner contest (`sub_277D0` :29755-73) reads the owner wizards'
+    /// `+136` off their pool records; ours is out of pool, so its
+    /// ceiling rides the ctx like `pmana` — a Gen field would drag the
+    /// snapshot codec and the state hash along for a per-tick echo.
+    pub(crate) pmana_max: u32,
     /// The human wizard is dead or death-falling (retail's leader
     /// death test `life_0x8 < 0` reads the player entity like any
     /// other; our player lives outside the pool, so followers get
@@ -989,16 +995,29 @@ impl Gen {
             }
         }
 
-        // Pool bodies: any class-3 except the out-of-pool human (model
-        // 0) — rival carpets (1), castles (2), mana balloons (3). Under
-        // `bodies_only` (the genie's +65<=1 gate) only the rival carpets
-        // qualify; castles and balloons are skipped.
-        for j in 1..self.ent.len() {
+        // Pool bodies: the TICK-TOP bucket[0] roster ([`Gen::wiz_chain`]),
+        // minus the out-of-pool human's model 0 — rival carpets (1),
+        // castles (2), mana balloons (3). Under `bodies_only` (the
+        // genie's +65<=1 gate) only the rival carpets qualify; castles
+        // and balloons are skipped.
+        //
+        // ⭐ THE LIFE TEST IS THE CHAIN BUILD, NOT A GUARD HERE. Retail's
+        // per-node gate is `(+16 & 0x20) == 0` and nothing else
+        // (:21524) — liveness was sampled once, at the tick-top rebuild
+        // (:52253). So a body that dies MID-tick stays acquirable for
+        // the rest of that tick, the same "a soft kill is not a free"
+        // shape the class-9 despawn and the balloon self-kill already
+        // wear; the port's old `act_life < 0` / `0x400` conjuncts were
+        // the stand-in for the snapshot it did not have. (A record that
+        // entered the tick already flagged is REAPED above this sweep,
+        // so it is not in the roster at all.)
+        for c in 0..self.wiz_chain.visible_len() {
+            let j = self.wiz_chain.list[c] as usize;
             let c = &self.ent[j];
-            if c.class64 != 3 || c.model65 == 0 || (bodies_only && c.model65 != 1) {
+            if c.model65 == 0 || (bodies_only && c.model65 != 1) {
                 continue;
             }
-            if c.act_life < 0 || c.flags & 0x420 != 0 || owner == c.id24 {
+            if c.flags & 0x20 != 0 || owner == c.id24 {
                 continue;
             }
             if wanted_only && self.village_wanted(c.id24) <= 0 {
@@ -1139,9 +1158,25 @@ impl Gen {
             (ctx.px, ctx.py, ctx.pz, 0xFFu8, 0xFFu8, ctx.pdead)
         } else {
             let t = tgt as usize;
-            // Port guard: retail would read the scratch slot / raw
-            // memory here; nothing reaches this with t out of range.
-            if t == 0 || t >= self.ent.len() {
+            // ⭐ A `+146` OF 0 IS THE SCRATCH RECORD, AND IT STEERS THE
+            // EXIT BEARING. Retail forms `v12 = &pool[+146]` with NO
+            // validity test (:21655) and re-bears off it (:21657)
+            // BEFORE the lost test reads `v12`'s own life and flags
+            // (:21658) — so slot 0's coordinates go into `+34` on the
+            // way out. That is not an exotic path: the PACK-DEATH
+            // HANDOFF hands a survivor `+146 = the dier's +40`
+            // (:21746), and `+40` is 0 whenever the fatal change did
+            // not arrive through that entity's own `+94` mailbox slot
+            // on the handoff tick (:21716). mc1l3 t=498 (slot 417
+            // hands 421 over) and mc1l4 t=406 (slot 56 hands 39 over)
+            // are the same law in two takes: the survivor aims at
+            // slot 0 and only then drops back to `base + 1`. The early
+            // return skipped the re-bear and left `+34` stale.
+            // ⚠ Keep the `class64 == 0` conjunct in `lost` below — it
+            // is what makes slot 0 read as lost here, since the port's
+            // SCRATCH record carries `flags = 0` where retail's
+            // carries 0x400. The bound is memory safety only.
+            if t >= self.ent.len() {
                 self.ent[i].tick70 = base + 1;
                 return false;
             }
@@ -2240,14 +2275,25 @@ impl Gen {
         }
         let (ex, ey) = (self.ent[i].x, self.ent[i].y);
         let r2 = r * r;
+        // ⭐ The burrower rung walks the TICK-TOP m9 roster (:22624-31
+        // walks `+36382 + 4*9`, the model-indexed chain the tick-head
+        // sweep rebuilt), NOT the live pool: membership was sampled
+        // once at the tick top, so a burrower born MID-tick is
+        // invisible to this tick's ladder, and one that died mid-tick
+        // is still a candidate — the walker carries no life test of
+        // its own (the bucket[0] law's model-9 coat). mc1l5 t=4442:
+        // one trigger tick mints 68 m9s and 32 m4s; the port's live
+        // scan let newborn militia 774 acquire newborn burrower 757
+        // and ARM in its birth frame — five graded lanes on one slot
+        // — where retail's ladder walks the empty tick-top chain and
+        // stays idle.
         let mut best: Option<(usize, i32)> = None;
-        for j in 1..self.ent.len() {
+        for k in 0..self.mob_chains.list.get(9).map_or(0, |l| l.len()) {
+            let j = self.mob_chains.list[9][k] as usize;
             let c = &self.ent[j];
-            if c.class64 == 5 && c.model65 == 9 && c.tick70 != 120 && c.act_life >= 0 {
-                let d2 = Self::dist2_sq(ex, ey, c.x, c.y);
-                if d2 <= r2 && best.is_none_or(|(_, b)| d2 < b) {
-                    best = Some((j, d2));
-                }
+            let d2 = Self::dist2_sq(ex, ey, c.x, c.y);
+            if d2 <= r2 && best.is_none_or(|(_, b)| d2 < b) {
+                best = Some((j, d2));
             }
         }
         if let Some((j, _)) = best {
@@ -3219,14 +3265,23 @@ impl Gen {
         if (self.ent[i].f63 as i16) % row.v_26 != 0 {
             return;
         }
-        // Nearest castle (:23752 — the wizard list filtered to model
-        // 2, id != own; unbounded radius).
+        // Nearest castle — a walk of BUCKET[0] (:23752 reads
+        // `var_u32_36462[0]`), filtered to `+65 == 2 && +24 != own`
+        // and nothing else, at unbounded radius. ⭐ THE MEMBERSHIP IS
+        // THE TICK-TOP SNAPSHOT, so there is NO life test here: a
+        // castle that dies mid-tick is still this cadence's answer.
+        // mc1l4 t=1017 is the receipt — castle 71 takes its fatal hit
+        // earlier in that very tick, and all four (5,9) mounds still
+        // write its bearing (`+34` holds 1174/1102/1114/1137) where a
+        // live-pool scan loses it and falls to the two-draw wander
+        // jitter instead.
         let e = &self.ent[i];
         let (ex, ey, ez, id) = (e.x, e.y, e.z, e.id24);
         let mut best: Option<(usize, i32)> = None;
-        for j in 1..self.ent.len() {
+        for c in 0..self.wiz_chain.visible_len() {
+            let j = self.wiz_chain.list[c] as usize;
             let c = &self.ent[j];
-            if c.class64 != 3 || c.model65 != 2 || c.act_life < 0 || c.id24 == id {
+            if c.model65 != 2 || c.id24 == id {
                 continue;
             }
             let d2 = Self::dist2_sq(ex, ey, c.x, c.y);

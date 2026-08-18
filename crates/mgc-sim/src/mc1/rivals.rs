@@ -199,6 +199,25 @@ pub(crate) struct Rival {
     pub(crate) knock_mag: i16,
     /// Desired speed (v_12) toward which f126 accelerates 16/tick.
     pub(crate) vdes: i16,
+    /// ⭐ THE SPEED-COLUMN LATCH (v_14) — "the BRAIN wrote v_12 this
+    /// tick". `sub_15470` CLEARS it at its head (:19057) and every
+    /// leg that actually writes v_12 sets it: the arrival stop
+    /// (:19075-76) and the plain throttle (:19089-91), plus the
+    /// cruise/home twins `sub_13A10` (:18197-98) and `sub_13A70`
+    /// (:18220-21) — which do NOT clear it, so a state that never
+    /// consults `sub_15470` leaves the latch standing.
+    ///
+    /// Its ONLY consumer is the speed token (`sub_56380` :65147-50 /
+    /// `sub_57F00` :66186-89): a set latch means the AI has retaken
+    /// the speed columns, so the burst KILLS ITSELF — `+48 = 1`, and
+    /// the shared decrement below zeroes it that same tick. That is
+    /// the two-phase kill: mc1l5's Vodor arrives at t=185 with the
+    /// burst still 63 ticks from expiry and the token drops to 0 in
+    /// one step, snapping his speed 160 → 80.
+    ///
+    /// Not in the recording (the closure carries v_12 but not v_14),
+    /// so it rides the port's own snapshot like `vdes`.
+    pub(crate) v14: bool,
     /// Spawn grace (u16_331): mailbox discarded while > 0.
     pub(crate) grace: u16,
     /// Post-hit regen stall (u32_383). Armed by the shared intake
@@ -251,6 +270,7 @@ impl Rival {
             knock_dir: 0,
             knock_mag: 0,
             vdes: 0,
+            v14: false,
             grace: 100,
             regen_stall: 0,
             life_rate: 0,
@@ -405,8 +425,18 @@ impl World {
             let e = &mut self.g.ent[c];
             e.id24 = r.ent;
             e.f26 = lvl as i16;
-            e.tick70 = 4; // standing (the buildable state the AI
-            // upgrade gate checks, :18432)
+            // ⚠ NO `+70` write here: the mint (:54974-55002) calls the
+            // ctor and never touches the job byte, so the authored
+            // castle stands at the ctor's TRANSFORM state (5, sub-state
+            // 0) and its FIRST tick runs the level-up commit — which is
+            // what carries `+26` from `count - 1` to the authored level
+            // and paints the top row. The mc1l5 capture reads it
+            // mid-flight: castle 680 is `+70 = 5, +48 = 4` at t=1 (the
+            // commit's own wait, :56469) and only settles later.
+            // A hard `tick70 = 4` here — added when `f59` alone drove
+            // the machine and this write was inert — now suppresses
+            // that commit and leaves every authored castle one level
+            // short with an unpainted top.
         }
         // The castle flag wears the owner's team colors (sprite
         // 177 + team, the :30809-10 family).
@@ -1111,7 +1141,7 @@ impl World {
     /// short pool) drops the burst to 1 so the shared decrement zeroes
     /// it (:64926-31) — silent for the AI, no buzz.
     pub(crate) fn rival_manifestation_tick(&mut self, m: usize, ri: usize, spell: usize) {
-        if !matches!(spell, 0 | 3 | 7 | 8 | 11 | 13 | 15 | 17 | 20) {
+        if !matches!(spell, 0 | 3 | 7 | 8 | 11 | 13 | 15 | 17 | 20 | 23) {
             return;
         }
         let f26 = self.g.ent[m].f26;
@@ -1171,6 +1201,141 @@ impl World {
         }
     }
 
+    /// ⭐ THE RIVAL'S SPEED TOKEN, at its OWN pool slot — retail's
+    /// `sub_56380_568B0` (:65131-99, spell 2) and its backwards twin
+    /// `sub_57F00_58410` (:66172-231, spell 21), which are the SAME
+    /// function with every speed term negated. The port used to run
+    /// only the contrail leg of this (in `class12_tick`) and decrement
+    /// the counter over in `rival_refresh_buffs`; everything else the
+    /// handler does was missing, which is what mc1l4 breaks on at
+    /// t=2 and mc1l5 at t=2:
+    ///
+    /// - **the v_14 KILL** (:65146-51): the owner's speed-column
+    ///   latch standing means the brain has retaken v_12, so the burst
+    ///   force-ends — `+48 = 1`, and the shared decrement below zeroes
+    ///   it the same tick. mc1l5 t=185: Vodor arrives, +48 drops
+    ///   63 → 0 in one step. A REFUSED `sub_55DD0` gate skips the
+    ///   sustain arm but does NOT force the end.
+    /// - **the spell-ACTIVE bit** `+16 bit 7` — set on the full tick
+    ///   (:65154-57), released two ticks in (:65160-65) and again at
+    ///   expiry (:65196). mc1l4 t=2 measures it: token 368's flags go
+    ///   `5 → 133` (0x85).
+    /// - **the SPEED OVERRIDE, SNAPPED into both columns**: `v_12 =
+    ///   3·f128` on the full tick, `2·f128` mid-burst, `f126 = v_12`
+    ///   (:65167-78) — not the AI's 16/tick ease. mc1l4 t=2/t=3
+    ///   measures f126 `0 → 240 → 160` against f128 = 80.
+    /// - **`sub_55E80`** (:65188): the full tick stamps the debit on
+    ///   the regen delta, every mid-burst tick PINS a positive delta
+    ///   to 0 — an active spell blocks mana regeneration. mc1l4 t=2:
+    ///   f132 `100 → −1000` (the cost), then `−1000 → 0` at t=3 once
+    ///   the wizard pass has spent it. mc1l5's Vodor sits under a
+    ///   248-tick burst from tick 0, which is why his `+132` reads 0
+    ///   forever and his purse never leaves zero.
+    /// - **the EXPIRY SNAP** (:65192-97): the counter reaching 0
+    ///   restores `v_12 = f126 = f128` (signed: −f128 backwards) and
+    ///   drops the active bit.
+    ///
+    /// ⚠ The decrement and the expiry snap live INSIDE the
+    /// owner-valid guard, so a token whose `+42` owner is gone stalls
+    /// at its current count rather than winding down.
+    pub(crate) fn rival_speed_token_tick(&mut self, m: usize, ri: usize, spell: usize) {
+        if self.g.ent[m].f26 <= 0 {
+            return; // :65141 — the whole handler is inside `+48 > 0`
+        }
+        let i = self.rivals[ri].ent as usize;
+        if i == 0 || i >= self.g.ent.len() {
+            return; // :65144 — no owner record, nothing runs
+        }
+        let count = self.spells()[spell].count as i16; // the token's +50
+        let full = self.g.ent[m].f26 == count;
+        // The backwards twin negates every speed term (:66207-27).
+        let dir: i16 = if spell == 2 { 1 } else { -1 };
+        if self.rivals[ri].v14 {
+            self.g.ent[m].f26 = 1; // :65149-50 — the two-phase kill
+        } else if self.rival_token_gate(ri, spell, full) {
+            let mut armed = false;
+            {
+                let e = &mut self.g.ent[m];
+                if full && e.flags & 0x80 == 0 {
+                    e.flags |= 0x80; // :65157
+                    armed = true;
+                }
+                if e.f26 == count - 2 {
+                    e.flags &= !0x80; // :65160-65
+                }
+            }
+            if armed {
+                // :65158 — the arm chime, at the OWNER's pool slot and
+                // `a2 = -1`. Case 19 (:64525) carries no local-player
+                // arm, so the AI's Accelerate is audible exactly like
+                // the human's (the same law as the id-17 hit grunt).
+                self.g.snd(19, i);
+            }
+            let base = self.g.ent[i].f128;
+            let v12 = if full { 3 } else { 2 } * base * dir;
+            self.rivals[ri].vdes = v12;
+            self.g.ent[i].f126 = v12;
+            // The (10,2) contrail at the OWNER's axis every 4th token
+            // tick (:65179-87) — id24 = the caster, act_life ×4.
+            if self.g.ent[m].f63 & 3 == 0 {
+                let (cx, cy, cz, own) = {
+                    let e = &self.g.ent[i];
+                    (e.x, e.y, e.z, e.id24)
+                };
+                if let Some(p) = self.g.spawn_effect(2, cx, cy, cz) {
+                    self.g.ent[p].id24 = own;
+                    self.g.ent[p].act_life *= 4;
+                }
+            }
+            // sub_55E80 (:65188): the debit on the full tick, the
+            // regen pin on every other.
+            let cost = self.spells()[spell].possess_mana.min(i32::MAX as u32) as i32;
+            let r = &mut self.rivals[ri];
+            if full {
+                r.mana_delta = if r.mana_delta >= 0 {
+                    -cost
+                } else {
+                    r.mana_delta - cost
+                };
+            } else if r.mana_delta > 0 {
+                r.mana_delta = 0;
+            }
+        }
+        // The shared decrement and the expiry snap (:65190-97).
+        self.g.ent[m].f26 -= 1;
+        if self.g.ent[m].f26 == 0 {
+            let base = self.g.ent[i].f128 * dir;
+            self.rivals[ri].vdes = base;
+            self.g.ent[i].f126 = base;
+            self.g.ent[m].flags &= !0x80;
+        }
+    }
+
+    /// `sub_55DD0_56300` (:64909-32) for a RIVAL's token — the gate
+    /// every class-12 handler runs before its sustain arm. Reads the
+    /// OWNER's purse and life, then the token's own live castle
+    /// requirement (+132) against the ESTABLISHED castle's store, and
+    /// finally admits a FULL tick only if the purse covers the cost
+    /// (:64926) while a MID-burst tick admits unconditionally
+    /// (:64928). The refusal buzz (:64931) is the local player's
+    /// channel and stays unported for the AI.
+    fn rival_token_gate(&self, ri: usize, spell: usize, full: bool) -> bool {
+        let r = &self.rivals[ri];
+        let i = r.ent as usize;
+        if self.g.ent[i].act_life < 0 {
+            return false; // a2[3] — the owner is dying
+        }
+        let req = self.spells()[spell].castle_req;
+        if req != 0
+            && !self
+                .rival_castle(r.ent)
+                .is_some_and(|c| self.g.ent[c].f140.max(0) as u32 >= req)
+        {
+            return false;
+        }
+        !full || r.mana >= self.spells()[spell].possess_mana
+    }
+
     /// Buff flags derive from the manifestations' burst counters
     /// (the human's manifestation_tick equivalents; the rival's
     /// bursts are armed by [`World::rival_cast`] and decremented
@@ -1202,12 +1367,12 @@ impl World {
             }
             self.g.ent[heal_m].f26 -= 1;
         }
-        // Speed-up (2) burst rides f26 too; consumed by the approach
-        // helper's boost checks.
-        let m2 = self.rival_token(ri, 2).unwrap_or(0);
-        if m2 != 0 && self.g.ent[m2].f26 > 0 {
-            self.g.ent[m2].f26 -= 1;
-        }
+        // ⚠ The speed-up (2) burst is NOT decremented here. Retail
+        // winds it down inside the token's OWN handler at the token's
+        // pool slot ([`Self::rival_speed_token_tick`], :65190), which
+        // is where the v_14 kill and the speed override live too —
+        // clocking it from the wizard's slot ran the counter a full
+        // pass early and skipped every other thing that handler does.
         {
             let r = &mut self.rivals[ri];
             r.shield = shield;
@@ -1342,9 +1507,12 @@ impl World {
                 return;
             }
         }
-        // 2. Flee home hurt (sub_14310 :18480).
+        // 2. Flee home hurt (sub_14310 :18480). ⭐ The PREDICATE
+        // writes the target itself (:18489-90 — `+146` = the
+        // established castle from wizext+50, `+148` = its signature);
+        // this transition is NOT targetless.
         if castle.is_some() && self.g.ent[i].act_life < (self.g.ent[i].max_life / 2) as i32 {
-            self.set_rival_state(ri, AiState::Home, 0);
+            self.set_rival_state(ri, AiState::Home, castle.unwrap() as u16);
             return;
         }
         if !think {
@@ -1361,7 +1529,9 @@ impl World {
                     >= Gen::CASTLE_CAP[self.g.ent[c].f26.clamp(0, 7) as usize] as u32
                 && self.g.castle_upgrade_space_ok(c)
             {
-                self.set_rival_state(ri, AiState::Upgrade, 0);
+                // ⭐ sub_14120 :18432-33 — the predicate stamps the
+                // castle into `+146`/`+148` on its way to returning 1.
+                self.set_rival_state(ri, AiState::Upgrade, c as u16);
                 return;
             }
         }
@@ -1401,9 +1571,11 @@ impl World {
             self.rivals[ri].state = AiState::HuntMana;
             return;
         }
-        // 9. Idle (sub_14DC0 :18749).
+        // 9. Idle (sub_14DC0 :18749). ⭐ The HOME leg stamps the
+        // castle (:18760-61); only the CRUISE leg (:18756) writes
+        // nothing but the brain byte.
         if castle.is_some() && self.g.ent[i].act_life < self.g.ent[i].max_life as i32 {
-            self.set_rival_state(ri, AiState::Home, 0);
+            self.set_rival_state(ri, AiState::Home, castle.unwrap() as u16);
         } else {
             self.rivals[ri].state = AiState::Cruise;
         }
@@ -1487,9 +1659,16 @@ impl World {
         self.rivals[ri].target_sig = self.target_sig(target);
         // Every retail pick writes the wizard ENTITY's +146/+148
         // directly (sub_14B10 :18744-45 and its siblings) — the
-        // corpus grades the column. Targetless transitions (Home,
-        // Upgrade) leave the old value STALE, exactly like retail's
-        // state setters, which touch only +415.
+        // corpus grades the column. ⚠ HOME AND UPGRADE ARE NOT
+        // TARGETLESS: their selector PREDICATES stamp the established
+        // castle themselves (`sub_14310` :18489-90, `sub_14120`
+        // :18432-33, `sub_14DC0`'s home leg :18760-61), all three off
+        // wizext+50. The only genuinely targetless transition is
+        // Build (`sub_13F00`) and Idle's CRUISE leg (:18756), which
+        // touch `+415` alone. mc1l5 t=933 is the exemplar: Vodor's
+        // upgrade predicate fires and retail re-points him from the
+        // mana ball 681 at his own keep 680 (`+148` 2000 -> 1061),
+        // where the port left the ball standing.
         if target != 0 {
             let ent = self.rivals[ri].ent as usize;
             self.g.ent[ent].f146 = target;
@@ -1770,11 +1949,26 @@ impl World {
         let me = self.rivals[ri].ent;
         let (px, py) = (self.g.ent[i].x, self.g.ent[i].y);
         let mut best: Option<(u16, i32)> = None;
-        for j in 1..self.g.ent.len() {
+        // ⭐ THE PICK WALKS THE TICK-TOP BALL CHAIN, NOT THE POOL.
+        // `sub_15080` (:18878) seeds from `var_u32_36462[1]` — the
+        // ball roster the tick head rebuilt at :52290-97 before any
+        // handler ran — and follows `+0` links to the end (:18919).
+        // A ball MINTED MID-TICK is therefore invisible to every
+        // rival brain until the next rebuild, and that is exactly
+        // what mc1l4 t=257 turns on: the human's castle is torn down
+        // that tick and ejects five balls into free slots, one of
+        // them slot 32, and the port's pool sweep saw it while retail
+        // could not — so retail's cascade found no eligible ball at
+        // all, fell through to the mana hunt, and RE-PICKED creature
+        // 85 (`+146` 85 and `+148` 728 both unchanged across the
+        // boundary), while the port re-pointed at the newborn 32.
+        // ⚠ Neither the model test nor the 0x400 test survives the
+        // move: the chain build has no life or flag filter and admits
+        // models 39 AND 40, and `sub_15080` adds no model test of its
+        // own — membership IS the filter.
+        for c in 0..self.g.ball_chain.visible_len() {
+            let j = self.g.ball_chain.list[c] as usize;
             let e = &self.g.ent[j];
-            if e.class64 != 10 || e.model65 != 39 || e.flags & 0x400 != 0 {
-                continue;
-            }
             if e.f144 == me {
                 continue; // already mine
             }
@@ -1959,7 +2153,17 @@ impl World {
                         self.g.ent[i].f30,
                         Gen::angle_between(self.g.ent[i].x, self.g.ent[i].y, tx, ty),
                     );
-                    if cast && facing <= 28 {
+                    // ⚠ THE CLAIM CONE IS STRICT: `< 0x1Cu` (:18254),
+                    // not `<= 28`. mc1l3 t=447 lands on the boundary
+                    // exactly — Vodor (slot 585) sits at `+30 = 1082`
+                    // with ball 105 bearing 1054, an angular distance
+                    // of precisely 28 — so retail refuses the claim
+                    // and the port took it. The ball's `+144` is an
+                    // UNGRADED lane, so no pair diff can see it; it
+                    // surfaces one tick later through the mana census,
+                    // which credits that ball's 512 to the rival's
+                    // ceiling: `mana_max` retail 3048, port 3560.
+                    if cast && facing < 28 {
                         self.g.ent[t].f144 = self.rivals[ri].ent;
                         // Settled balls never re-run the tick's
                         // re-derive — recolor at the claim.
@@ -2068,9 +2272,17 @@ impl World {
     }
 
     /// The Cruise speed logic (sub_13A10 :18188-203, shared by the
-    /// castle-less Home arm): an ACTIVE speed burst owns the speed
-    /// columns (sub_15E60's +48 test — vdes untouched); else the AI
-    /// chain-casts the speed-up whenever ready, else full throttle.
+    /// castle-less Home arm sub_13A70 :18213-22): an ACTIVE speed
+    /// burst owns the speed columns (sub_15E60's +48 test — vdes
+    /// untouched); else the AI chain-casts the speed-up whenever
+    /// ready, else full throttle.
+    ///
+    /// ⚠ NEITHER twin CLEARS `v_14` — only `sub_15470` does (:19057).
+    /// The plain-throttle leg SETS it (:18198 / :18221), so a rival
+    /// cruising on this arm re-arms the latch every tick it is not
+    /// boosting, and the moment it does cast the burst the arm stops
+    /// running entirely (the `sub_15E60` early return) and the latch
+    /// keeps whatever the cast tick left.
     fn rival_cruise_speed(&mut self, ri: usize, i: usize) {
         if self
             .rival_token(ri, 2)
@@ -2082,6 +2294,7 @@ impl World {
             self.rival_cast(ri, i, 2);
         } else {
             self.rivals[ri].vdes = self.g.ent[i].f128;
+            self.rivals[ri].v14 = true;
         }
     }
 
@@ -2111,6 +2324,11 @@ impl World {
             let e = &self.g.ent[i];
             (e.x, e.y, e.z)
         };
+        // The speed-column latch clears at the HEAD (:19057), before
+        // any leg decides — so a tick that returns through the
+        // boost-active or boost-cast arms leaves it CLEAR and the
+        // running burst survives.
+        self.rivals[ri].v14 = false;
         // Retail compares the TRUNCATED scalar distance, never the
         // square: sub_15470 tests `sub_42340(...) > a3` (:19058-62)
         // and `> a4` (:19066), and both helpers end in the isqrt
@@ -2136,6 +2354,7 @@ impl World {
         self.g.ent[i].f34 = Gen::angle_between(px, py, tx, ty);
         if d <= arrive {
             self.rivals[ri].vdes = 0;
+            self.rivals[ri].v14 = true; // :19075-76 — the arrival stop
             return true;
         }
         if self
@@ -2149,6 +2368,7 @@ impl World {
             return false;
         }
         self.rivals[ri].vdes = self.g.ent[i].f128;
+        self.rivals[ri].v14 = true; // :19089-91 — the plain throttle
         false
     }
 
@@ -2520,7 +2740,7 @@ impl World {
         let def = &self.spells()[s];
         let speed = self.g.ent[i].f126;
         let snd = match s {
-            0 | 11 | 13 | 17 | 20 => Some(9u8),
+            0 | 11 | 13 | 17 | 20 | 23 => Some(9u8),
             7 | 8 => Some(15),
             2 => Some(19),
             15 => Some(23),
@@ -2532,7 +2752,7 @@ impl World {
             self.g.snd(id, i);
         }
         let pr = match s {
-            0 => self.g.spawn_fireball(x, y, z),
+            0 | 23 => self.g.spawn_fireball(x, y, z),
             3 => self.g.spawn_spell_lob(1, x, y, z),
             7 => self.g.spawn_trail_bolt(x, y, z),
             8 => self.g.spawn_spell_lob(4, x, y, z),
@@ -2630,6 +2850,20 @@ impl World {
             (e.x, e.y, e.z)
         };
         Gen::polar_step(&mut pos, yaw, 0, speed);
+        // The strafe lane of the same shared mover (:55199-203): the
+        // wizext's v_16 holds whatever jink residue the AI died with,
+        // and NOTHING updates it during the fall — the dead brain
+        // never runs its 4/tick decay — so the corpse sidesteps by
+        // the SAME constant every fall tick until touchdown. mc1l3
+        // t=1859: rival 585 falls with v_16 = 7 and the port's corpse
+        // landed (−5,+5)/tick short of retail's, a residual every
+        // (10,1) trail puff inherited at birth.
+        {
+            let jink = self.rivals[ri].jink;
+            if jink != 0 {
+                Gen::polar_step(&mut pos, yaw.wrapping_add(0x200) & 0x7FF, 0, jink);
+            }
+        }
         // The knock lane of the same shared mover (:55204-19). The AI's
         // live mover never runs it, so the killing blow's whole impulse
         // is still pending when the corpse enters state 2: retail's
@@ -2657,6 +2891,19 @@ impl World {
         // sub_455D0 :55158-60 stamps the body's +32 from the control
         // block's u16_329 (HIBYTE &= 7), which is 0 for an AI.
         self.g.ent[i].f32 = 0;
+        // The mover's wind-gust flutter (:55294-99) — every 64th tick
+        // of the entity's OWN phase clock, one draw from its PRIVATE
+        // LCG, 1-in-11 → sound 46. The live AI never runs sub_455D0,
+        // so for a rival this fires only during the fall; the +63
+        // read is PRE-increment (the walk clocks the record after the
+        // handler). mc1l3 t=1890: the corpse's f63 crosses 192 and
+        // retail's rand steps exactly once where the port's held.
+        if self.g.ent[i].f63 & 0x3F == 0 {
+            let roll = crate::engine::features::lcg32(&mut self.g.ent[i].rand);
+            if roll % 11 == 0 {
+                self.g.snd(46, i);
+            }
+        }
         let puff = pos;
         pos.2 = pos.2.saturating_add(vz);
         {
@@ -2947,6 +3194,7 @@ impl Snap for Rival {
             knock_dir,
             knock_mag,
             vdes,
+            v14,
             grace,
             regen_stall,
             life_rate,
@@ -2980,6 +3228,7 @@ impl Snap for Rival {
         w.put(knock_dir);
         w.put(knock_mag);
         w.put(vdes);
+        w.put(v14);
         w.put(grace);
         w.put(regen_stall);
         w.put(life_rate);
@@ -3015,6 +3264,7 @@ impl Snap for Rival {
             knock_dir: r.get()?,
             knock_mag: r.get()?,
             vdes: r.get()?,
+            v14: r.get()?,
             grace: r.get()?,
             regen_stall: r.get()?,
             life_rate: r.get()?,
@@ -3071,6 +3321,46 @@ mod tests {
     /// Castle in its book and a level-1 starting castle —
     /// CASTLE_CAP[1] = 10000 clears Rebound's 8000 castle_req, so the
     /// token is not fizzled by the stored-mana ladder.
+    /// A flat world with one rival whose book holds POSSESS (spell 3)
+    /// and nothing else — the claim-cone probe's scaffolding.
+    fn possess_world() -> World {
+        let planes = Planes {
+            height: vec![100; 0x10000],
+            tile_type: vec![5; 0x10000],
+            shading: vec![32; 0x10000],
+            angle: vec![5; 0x10000],
+            ceiling: Vec::new(),
+        };
+        let things = vec![Thing {
+            slot: 0,
+            kind: ThingKind::Entity,
+            class: 3,
+            model: 5,
+            x: 120,
+            y: 120,
+            dis_id: 0,
+            swi_sz: 0,
+            swi_id: 0,
+            parent: 0,
+            child: 0,
+            par3: None,
+        }];
+        let mut w = World::new(planes, &things, 1, assets());
+        let mut book = [false; SPELL_COUNT];
+        book[3] = true;
+        let mut cfgs: [Option<RivalConfig>; 8] = Default::default();
+        cfgs[1] = Some(RivalConfig {
+            aggression: 200,
+            accuracy: 255,
+            tempo: 255,
+            castle_level: 0,
+            book,
+            allowed: book,
+        });
+        w.set_wizards(&cfgs, 2);
+        w
+    }
+
     fn rebound_world() -> World {
         let planes = Planes {
             height: vec![100; 0x10000],
@@ -3261,10 +3551,17 @@ mod tests {
     fn rebound_deflection_bounces_debits_and_is_silent_when_poor() {
         use crate::mc1::mobs::MobCtx;
         let mut w = rebound_world();
-        // Settle a few ticks, then check the WORLD maintains the
-        // entity mana mirror at all.
-        for _ in 0..4 {
+        // Settle until the pool is stocked, then check the WORLD
+        // maintains the entity mana mirror at all. The starting
+        // castle only joins the census once it reaches its
+        // ESTABLISHED tick and echoes `+144 = +24` (sub_46DB0
+        // :56015) — the ceiling, and with it the purse, is at the
+        // intrinsic 1000 until then.
+        for _ in 0..64 {
             w.tick(away(), PlayerCommand::default());
+            if w.rivals[0].mana > 2000 {
+                break;
+            }
         }
         let me = w.rivals[0].ent as usize;
         assert_eq!(
@@ -3282,6 +3579,7 @@ mod tests {
             pz: 200,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -3408,5 +3706,69 @@ mod tests {
             }
         }
         assert!(shielded, "the model-9 control never armed Shield");
+    }
+
+    /// ⭐ THE POSSESS CLAIM CONE IS STRICT — `< 0x1Cu` (:18254), not
+    /// `<= 28`. `sub_13BA0`'s claim arm re-derives the bearing after
+    /// the approach and writes `+144` only inside that cone:
+    ///
+    ///     if ( sub_155F0(a1, 3u) ) {
+    ///       v3 = sub_42150_42490(a1 + 72, v1 + 36);
+    ///       if ( (unsigned __int16)sub_42210_42550(*(_WORD *)(a1 + 30), v3) < 0x1Cu )
+    ///         v1[72] = *(_WORD *)(a1 + 24);          // +144 = the claimant
+    ///     }
+    ///
+    /// NOT A FIXTURE: `+144` is not in the graded obs, so a pair diff
+    /// can never see the wrong claim — it re-imports the ball's owner
+    /// every tick. mc1l3 lands on the boundary exactly (Vodor at
+    /// `+30 = 1082`, ball 105 bearing 1054, angular distance 28) and
+    /// the port's `<=` took a claim retail refuses; the free run only
+    /// noticed one tick later, through the MANA CENSUS crediting that
+    /// ball's 512 to his ceiling (`mana_max` retail 3048, port 3560 at
+    /// t=448). This test pins both sides of the boundary directly.
+    #[test]
+    fn the_possess_claim_cone_refuses_at_exactly_28() {
+        let claim_at = |off: u16| -> u16 {
+            let mut w = possess_world();
+            let ri = 0;
+            let i = w.rivals[ri].ent as usize;
+            // A wild (10,39) mana ball, well inside the 1024 arrive
+            // ring so the approach reports ARRIVED and the claim arm
+            // runs at all.
+            let (rx, ry, rz) = {
+                let e = &w.g.ent[i];
+                (e.x, e.y, e.z)
+            };
+            let b = w.g.new_event().expect("ball slot");
+            {
+                let e = &mut w.g.ent[b];
+                e.class64 = 10;
+                e.model65 = 39;
+                e.tick70 = 41; // settled
+                e.f140 = 512;
+                e.f144 = 0; // wild: eligible
+                e.act_life = 300;
+                e.max_life = 300;
+            }
+            let (bx, by) = (rx, ry.wrapping_add(512));
+            w.g.move_relink(b, bx, by, rz);
+            let bearing = Gen::angle_between(rx, ry, bx, by);
+            w.g.ent[i].f30 = (bearing + off) & 0x7FF;
+            w.g.ent[i].f34 = w.g.ent[i].f30; // inside every commit cone
+            w.rivals[ri].mana = 200_000;
+            w.rivals[ri].cooldown[3] = 0;
+            w.rivals[ri].state = AiState::Possess;
+            w.rivals[ri].target = b as u16;
+            w.rivals[ri].target_sig = w.target_sig(b as u16);
+            assert_eq!(
+                Gen::angdist(w.g.ent[i].f30, bearing),
+                off,
+                "test premise: the offset IS the angular distance"
+            );
+            w.rival_state_tick(ri, i, false);
+            w.g.ent[b].f144
+        };
+        assert_eq!(claim_at(28), 0, "28 is OUTSIDE the cone — retail refuses");
+        assert_ne!(claim_at(27), 0, "27 is inside the cone — the claim lands");
     }
 }

@@ -1,0 +1,24 @@
+{
+ "dir": "fixtures/mc1l3",
+ "pin_pose": "n1",
+ "fixtures": [
+  {
+   "t": 497,
+   "file": "a-146-of-0-is-the-scratch-record-and-it-steers-t.mgcr",
+   "source": "mc1l3",
+   "note": "A +146 OF 0 IS THE SCRATCH RECORD, AND IT STEERS THE EXIT BEARING: sub_1A120 forms `v12 = &pool[+146]` with NO validity test (:21655) and re-bears off it (:21657) BEFORE the lost test reads v12's own life and flags (:21658), so slot 0's coordinates land in +34 on the way out. The PACK-DEATH HANDOFF is what puts a survivor there - it hands `+146 = the dier's +40` (:21746), and +40 is 0 whenever the fatal change did not arrive through that entity's own +94 mailbox slot on the handoff tick (:21716). mc1l3 t=498: slot 417 dies and hands 421 over, 421 aims at slot 0 (41472,40960) for 275 and only then drops to base+1; the port's `t == 0` early return skipped the re-bear and left +34 stale at 590. Same law at mc1l4 t=406 (slot 56 hands 39 over, 1145). \u26a0 the `class64 == 0` conjunct in the lost test is load-bearing once the guard goes - the port's SCRATCH record carries flags 0 where retail's carries 0x400 - ledger 2026-08-18d."
+  },
+  {
+   "t": 1858,
+   "file": "the-corpse-keeps-its-jink-the-death-fall-sub-45f.mgcr",
+   "source": "mc1l3",
+   "note": "THE CORPSE KEEPS ITS JINK: the death fall (sub_45FC0 :55463) opens with the FULL shared mover sub_455D0, whose strafe lane (:55199-203) consumes wizext v_16 at yaw+0x200 - and nothing updates a dead AI's wizext, so the corpse sidesteps by the SAME residue every fall tick until touchdown (the live AI's 4/tick jink decay is the brain's own write; dead brains don't run). The port's rival_death_fall modeled forward + knock and dropped the strafe lane. mc1l3 t=1859: rival 585 falls with v_16 = 7 and the port lands (-5,+5)/tick short - a residual every (10,1) trail puff inherits at birth (slot 347) - ledger 2026-08-19c."
+  },
+  {
+   "t": 1889,
+   "file": "the-mover-s-flutter-draw-reaches-the-corpse-sub.mgcr",
+   "source": "mc1l3",
+   "note": "THE MOVER'S FLUTTER DRAW REACHES THE CORPSE: sub_455D0's tail (:55294-99) rolls the entity's PRIVATE LCG once on every tick its +63 & 0x3F == 0, 1-in-11 -> sound 46. The live AI never runs sub_455D0, so for a rival this fires only during the death fall; the human's copy already lived in mc1_move. mc1l3 t=1890: the corpse's f63 crosses 192 and retail's rand steps exactly once (450387334 -> 1329188389, one 9377-step) where the port's held - the write trace names no port writer and explain counts the draw - ledger 2026-08-19c."
+  }
+ ]
+}

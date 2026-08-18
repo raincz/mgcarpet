@@ -104,12 +104,20 @@ fn level_005_trigger_cascade() {
         after_crater < before,
         "crater must dig: region height {after_crater} vs {before}"
     );
-    let live_after_crater = creature_count(&w);
+    // ⚠ Counted WITHOUT the village families, for the same reason the
+    // one-shot assertion below excludes them: full dwellings emit and
+    // absorb villagers on their own clock, so a plain class-5 count
+    // measures the ambush plus whatever the village did in the same 16
+    // ticks. It went unnoticed while the port's houses carried a
+    // quarter of retail's occupancy cap and turned nearly every feeder
+    // away; with `+128 = area/4` landed, two more walk in the door
+    // during this window and the raw delta reads 6.
+    let live_after_crater = non_village_count(&w);
 
     // The follow-up trigger at (95,109) → disposition 2: the ambush
     // (8 class-5 model-2 creatures around the crater).
     fly(&mut w, 95.5, 109.5, 16);
-    let live_final = creature_count(&w);
+    let live_final = non_village_count(&w);
     assert_eq!(
         live_final - live_after_crater,
         8,
@@ -122,21 +130,22 @@ fn level_005_trigger_cascade() {
     // are excluded: full dwellings emit and absorb villagers on their
     // own clock (sub_28DC0/sub_1F640), so their count breathes either
     // way — only the trigger-spawned models prove one-shot-ness.
-    let non_village = |w: &World| {
-        w.live_things()
-            .iter()
-            .filter(|t| t.class == 5 && !matches!(t.model, 4 | 12 | 13 | 14))
-            .count()
-    };
-    let nv_final = non_village(&w);
+    let nv_final = non_village_count(&w);
     fly(&mut w, 101.5, 117.5, 32);
     fly(&mut w, 95.5, 109.5, 32);
-    assert!(non_village(&w) <= nv_final);
+    assert!(non_village_count(&w) <= nv_final);
 }
 
-/// Live class-5 creature count (heads only; movement can kill).
-fn creature_count(w: &World) -> usize {
-    w.live_things().iter().filter(|t| t.class == 5).count()
+/// Live class-5 creature count EXCLUDING the village families
+/// (m4/12/13/14): full dwellings emit and absorb villagers on their
+/// own clock (sub_28DC0/sub_1F640), so their count breathes either
+/// way — only the trigger-spawned models prove anything about a
+/// trigger.
+fn non_village_count(w: &World) -> usize {
+    w.live_things()
+        .iter()
+        .filter(|t| t.class == 5 && !matches!(t.model, 4 | 12 | 13 | 14))
+        .count()
 }
 
 #[test]

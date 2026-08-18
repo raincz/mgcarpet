@@ -261,17 +261,26 @@ impl Gen {
         // It is `sub_10C80`'s ch0 arm alone — and where it runs, the
         // tile scan must skip (10,45) so the two never double up.
         let fp_pass = ch == 0 && !shake && mc2;
-        // The castle pre-pass (ch0 only).
+        // The castle pre-pass (ch0 only) — :17322-33, and it is a walk
+        // of BUCKET[0] ([`Gen::wiz_chain`], the tick-top class-3
+        // roster) filtered to `+65 == 2`, not a pool sweep. Same
+        // membership law as the m9 castle hunt and Scan A: liveness was
+        // sampled once at the tick top, so a castle that dies mid-tick
+        // keeps taking ch0 for the rest of that tick and a castle
+        // already dead at the tick top takes NONE — where the port's
+        // pool walk, which had no life test at all, delivered to both.
+        // (mc1l4: 45 `(3,2) mail0.amt` shadow rows inside the bit-exact
+        // window, e.g. t=1312 slot 436 retail 500 port 1050 — one
+        // extra fire's 550 accumulated into a box retail left for the
+        // spreader alone.) ⚠ This pass carries NO `& 8` damageable
+        // test, no `+28` channel mask and no `+66/+67` filter — the
+        // three the tile-ring walk below does carry. A castle is
+        // reachable by anything.
         if ch == 0 {
             let mut hits: Vec<usize> = Vec::new();
-            for j in 1..self.ent.len() {
-                let c = &self.ent[j];
-                if c.class64 == 3
-                    && c.model65 == 2
-                    && c.flags & 0x400 == 0
-                    && j != i
-                    && self.ent_overlap(i, j)
-                {
+            for c in 0..self.wiz_chain.visible_len() {
+                let j = self.wiz_chain.list[c] as usize;
+                if self.ent[j].model65 == 2 && j != i && self.ent_overlap(i, j) {
                     hits.push(j);
                 }
             }
@@ -4161,6 +4170,17 @@ impl Gen {
             // neighbor trees (WITHOUT it the fire had zero extents and
             // overlapped nothing → ambient fires dealt no damage). Tree
             // deaths override life and set the f46 trunk offset.
+            // sub_3A730 (:46620): the STANDING fire. ⭐ The ctor's
+            // last position write is a GROUND SNAP — `v2[38] =
+            // sub_11F50(a1)` (:46640), word 38 = `+76` = z, sampled at
+            // the CALLER's axis and overwriting the z the link just
+            // stored. A standing fire is born ON THE GROUND, never at
+            // its spawner's altitude, and the sibling ctors 4/5/7
+            // (:46600/:46608/:46672) all close the same way.
+            // mc1l4 t=1224: three trees burn on ground the (10,0) fire
+            // in slot 63 scorched 68 units DOWN earlier in that same
+            // tick, so their records still read the pre-dig 2157 while
+            // the flames retail plants read 2089.
             6 => {
                 let e = &mut self.ent[s];
                 e.tick70 = 6;
@@ -4169,6 +4189,8 @@ impl Gen {
                 e.flags &= !8;
                 e.flags |= 0x20000;
                 self.link(s, x, y, z);
+                let (px, py) = (self.ent[s].x, self.ent[s].y);
+                self.ent[s].z = self.ground_z(px, py) as i16;
                 self.refill_life(s);
                 self.set_sprite(s, 228);
                 self.extents(s, 272, 1536);
@@ -4891,10 +4913,29 @@ impl Gen {
                             (e.x, e.y, e.z, e.f84)
                         };
                         if let Some(f) = self.spawn_effect(6, x, y, z) {
-                            // The mailbox source is already the
-                            // broadcaster's +24 owner; the original's
-                            // second +24 hop is the identity for it.
-                            self.ent[f].id24 = src;
+                            // ⭐ THE SECOND `+24` HOP IS NOT THE
+                            // IDENTITY. :57683 reads
+                            // `pool[a1->+94].+24` — the OWNER TAG OF
+                            // THE RECORD THAT BROADCAST, not the
+                            // broadcasting slot — and it reads it
+                            // blind, through a slot the reap may
+                            // already have freed (the freed-slot
+                            // stale-bytes law; retail keeps the whole
+                            // record until the slot is re-minted).
+                            // mc1l4 t=1239: the killer is (10,1)
+                            // spreader 224, dead and freed since the
+                            // tick top, whose `+24` still names the
+                            // (10,0) fire 390 that seeded it — so
+                            // retail's flame belongs to 390 and the
+                            // port's belonged to 224, and every ch0
+                            // and XP credit downstream reads it.
+                            // The human's carpet is out of pool, so
+                            // its sentinel IS its own tag.
+                            self.ent[f].id24 = if src == PLAYER_TARGET {
+                                src
+                            } else {
+                                self.ent[src as usize].id24
+                            };
                             self.ent[f].f46 = (3 * f84 as i32 / 4) as i16;
                             let d = self.ent_rand(i);
                             let burn = (d % 60 + 130) as i32;
@@ -5196,7 +5237,15 @@ impl Gen {
             self.snd(24, i);
             self.ent[i].act_life = 1;
         }
-        self.anim_advance(i);
+        // ⚠ NO ANIMATION STEP. The class-10 flash family is NOT uniform
+        // here: `sub_25760` (:28437, possess), `sub_26360` (:28937,
+        // steal) and `sub_263C0` (:28959, tether) each open their live
+        // arm with `sub_42510_42850`, and THIS one does not (:28908-19
+        // is the whole live arm — the ch0 write, sound 24, the life
+        // pin, the flag). A 2026-07-21 audit batch read the family as
+        // uniform and added the step here too; the raw shadow measured
+        // the cost as 2,092 `(10,23) frame88` rows on mc1l42, `retail
+        // 0 port 1` on every hit flash in the take.
         false
     }
 
@@ -5259,6 +5308,73 @@ impl Gen {
     /// (`bitmaps_E9980x`) the decompile does not carry; raster order
     /// stands in. It only decides which of two simultaneously
     /// overlapping partners is absorbed first.
+    /// The MC1 ball-merge OWNER CONTEST (`sub_277D0` :29700-73),
+    /// lifted out of the merge so it can be pinned directly: the pair
+    /// channel restores `+144` every tick and is blind to it.
+    pub(crate) fn mc1_ball_owner_contest(&mut self, i: usize, j: usize, ctx: &MobCtx) {
+        // MC1 owner rule (`sub_277D0` :29700): OWNED BEATS
+        // UNOWNED — an unowned survivor ADOPTS the absorbed
+        // ball's owner (:29717; this is how magnet-pulled
+        // balls become claimed as they coalesce into the
+        // claimed one). A class-10 owner (a grave's bank
+        // tag) loses to a real owner (:29734-50); two
+        // DIFFERENT real owners contest on the owner
+        // wizards' +136 (:29755-73: strictly larger keeps
+        // the survivor's owner, else the absorbed side
+        // wins). Port note: MC1 wizard ents don't carry a
+        // +136 bank (only castles do) and the human has no
+        // pool entity, so both sides resolve 0 and the
+        // contest falls to retail's else-arm (absorbed
+        // side's owner) — structure faithful, operands
+        // approximated. Mana is ALWAYS additive: the
+        // reconstruction's two `*=` branches (:29750,
+        // :29773) are transcription slips (every sibling
+        // branch is `+=`).
+        let (oi, oj) = (self.ent[i].f144, self.ent[j].f144);
+        let is_c10 = |g: &Self, o: u16| {
+            o != crate::mc1::mobs::PLAYER_TARGET
+                && (o as usize) < g.ent.len()
+                && g.ent[o as usize].class64 == 10
+        };
+        // ⭐ THE CONTEST OPERAND IS THE OWNER WIZARD'S OWN
+        // `+136` — its mana CEILING, read off its pool
+        // record (:29760-66). The human's carpet is out of
+        // pool here, so its ceiling arrives through the
+        // ctx; a rival's is mirrored onto its entity by
+        // the rival pass. Reading 0 for BOTH (the earlier
+        // approximation) collapsed every contest onto
+        // retail's else-arm, which hands the ball to the
+        // ABSORBED side unconditionally. mc1l4 t=2722:
+        // ball 432 lands on the human (358) in retail and
+        // on Vodor (365) in the port, and the 9,500 of
+        // ceiling it carries moves with it — both
+        // wizards' `mana_max` part on the next census.
+        let w136 = |g: &Self, o: u16| {
+            if o == crate::mc1::mobs::PLAYER_TARGET {
+                ctx.pmana_max.min(i32::MAX as u32) as i32
+            } else if (o as usize) < g.ent.len() {
+                g.ent[o as usize].f136
+            } else {
+                0
+            }
+        };
+        if oi == 0 {
+            self.ent[i].f144 = oj;
+        } else if oj != 0 && oi != oj {
+            let (ci, cj) = (is_c10(self, oi), is_c10(self, oj));
+            // Two distinct retail branches that share an
+            // outcome: the class-10-loses arm and the
+            // lost +136 contest — kept separate to match
+            // the trace.
+            #[allow(clippy::if_same_then_else)]
+            if ci && !cj {
+                self.ent[i].f144 = oj;
+            } else if !ci && !cj && w136(self, oi) <= w136(self, oj) {
+                self.ent[i].f144 = oj;
+            }
+        }
+    }
+
     fn ball_merge_candidates(
         &self,
         i: usize,
@@ -5533,9 +5649,23 @@ impl Gen {
         //     f44 on class-5 creatures (mc2/mobs.rs field map), so the
         //     cross-read below is f44. MC2-only: MC1's ball tick has
         //     no leviathan.
+        // ⚠ THE COLLECTOR TEST IS CLASS + MODEL, AND NOTHING ELSE.
+        // `if (ent[+146].+64 == 3 && ent[+146].+65 == 3)` (:29469) and
+        // the MC2 twin's identical switch (EF:26115-27) — no liveness
+        // test, no 0x400 test. SOFT KILL IS NOT A FREE: the record
+        // keeps its class, model and links for the rest of the tick,
+        // so a balloon culled by its castle's dispatcher at a LOWER
+        // pool slot is still a valid collector when the ball's own
+        // handler runs later in the same pass. mc1l5 t=713: castle 301
+        // culls balloon 325 over quota (flags 12 -> 0x40c, act_life
+        // still 8600), and ball 362 keeps its tether bit AND its
+        // 16/tick step for that whole tick — retail flags 76, port 12.
+        // (`b != 0` stays: retail's +146 = 0 indexes the class-0
+        // scratch record, so the class test fails there anyway; the
+        // bounds check is ours, guarding a Vec retail indexes raw.)
         if self.ent[i].flags & 0x40 != 0 {
             let b = self.ent[i].f146 as usize;
-            let live = b != 0 && b < self.ent.len() && self.ent[b].flags & 0x400 == 0;
+            let live = b != 0 && b < self.ent.len();
             let step = if live && self.ent[b].class64 == 3 && self.ent[b].model65 == 3 {
                 Some(32i16)
             } else if live && mc2 && self.ent[b].class64 == 5 && self.ent[b].model65 == 23 {
@@ -5763,52 +5893,7 @@ impl Gen {
                         self.ent[i].flags |= crate::mc2::mobs::F_CLAIM_LOCK;
                     }
                 } else {
-                    // MC1 owner rule (`sub_277D0` :29700): OWNED BEATS
-                    // UNOWNED — an unowned survivor ADOPTS the absorbed
-                    // ball's owner (:29717; this is how magnet-pulled
-                    // balls become claimed as they coalesce into the
-                    // claimed one). A class-10 owner (a grave's bank
-                    // tag) loses to a real owner (:29734-50); two
-                    // DIFFERENT real owners contest on the owner
-                    // wizards' +136 (:29755-73: strictly larger keeps
-                    // the survivor's owner, else the absorbed side
-                    // wins). Port note: MC1 wizard ents don't carry a
-                    // +136 bank (only castles do) and the human has no
-                    // pool entity, so both sides resolve 0 and the
-                    // contest falls to retail's else-arm (absorbed
-                    // side's owner) — structure faithful, operands
-                    // approximated. Mana is ALWAYS additive: the
-                    // reconstruction's two `*=` branches (:29750,
-                    // :29773) are transcription slips (every sibling
-                    // branch is `+=`).
-                    let (oi, oj) = (self.ent[i].f144, self.ent[j].f144);
-                    let is_c10 = |g: &Self, o: u16| {
-                        o != crate::mc1::mobs::PLAYER_TARGET
-                            && (o as usize) < g.ent.len()
-                            && g.ent[o as usize].class64 == 10
-                    };
-                    let w136 = |g: &Self, o: u16| {
-                        if o != crate::mc1::mobs::PLAYER_TARGET && (o as usize) < g.ent.len() {
-                            g.ent[o as usize].f136
-                        } else {
-                            0
-                        }
-                    };
-                    if oi == 0 {
-                        self.ent[i].f144 = oj;
-                    } else if oj != 0 && oi != oj {
-                        let (ci, cj) = (is_c10(self, oi), is_c10(self, oj));
-                        // Two distinct retail branches that share an
-                        // outcome: the class-10-loses arm and the
-                        // lost +136 contest — kept separate to match
-                        // the trace.
-                        #[allow(clippy::if_same_then_else)]
-                        if ci && !cj {
-                            self.ent[i].f144 = oj;
-                        } else if !ci && !cj && w136(self, oi) <= w136(self, oj) {
-                            self.ent[i].f144 = oj;
-                        }
-                    }
+                    self.mc1_ball_owner_contest(i, j, ctx);
                 }
                 self.ent[i].f140 = fi + fj;
                 // MC1's sub_277D0 frees the absorbed ball through

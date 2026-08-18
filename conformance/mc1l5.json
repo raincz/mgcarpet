@@ -1,12 +1,54 @@
 {
-  "dir": "fixtures/mc1l5",
-  "pin_pose": "n1",
-  "fixtures": [
-    {
-      "t": 5475,
-      "file": "the-m0-bob-survives-a-promoting-hit-the-wrapper.mgcr",
-      "source": "mc1l5",
-      "note": "THE m0 BOB SURVIVES A PROMOTING HIT: the wrapper trailer runs on EVERY hit path, the retarget-and-promote one included - sub_1B070/1B090/1B0E0 (:22172-90) all end `sub_1B120(a1x);` with no guard, so wizard 650's 400 promotes worm 271 and it still bobs (retail f26 20 z 3083, port 25 / 3058) - ledger 2026-08-17."
-    }
-  ]
+ "dir": "fixtures/mc1l5",
+ "pin_pose": "n1",
+ "fixtures": [
+  {
+   "t": 1,
+   "file": "the-mana-census-credits-only-through-144-sub-483.mgcr",
+   "source": "mc1l5",
+   "note": "THE MANA CENSUS CREDITS ONLY THROUGH +144: sub_48340_48680 (:56911-19) reads the counted entity's +144 and nothing else - creature, castle, balloon, mana ball and house alike - and only the WORLD total is unconditional (:56919). So an AUTHORED castle, whose level-load mint sub_44D30 (:54974-55002) stamps +24 alone, is credited to NOBODY until its established tick echoes +144 = +24 (sub_46DB0 :56015). Vodor's keep (slot 680, +24 = 675, +144 = 0) holds 5000 and retail still censuses him at the intrinsic base 1000 where the port's invented +24 arm read 6000 - ledger 2026-08-18d."
+  },
+  {
+   "t": 491,
+   "file": "the-balloon-has-no-self-kill-sub-481d0-48510-568.mgcr",
+   "source": "mc1l5",
+   "note": "THE BALLOON HAS NO SELF-KILL: sub_481D0_48510 (:56814-36) consumes the ch0 letter, stamps the killer into +38 (:56829) and RETURNS 2 - and nothing consumes that 2, because the walker (:52405) casts the class-3 handler to void(*)(Ent*) and discards it, unlike the castle twin sub_47EC0 whose 2 is the :56003 +70 = 6 park. A dead balloon is reaped by its own castle's FLEET DISPATCHER (sub_47400 :56354-58 - drop the cargo, soft-kill, clear the register slot) on that castle's even-+63 pass (:56016), so it flies on negative for a tick or two. Also: unlike the castle (:56696) the lethal arm clears NEITHER +94 nor +90, and the :56820-21 early-out is what stops the letter being eaten twice. mc1l5 slot 325 dies at t=492 with flags still 0xc and is reaped at t=493; the port killed it at t=492 and spawned its (10,39) cargo ball a tick early - ledger 2026-08-18d."
+  },
+  {
+   "t": 713,
+   "file": "the-ball-s-collector-test-is-class-model-and-not.mgcr",
+   "source": "mc1l5",
+   "note": "THE BALL'S COLLECTOR TEST IS CLASS + MODEL AND NOTHING ELSE: `if (ent[+146].+64 == 3 && ent[+146].+65 == 3)` (:29469, MC2 twin EF:26115-27) - no liveness test and no 0x400 test, because a SOFT KILL IS NOT A FREE and the record keeps its class, model and links for the rest of the tick. mc1l5 t=713: castle 301 culls balloon 325 over quota (flags 0xc to 0x40c, act_life still 8600) and ball 362 keeps its tether bit AND its 16/tick step for that whole tick - retail flags 76, port 12 - ledger 2026-08-18d."
+  },
+  {
+   "t": 932,
+   "file": "home-and-upgrade-are-not-targetless-transitions.mgcr",
+   "source": "mc1l5",
+   "note": "HOME AND UPGRADE ARE NOT TARGETLESS TRANSITIONS: the rival selector's PREDICATES stamp the established castle into +146/+148 themselves before returning 1 - sub_14310 (:18489-90), sub_14120 (:18432-33) and sub_14DC0's home leg (:18760-61), all three off wizext+50 - and only Build (sub_13F00) and Idle's CRUISE leg (:18756) touch +415 alone. mc1l5 t=933: Vodor's upgrade predicate fires the tick his ceiling crosses CASTLE_CAP[1] (ball 681's claim at t=922 pushed +136 9584 -> 10608) and retail re-points him from the ball at his own keep 680, +148 2000 -> 1061, where the port passed target 0 and left the ball standing - ledger 2026-08-18d."
+  },
+  {
+   "t": 2498,
+   "file": "the-castle-s-ball-absorption-walks-the-tick-top.mgcr",
+   "source": "mc1l5",
+   "note": "THE CASTLE'S BALL ABSORPTION WALKS THE TICK-TOP BALL CHAIN: sub_46DB0's absorb block (:57023-32) iterates the chain head at dword_AE408_AE3F8() + 36466 - var_u32_36462[1], the same roster the rival's ball pick reads at :18878 - and RETURNS on the FIRST member matching +65 == 39 && +144 == castle +24 && sub_11950 overlap. There is no class test and no 0x400 test: chain membership IS the filter. The port scanned the pool 1..n instead, so wherever two owned balls straddle the tower it drank the lower SLOT rather than the earlier CHAIN member. mc1l5 t=2499: castle 312 (stored 20260, cap 40000) takes ball 283's 140 in retail and ball 295's 2250 in the port - mana 20400 vs 22510 - and wrongly soft-kills 295 (flags 12 vs 1036), which retail only drinks two ticks later on its next even-+63 pass - ledger 2026-08-19."
+  },
+  {
+   "t": 4441,
+   "file": "the-militia-ladder-s-burrower-rung-walks-the-tic.mgcr",
+   "source": "mc1l5",
+   "note": "THE MILITIA LADDER'S BURROWER RUNG WALKS THE TICK-TOP m9 ROSTER: sub_1B5D0's second rung (:22624-31) walks the model-indexed chain at +36382 + 4*9 - membership sampled ONCE at the tick head, no life test on the walker (the bucket[0] law's model-9 coat). A burrower born MID-tick is invisible to that tick's ladder. mc1l5 t=4442: one trigger tick mints 68 m9s and 32 m4s; the port's live pool scan let newborn militia 774 acquire newborn burrower 757 and ARM in its birth frame (sclass/smodel/speed/chase/rand, five graded lanes) where retail's newborn walks the empty tick-top chain and stays idle at state 25 - segmented deviations 3,317 -> ~2,066 on this law - ledger 2026-08-19c."
+  },
+  {
+   "t": 4457,
+   "file": "a-house-spawn-rides-the-house-s-own-z-both-dwell.mgcr",
+   "source": "mc1l5",
+   "note": "A HOUSE SPAWN RIDES THE HOUSE'S OWN Z: both dwelling emitters copy the house's WHOLE position and then only step x += f80 - the defender pop-out (sub_28DC0 :30790-92) and the every-40 emit (:30825-27) - so the newborn is minted at the HOUSE's z and its own birth-frame creature_move settles it (-128/tick). The port probed the ground at the spawn site instead. mc1l5 t=4458: house 19 sits at z=2560 over a cliff lip whose pop-out site grounds at 1536; retail's newborn 808 reads 2432 (2560 minus one settle step) where the port's read 1536 - ledger 2026-08-19c."
+  },
+  {
+   "t": 5475,
+   "file": "the-m0-bob-survives-a-promoting-hit-the-wrapper.mgcr",
+   "source": "mc1l5",
+   "note": "THE m0 BOB SURVIVES A PROMOTING HIT: the wrapper trailer runs on EVERY hit path, the retarget-and-promote one included - sub_1B070/1B090/1B0E0 (:22172-90) all end `sub_1B120(a1x);` with no guard, so wizard 650's 400 promotes worm 271 and it still bobs (retail f26 20 z 3083, port 25 / 3058) - ledger 2026-08-17."
+  }
+ ]
 }

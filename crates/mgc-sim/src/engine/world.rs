@@ -2324,11 +2324,28 @@ impl World {
         // 9700 → 8700, the port 9700 → 7700, and again at every re-cast
         // in the burst (10673, 10676, 10684 …), nine of the take's
         // twenty-two reset clusters.
+        //
+        // ⭐ 23 REPEAT FIREBALLS IS ONE OF THEM TOO. Its command arm is
+        // the SAME bare LABEL_20→LABEL_32 flow (v5 = 23 ≥ 0x10, not 16,
+        // not 21 → LABEL_20; +62 clear → the silent gate → the +48
+        // reload), and its fire machine sub_58240 (:66296) is
+        // byte-identical to fireball's sub_56090 — fire at FULL, full-
+        // cost delta debit, decrement. The stream comes from the input
+        // layer alone: 23 is +60==0, so a HELD button re-issues the
+        // command every tick, each re-arm re-pins +48 = +50 and the
+        // token fires 1/tick at −600/tick. mc1l4 t=5376: the old
+        // command-site fire ran the whole stream ONE TICK EARLY (and
+        // at cost/count per shot) — retail's press@5375 arms in pair
+        // 5375→5376 and the first ball is born 5376→5377, slot 267.
         if matches!(
             id,
-            0 | 1 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 16 | 17 | 18 | 19 | 20 | 22
+            0 | 1 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 16 | 17 | 18 | 19 | 20 | 22 | 23
         ) {
-            if !edge {
+            // 23's held re-issue (the +60==0 input law) is a LEVEL,
+            // not an edge: every held tick re-arms the burst. The
+            // strict lane's dw_0 bits already re-emit per held tick;
+            // the native edge filter must not eat the autofire.
+            if !edge && id != 23 {
                 return;
             }
             let m = self.player.owned[id] as usize;
@@ -2828,6 +2845,16 @@ impl World {
         let mut any_transient = false;
         let mut ball_chain = std::mem::take(&mut self.g.ball_chain.list);
         ball_chain.clear();
+        // ⭐ BUCKET[0], THE CLASS-3 ROSTER (`var_u32_36462[0]`, the
+        // case-3 arm at :52253-62) — the SAME tick-top snapshot law as
+        // the ball chain, and the list every creature's wizard/castle
+        // scan actually walks. Membership is sampled ONCE, here:
+        // `actLife >= 0 && (flags & 0x10) == 0` (0x10 is a dead bit
+        // nothing sets). A class-3 body that dies MID-tick therefore
+        // stays a candidate for the rest of the tick — retail's
+        // walkers carry no life test of their own.
+        let mut wiz_chain = std::mem::take(&mut self.g.wiz_chain.list);
+        wiz_chain.clear();
         // The per-model class-5 roster chains ([`MobChains`]) rebuild
         // in the same sweep — ascending, retail's tick-top membership.
         let mc1_family = matches!(self.game, GameId::Mc1 | GameId::Mc1Hw);
@@ -2856,9 +2883,14 @@ impl World {
             if e.class64 == 10 && matches!(e.model65, 39 | 40) {
                 ball_chain.push(s as u16);
             }
+            if e.class64 == 3 && e.act_life >= 0 && e.flags & 0x10 == 0 {
+                wiz_chain.push(s as u16);
+            }
         }
         self.g.ball_chain.list = ball_chain;
         self.g.ball_chain.cut = usize::MAX;
+        self.g.wiz_chain.list = wiz_chain;
+        self.g.wiz_chain.cut = usize::MAX;
         self.g.mob_chains = mob_chains;
 
         let mut ctx = MobCtx {
@@ -2867,6 +2899,7 @@ impl World {
             pz: player.z,
             pyaw: player.heading,
             pmana: self.player.mana,
+            pmana_max: self.player.mana_max,
             pdead: self.player.state != LifeState::Alive,
             strict: self.strict_retail,
             patches: self.patches,
@@ -3606,22 +3639,29 @@ impl World {
                     // predicate, is what the corpus (12,16) slot-28
                     // stream shows.
                     let count1 = SPELLS[16].count as i16 - 1;
-                    let stamp = if pre70 == 6 {
+                    let stamp = match pre70 {
                         // The deferred downgrade tick: teardown pins
                         // (:56529); a level-0 death releases instead
                         // (:56533 — flags 0x400 set by the arm).
-                        if self.g.ent[i].flags & 0x400 != 0 {
-                            Some(0)
-                        } else {
-                            Some(count1)
+                        6 => {
+                            if self.g.ent[i].flags & 0x400 != 0 {
+                                Some(0)
+                            } else {
+                                Some(count1)
+                            }
                         }
-                    } else {
-                        match pre59 {
+                        // SETTLED: only the blast-shake countdown
+                        // pins (:55995-96) — the ==1 tick transitions
+                        // without pinning, so the census is on the
+                        // PRE value being >= 2.
+                        4 if pre50 >= 2 => Some(count1),
+                        // TRANSFORMING: the sub-state actions.
+                        5 => match pre59 {
                             2 => Some(0),
                             3 | 5 => Some(count1),
-                            4 if pre50 >= 2 => Some(count1),
                             _ => None,
-                        }
+                        },
+                        _ => None,
                     };
                     if let Some(v) = stamp {
                         let own = self.g.ent[i].id24;
@@ -5485,27 +5525,6 @@ impl World {
         }
         let def = &self.spells()[id];
 
-        // 23: the firehose.
-        if id == 23 {
-            if !self.spell_gate(id, def, pre_mana) {
-                self.g.snd_player(29); // cast-blocked buzz (:64930)
-                return;
-            }
-            // Per-shot debit at cost/count: the original charges the
-            // full +136 per 3-tick refire window at 1 shot/tick —
-            // the same drain rate, and the negative delta correctly
-            // starves regen while the stream is held.
-            self.mana_debit(def.possess_mana / def.count as u32);
-            self.g.ent[m].f26 = def.count as i16;
-            self.break_cloak(id);
-            // Per-shot discharge (:66296 family 9): every fireball of
-            // the firehose thunks — the machine-gun sound is the
-            // spell's identity.
-            self.g.snd_player(9);
-            self.cast_fireball(p, right, id);
-            return;
-        }
-
         let armed = self.g.ent[m].f26 > 0;
 
         // The hold-to-channel toggles re-arm while held — retail's
@@ -5672,9 +5691,10 @@ impl World {
             self.g.snd_player(snd);
         }
         match id {
-            // 0 Fireball (:65029): edge-triggered single shot (the
-            // hold-to-autofire lives on 23 alone).
-            0 => self.cast_fireball(p, right, 0),
+            // 0 Fireball (:65029) / 23 Repeat Fireballs (:66296): the
+            // same fire machine — 23's autofire is the held command
+            // re-arming the burst every tick, not a different emitter.
+            0 | 23 => self.cast_fireball(p, right, id),
             // 1 Heal (:65091): continuous — runs in the manifestation
             // tick while the burst is live.
             1 => {}
@@ -6085,8 +6105,8 @@ impl World {
 
     /// The MC1 castle-spell UPGRADE LOCK: engaged while a cast is in
     /// transit (the (9,10) ball / (10,43) token) OR the player's castle
-    /// is mid-transform — any `castle_tick` state other than ESTABLISHED
-    /// (`f59 == 4`, the standing/damage-intake tick). Retail pins the
+    /// is mid-transform — any castle macro-state other than SETTLED
+    /// (`tick70 == 4`, the standing/damage-intake tick). Retail pins the
     /// castle-spell manifestation throughout the transform (MC2's
     /// `sub_5F890`; the MC1 decompile is truncated but the port already
     /// runs the between-transformations window in `castle_tick` — the
@@ -6097,7 +6117,8 @@ impl World {
         if self.castle_build_lives() {
             return true;
         }
-        self.player_castle().is_some_and(|c| self.g.ent[c].f59 != 4)
+        self.player_castle()
+            .is_some_and(|c| self.g.ent[c].tick70 != 4)
     }
 
     /// The player's established castle slot (teleport anchor).
@@ -6336,13 +6357,24 @@ impl World {
             // 57 the match list is the whole filter.)
             let m = e.f140.max(0) as u32;
             world = world.saturating_add(m);
-            // Claim owner: mana balls/houses carry it in +144, the
-            // wizard-family (castle/balloon) in +24 (:56869-906).
-            let owner = if matches!((e.class64, e.model65), (3, 2) | (3, 3)) {
-                e.id24
-            } else {
-                e.f144
-            };
+            // ⭐ THE CREDIT IS ALWAYS THROUGH `+144`, FOR EVERY
+            // COUNTED ENTITY. The census body never reads `+24`: it
+            // hands each match to `sub_48340_48680` (:56911-19),
+            // whose ONLY owner source is `if (*(WORD *)(a1 + 144))`
+            // — creature, castle, balloon, mana ball and house
+            // alike. The port's `+24` arm for the wizard-family was
+            // invented, and on a RUNTIME-built castle it is
+            // invisible (the ball morph stamps `+24` AND `+144` to
+            // the same owner, :63506-11). It only parts on an
+            // AUTHORED castle, which the level file gives an owner
+            // in `+24` and leaves `+144 = 0`: retail credits such a
+            // castle to NOBODY, so a rival who starts the level with
+            // a stocked castle still censuses at the intrinsic base.
+            // mc1l5 t=1 is the exemplar — Vodor's authored castle
+            // (slot 680, `+24 = 675`, `+144 = 0`) holds 5000, and
+            // the port read his ceiling as 6000 where retail reads
+            // 1000. Only the world total is unconditional (:56919).
+            let owner = e.f144;
             if owner == PLAYER_TARGET {
                 max = max.saturating_add(m);
                 if e.class64 == 10 && e.model65 == 45 {
@@ -6796,7 +6828,11 @@ impl World {
                     let owner = self.g.ent[i].f144;
                     self.rivals.iter().position(|r| r.ent == owner)
                 } {
-                    self.rival_manifestation_tick(i, ri, spell);
+                    if matches!(spell, 2 | 21) {
+                        self.rival_speed_token_tick(i, ri, spell);
+                    } else {
+                        self.rival_manifestation_tick(i, ri, spell);
+                    }
                 }
             }
             return;
@@ -6854,56 +6890,45 @@ impl World {
                 if self.player.owned[spell] == i as u16
                     && matches!(
                         spell,
-                        0 | 2 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 16 | 17 | 18 | 19 | 20 | 21 | 22
+                        0 | 2
+                            | 3
+                            | 6
+                            | 7
+                            | 8
+                            | 9
+                            | 10
+                            | 11
+                            | 13
+                            | 16
+                            | 17
+                            | 18
+                            | 19
+                            | 20
+                            | 21
+                            | 22
+                            | 23
                     )
                 {
                     self.manifestation_tick(i, spell, ctx);
                     return;
                 }
-                // A RIVAL's speed token (sub_56380_568B0 remc1
-                // :65131-99 / remc1hw :61353-422 and the reverse twin
-                // sub_57F00_58410): only the conformance-visible leg
-                // runs — the (10,2) contrail puff every 4th token f63
-                // tick (:61401-08; f63 still holds the imported
-                // value, the loop clocks it after this handler, same
-                // as retail :52406). The owner's Type_160 v_12 speed
-                // writes ride that rival's own recorded pose. The
-                // owner resolves via f144 (the importer stamps retail
-                // +42 there on class-12; hw:0 corpus = 100% RIVAL
-                // contrail).
-                if matches!(spell, 2 | 21)
-                    // The importer homes the token's burst countdown
-                    // +48 into f26 (conformance.rs) — same lane the
-                    // native encoding uses.
-                    && self.g.ent[i].f26 > 0
-                    && self.g.ent[i].f63 & 3 == 0
-                {
-                    let o = self.g.ent[i].f144 as usize;
-                    let puff = self
-                        .g
-                        .ent
-                        .get(o)
-                        .filter(|c| c.class64 == 3 && c.flags & 0x400 == 0)
-                        .map(|c| ((c.x, c.y, c.z), c.id24));
-                    if let Some(((cx, cy, cz), own)) = puff {
-                        if let Some(p) = self.g.spawn_effect(2, cx, cy, cz) {
-                            // :61406-07 — id24 = the caster, act_life
-                            // ×4 (ctor 8 → 32; the t=3 corpus puff
-                            // reads 31).
-                            self.g.ent[p].id24 = own;
-                            self.g.ent[p].act_life *= 4;
-                        }
-                    }
-                }
-                // A RIVAL's launcher token runs the LIVE burst
-                // machine (the importer stamped +42 into f144 and
-                // homed +48 into f26): fire at full, debit, freeze,
-                // decrement — retail's sub_56090 at this very slot.
+                // A RIVAL's token runs its OWN handler at this slot
+                // (the importer stamped retail +42 into f144 and
+                // homed the +48 countdown into f26): the speed pair
+                // runs sub_56380/sub_57F00 in full — the v_14 kill,
+                // the ACTIVE bit, the snapped 3×/2× override, the
+                // (10,2) contrail and the sub_55E80 debit/pin — and
+                // the launcher set runs sub_56090's fire-at-full,
+                // debit, freeze, decrement.
                 if let Some(ri) = {
                     let owner = self.g.ent[i].f144;
                     self.rivals.iter().position(|r| r.ent == owner)
                 } {
-                    self.rival_manifestation_tick(i, ri, spell);
+                    if matches!(spell, 2 | 21) {
+                        self.rival_speed_token_tick(i, ri, spell);
+                    } else {
+                        self.rival_manifestation_tick(i, ri, spell);
+                    }
                 }
                 return; // owned tokens otherwise idle
             }
@@ -7184,13 +7209,18 @@ impl World {
         // the delta AFTER the token slots, so both land the same
         // frame like retail's. The gate failure (:64926-31) buzzes
         // and aborts the burst (+48 = 1, then the decrement).
-        // The traced hold/channel spells {2, 15, 21, 23} and heal
-        // keep their certified command-site fire — their tokens stay
+        // The traced hold/channel spells {2, 15, 21} and heal keep
+        // their certified command-site fire — their tokens stay
         // countdown + effects only (token-phase = ledgered lead).
+        // 23 Repeat Fireballs is a LAUNCHER: its machine sub_58240
+        // (:66296) is byte-identical to fireball's sub_56090, and the
+        // stream is the held command re-arming +48 every tick (mc1l4
+        // t=5376 — the whole burst fired one tick early from the
+        // command site before this).
         let was_live = self.g.ent[i].f26 > 0;
         let launcher = matches!(
             spell,
-            0 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 17 | 18 | 19 | 20 | 22
+            0 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 17 | 18 | 19 | 20 | 22 | 23
         );
         let mut fired = false;
         let mut gate_failed = false;
@@ -7224,17 +7254,29 @@ impl World {
                 self.g.ent[i].f26 = 1;
             } else if self.g.ent[i].f26 != count || self.mc1_token_gate(spell) {
                 speed_sustained = true;
+                let mut armed = false;
                 let full = {
                     let e = &mut self.g.ent[i];
                     let full = e.f26 == count;
                     if full && e.flags & 0x80 == 0 {
                         e.flags |= 0x80; // :65154-57 — the spell-ACTIVE bit
+                        armed = true;
                     }
                     if e.f26 == count - 2 {
                         e.flags &= !0x80; // :65160-65
                     }
                     full
                 };
+                if armed {
+                    // :65158 — the arm tick chimes 19 at the OWNER's
+                    // pool slot with `a2 = -1`, and case 19 (:64525-47)
+                    // is the plain positional group with no local-player
+                    // arm at all, so it sounds for every wizard. The
+                    // human's carpet is out of pool here; a sound at the
+                    // listener's own position IS the centred full-volume
+                    // request, which is what `snd_player` builds.
+                    self.g.snd_player(19);
+                }
                 if full {
                     // sub_55E80's full arm (:64942-52) from the
                     // TOKEN: the arm tick, every held re-arm and the
@@ -8041,6 +8083,7 @@ impl World {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: self.strict_retail,
             patches: self.patches,
@@ -8261,6 +8304,7 @@ impl World {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: self.strict_retail,
             patches: self.patches,
@@ -12238,6 +12282,7 @@ mod tests {
             pz: 100,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -12253,6 +12298,8 @@ mod tests {
             // even parity) so it sits dead ahead, inside range and cone.
             let (bx, by) = (w.g.ent[b].x, w.g.ent[b].y);
             w.g.ent[s].f30 = Gen::angle_between(ex, ey, bx, by);
+            // The scan walks BUCKET[0], the tick-top class-3 roster.
+            w.g.rebuild_wiz_chain();
 
             // The wyvern/crab/mound/guard scan takes every class-3 model.
             assert_eq!(
@@ -12274,7 +12321,12 @@ mod tests {
                 "model {model} owner-exclusion"
             );
             w.g.ent[s].id24 = 0;
-            w.g.ent[b].flags |= 0x400; // retire before the next model
+            // Retire before the next model, the way the tick top does:
+            // the reap FREES every 0x400 record before it rebuilds
+            // bucket[0], so a soft-killed body is gone from the NEXT
+            // tick's roster (and only from the next tick's).
+            w.g.ent[b].flags |= 0x400;
+            w.g.ent[b].class64 = 0;
         }
     }
 
@@ -12306,6 +12358,7 @@ mod tests {
                 pz: 100,
                 pyaw: 0,
                 pmana: 0,
+                pmana_max: 0,
                 pdead: false,
                 strict: false,
                 patches: crate::patches::WorldPatches::RETAIL,
@@ -12355,6 +12408,7 @@ mod tests {
         w.g.rival_ents[3] = rival as u16;
         let tag = w.g.ent[rival].id24;
         w.g.ent[s].f30 = Gen::angle_between(ex, ey, w.g.ent[rival].x, w.g.ent[rival].y);
+        w.g.rebuild_wiz_chain(); // the scan walks bucket[0]
 
         // Human parked far out so only the rival can be the pick.
         let far = MobCtx {
@@ -12363,6 +12417,7 @@ mod tests {
             pz: 100,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -12820,6 +12875,7 @@ mod tests {
             pz: 3200,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -12873,6 +12929,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -12930,6 +12987,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -12985,6 +13043,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -13090,6 +13149,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: true, // keep the human out of the candidate set
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -13196,6 +13256,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: true,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -13272,6 +13333,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: true,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -13339,6 +13401,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: true,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -14125,6 +14188,7 @@ mod tests {
                 pz: 0,
                 pyaw: 0,
                 pmana: 0,
+                pmana_max: 0,
                 pdead: false,
                 strict: false,
                 patches: crate::patches::WorldPatches::RETAIL,
@@ -14212,6 +14276,7 @@ mod tests {
                 pz: 0,
                 pyaw: 0,
                 pmana: 0,
+                pmana_max: 0,
                 pdead: false,
                 strict: false,
                 patches: crate::patches::WorldPatches::RETAIL,
@@ -14353,6 +14418,7 @@ mod tests {
                 pz: 0,
                 pyaw: 0,
                 pmana: 0,
+                pmana_max: 0,
                 pdead: false,
                 strict: false,
                 patches: crate::patches::WorldPatches::RETAIL,
@@ -14963,6 +15029,7 @@ mod tests {
             pz: 3200,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -18377,6 +18444,7 @@ mod tests {
             pz: 100,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -19234,10 +19302,36 @@ mod tests {
         assert_eq!(w.g.ent[c].f26, 2);
         assert_eq!(w.g.ent[c].id24, r.ent);
         assert_eq!(w.g.ent[c].f140, Gen::CASTLE_CAP[2].clamp(0, 320_000));
-        // The census credits the castle to the rival, not the player.
+        // ⭐ THE CENSUS CREDITS THROUGH `+144`, AND A FRESH CASTLE
+        // HAS NONE. `sub_48340_48680` (:56911-19) reads the counted
+        // entity's `+144` and nothing else; the level-load mint
+        // (`sub_44D30` :54974-55002) stamps only `+24` and the
+        // established-castle register. So the ceiling stays at the
+        // intrinsic base until the castle reaches its ESTABLISHED
+        // tick, whose `+144 = +24` echo (sub_46DB0 :56015) is what
+        // finally joins it to the census. mc1l5 measures both halves
+        // on Vodor's authored keep: `+144 = 0` and ceiling 1000 at
+        // t=0..5, `+144 = 675` and ceiling 6000 by t=100.
         let mut w = w;
         w.tick(away(), PlayerCommand::default());
-        assert!(w.rivals[0].mana_max > 1000);
+        assert_eq!(
+            w.rivals[0].mana_max, 1000,
+            "an un-echoed castle is credited to nobody"
+        );
+        let mut credited = 0;
+        for n in 2..64 {
+            w.tick(away(), PlayerCommand::default());
+            if w.rivals[0].mana_max > 1000 {
+                credited = n;
+                break;
+            }
+        }
+        assert!(credited > 0, "the established echo never joined the census");
+        assert_eq!(
+            w.rivals[0].mana_max,
+            1000 + w.g.ent[c].f140 as u32,
+            "the whole store, to the OWNER named in +144"
+        );
         assert_eq!(w.player.mana_max, 1000);
     }
 
@@ -22548,6 +22642,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -22599,6 +22694,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -22735,6 +22831,7 @@ mod tests {
             pz: 1056,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -22927,6 +23024,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -23028,6 +23126,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -23083,6 +23182,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -23147,6 +23247,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -23244,6 +23345,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -23289,6 +23391,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -23370,6 +23473,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -25247,6 +25351,7 @@ mod tests {
             pz: mz,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -25325,6 +25430,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -25372,6 +25478,7 @@ mod tests {
             pz: 0,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -25420,6 +25527,7 @@ mod tests {
             pz: z,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -26080,6 +26188,7 @@ mod tests {
             pz: mz,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -26178,6 +26287,7 @@ mod tests {
             pz,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -26451,6 +26561,7 @@ mod tests {
             pz: gz,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,
@@ -26547,6 +26658,7 @@ mod tests {
             pz: gz,
             pyaw: 0,
             pmana: 0,
+            pmana_max: 0,
             pdead: false,
             strict: false,
             patches: crate::patches::WorldPatches::RETAIL,

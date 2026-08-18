@@ -1410,7 +1410,8 @@ impl Gen {
     // - the owner's lock range rides the wizard row 59's v_28
     //   (4096 — every class-9 row carries the same value; the
     //   out-of-pool human has no row156);
-    // - the awake gate `byte_0x39_57` → f58 > 0;
+    // - the awake gate `byte_0x39_57` → f58 nonzero (retail's own
+    //   truthiness on the byte);
     // - bucket 22 = the worm family, approximated as model-22
     //   heads + their f54 chains;
     // - the cave-in `sub_3A7F0` on-ground filter → z within one
@@ -1518,7 +1519,14 @@ impl Gen {
                 if e.class64 != 5
                     || e.flags & 0x400 != 0
                     || e.act_life < 0
-                    || e.f58 <= 0
+                    // The awake gate is retail's TRUTHINESS on the
+                    // byte (`kx->byte_0x39_57`, EF:54811/54917/54964/
+                    // 54992) — not a sign test. Read `<= 0` it
+                    // rejected exactly the records the importer hands
+                    // over carrying the −6 never-woken sentinel while
+                    // admitting the natively-minted 250 that is the
+                    // same byte.
+                    || (e.f58 & 0xFF) == 0
                     || e.id24 == own
                 {
                     continue;

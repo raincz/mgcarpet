@@ -736,10 +736,6 @@ fn level_005_golden_state_hashes() {
         // A/B-proven with `MGC_NO_MC1_JAR_CTOR=1`, which restores these
         // hashes exactly (and `flight_tier_golden_state_hashes` too —
         // one cause, both goldens). mc1l42 6 field rows -> 0.
-        0xee64edaaec220851, // post-init
-        0x39d77410d2db3af5, // A
-        0xe713b6beeb64afe7, // B
-        0x8bc77e31d36b8627, // C
         // D/E re-pinned for THE SEGMENTED-REPLAY RESIDUE SESSION.
         // Post-init and A..C hold byte-for-byte and OBSERVABLE holds
         // at ALL SIX, which is the expected shape: every law that
@@ -753,8 +749,88 @@ fn level_005_golden_state_hashes() {
         // amount MC1's intake never reads), and the class-12 ctor
         // stamping its whole row (`+50`/`+136`/`+140` and both life
         // words) on every grant, not spell 16 alone.
-        0x543905e32a2cedd3, // D: 64 ticks of two-hand fireball combat
-        0x560e567a77e90fbb, // E: 100 aftermath ticks
+        // ⭐ ALL SIX re-pinned for THE RIVAL SPEED-TOKEN SESSION —
+        // REAL behavior, and mc1l5 is the level that measures it.
+        // Vodor enters this take under a 248-tick Accelerate burst,
+        // and the port now runs retail's whole token handler at the
+        // token's own pool slot (`sub_56380` :65131-99): the v_14
+        // kill, the `+16` ACTIVE bit, the SNAPPED 3x/2x speed
+        // override and `sub_55E80`'s debit/regen-pin. Beside it the
+        // mana census now credits a counted entity's store through
+        // `+144` alone (`sub_48340` :56911-19), so an authored castle
+        // whose owner sits only in `+24` feeds NOBODY until its
+        // established tick echoes the owner across. Post-init moves
+        // because the ceiling is a post-init hashed field; every
+        // later window moves because the rival genuinely flies,
+        // spends and regenerates differently. Corpus: mc1l5's
+        // free-run horizon 0 -> 491 boundaries and mc1l4's 1 -> 256,
+        // with l0/l1/l2/l42 each still ONE segment end to end.
+        // ⭐ ALL SIX re-pinned for THE CASTLE MACRO-STATE session. The
+        // castle's job byte `+70` is the DISPATCH KEY (the three rows
+        // at :4673-75 — 4 settled / 5 transforming / 6 leveler), not a
+        // spare: the port had fused both levels of the machine into
+        // `f59` and parked every castle at `tick70 = 5` forever, which
+        // made the rival's upgrade predicate (`castle.tick70 == 4`,
+        // :18428) unreachable in every free run. POST-INIT moves for a
+        // LAYOUT reason alone — the authored castle keeps the ctor's
+        // `+70 = 5` now that `spawn_starting_castle`'s (inert, and
+        // once harmless) `tick70 = 4` override is gone, matching the
+        // mint at :54974-55002 which never writes the job byte.
+        // ⭐ OBSERVABLE HOLDS BYTE-FOR-BYTE AT ALL SIX below, so this
+        // re-pin is LAYOUT-ONLY by the companion's construction: what
+        // moved is the castle's own state byte, and nothing inside
+        // these six windows plays differently for it. The evidence
+        // that the law does work is the corpus — mc1l5's free-run
+        // horizon 932 → 2498 boundaries on this change alone, with
+        // l0/l1/l2/l42 each still ONE bit-exact segment.
+        // ⭐ ALL SIX re-pinned AGAIN, same session, for THE DWELLING
+        // CTOR — and this half is REAL behavior, stated as such.
+        // `sub_3B690` (:47501) closes on `sub_36FA0_37360(event, 177)`
+        // and `sub_36DF0_371B0` hands the build row to
+        // `sub_37150_37510` (:43798), which writes the `+78 = 0xE000`
+        // z-center marker along with the extents; the occupancy cap
+        // `+128` is the footprint area over FOUR (corpus-measured on
+        // build rows 25/26/30/53 — the lift's `>> 4` misses every one
+        // by 4x). So every authored house on this level now wears its
+        // art, aims from its FOOTING instead of its roof, and holds
+        // four times the villagers it did. Corpus: mc1l5's free-run
+        // horizon 4226 -> 4441 and mc1l3's 710 -> 1858, with
+        // l0/l1/l2/l42 each still ONE bit-exact segment.
+        // ⭐ B..E re-pinned for THE SPEED TOKEN'S ARM CHIME — the last
+        // deliberately-unported line of the rival speed-token machine
+        // (:65158, `sub_55370_558A0(owner, -1, 19)`). Case 19 of the
+        // router (:64525-47) is the PLAIN POSITIONAL group: it carries
+        // no local-player arm at all, so this chime always sounded for
+        // every wizard and the port emitted it for none. OBSERVABLE
+        // HOLDS BYTE-FOR-BYTE AT ALL SIX — the sounds vec is hashed
+        // into the state digest and not into the observable
+        // projection, so this re-pin is a SOUND-ONLY one by
+        // construction. Post-init and A hold because the burst arms
+        // after them. A/B-measured against the same tree with the two
+        // emits stubbed out: the hashes below revert exactly to the
+        // previous pin, so nothing else in this change set (the hit
+        // flash's anim step, the `+58` import normalization) touches
+        // this level's goldens at all.
+        // ⭐ D/E re-pinned for THE REPEAT-FIREBALLS LAUNCHER LAW
+        // (mc1l4 t=5376): spell 23's command arm is retail's bare
+        // LABEL_20→LABEL_32 launcher flow (sub_46B00 :55893) and its
+        // fire machine sub_58240 (:66296) is byte-identical to
+        // fireball's sub_56090 — so the right hand's held stream in
+        // the D window now ARMS on the press tick and fires from the
+        // TOKEN one lap later, one ball per held tick at the FULL
+        // per-shot cost (the sub_55E80 delta debit), not the old
+        // command-site immediate fire at cost/count. Every D ball
+        // launches one tick later and the mana ledger drains 3x, so
+        // combat and its aftermath genuinely differ. Post-init..C
+        // hold byte-for-byte — nothing casts 23 before D. Corpus:
+        // mc1l4's segmented deviations 1,358 → 4 on this law alone,
+        // l0/l1/l2/l42 each still ONE bit-exact segment.
+        0xc200e23f98576fde, // post-init
+        0xd63f61f04f30e5e3, // A
+        0x94b0e2c5ee0dd745, // B
+        0x7b0b11359dea8314, // C
+        0xfa3da7ee6dbf5c19, // D: 64 ticks of two-hand fireball combat
+        0x7fd27fccf8bb901d, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,
@@ -855,8 +931,14 @@ fn level_005_golden_state_hashes() {
     // combat genuinely differ. Post-init..C hold — nothing is aimed
     // at before D.
     const OBSERVABLE: [u64; 6] = [
-        0x9c6fa2c7f861e019, // post-init — + unclaimed-dwelling poses
-        0xf2d0e60ad7a88dcc, // A
+        // ⭐ THE DWELLING CTOR moves OBSERVABLE at ALL SIX, unlike the
+        // castle macro-state re-pin above it, and that difference is
+        // the whole verdict: `+78` is the sprite half-height AND the
+        // aim lift, and `+128` is the occupancy cap, so the houses
+        // draw differently, offer a different aim point, and take four
+        // times the villagers off the map. Behavior, by design.
+        0x2dea118b36808b49, // post-init — + unclaimed-dwelling poses
+        0x9ef97ad683928ffc, // A
         // B..E re-pinned with THE mc1l2 RIVAL-WIZARD SESSION (see the
         // GOLDEN note). OBSERVABLE moving from B on is the CORRECT
         // signal — REAL behavior by design: Vodor heals through
@@ -873,8 +955,6 @@ fn level_005_golden_state_hashes() {
         // differently (boundary-tick casts, tick-top ball picks, no
         // militia house rung, bee pre-work on death ticks, knocked
         // corpses).
-        0x5074e1c62554ddbc, // B — settler phase + feeder leash
-        0x6738cadeda82682f, // C — trigger pre-move pose law
         // D/E re-pinned with the state pins above (THE CAST-PHASE
         // LAW + the area-broadcast tile rounding): the D-window
         // fireballs launch at arm+1 with the corpus f140 stamp and
@@ -914,8 +994,29 @@ fn level_005_golden_state_hashes() {
         // in D therefore lands differently and the aftermath in E
         // inherits it. Post-init..C hold, so nothing before the
         // combat window moved.
-        0xcefaec7ca85967d6, // D
-        0xe4a404dd47a0029a, // E
+        // ⭐ B..E re-pinned for THE RIVAL SPEED-TOKEN SESSION, and
+        // OBSERVABLE moving is the CORRECT signal: this is behavior,
+        // not layout. Vodor's Accelerate burst now drives his speed
+        // columns the way retail's does (snapped 3x on the arm tick,
+        // 2x while it holds, base on expiry) and ends the moment his
+        // brain retakes v_12, while his purse no longer regenerates
+        // under an active spell and his authored castle no longer
+        // inflates his ceiling. His flight path, his casts and every
+        // population he touches therefore differ from the dig window
+        // on. Post-init and A hold byte-for-byte — the far-afield
+        // idle is unmoved, which is the evidence that nothing outside
+        // the rival column changed.
+        // D/E re-pinned with THE REPEAT-FIREBALLS LAUNCHER LAW (see
+        // the GOLDEN note). OBSERVABLE moving is the CORRECT signal —
+        // REAL behavior by design: the right hand's stream launches
+        // one tick later and pays full cost per shot, so D's
+        // projectile poses, impacts and the populations that survive
+        // genuinely differ. Post-init..C hold — nothing casts 23
+        // before D.
+        0x43bf391b4fe16821, // B — settler phase + feeder leash
+        0x39bac991e82e172d, // C — trigger pre-move pose law
+        0xdfc55622b7f62818, // D
+        0xd86d6ea8a2a0e935, // E
     ];
     assert_eq!(
         obs, OBSERVABLE,

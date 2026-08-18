@@ -1,0 +1,42 @@
+{
+ "dir": "fixtures/mc1l4",
+ "pin_pose": "n1",
+ "fixtures": [
+  {
+   "t": 1,
+   "file": "the-rival-s-speed-token-runs-its-own-handler-at.mgcr",
+   "source": "mc1l4",
+   "note": "THE RIVAL'S SPEED TOKEN RUNS ITS OWN HANDLER AT ITS OWN POOL SLOT: sub_56380_568B0 (:65131-99) is the whole machine - the v_14 kill (:65146-51), the +16 spell-ACTIVE bit (:65154-65), the SNAPPED 3x/2x speed override into the owner's v_12 and +126 (:65167-78), the (10,2) contrail (:65179-87), sub_55E80's debit/regen-pin (:65188) and only then the shared decrement and expiry snap (:65190-97). The port ran the contrail alone and clocked the counter from the WIZARD's slot, so Vodor's arm tick left speed 0 where retail reads 240 = 3 x f128 and token 368's flags 5 where retail reads 0x85 - ledger 2026-08-18d."
+  },
+  {
+   "t": 256,
+   "file": "the-rival-s-ball-pick-walks-the-tick-top-chain-n.mgcr",
+   "source": "mc1l4",
+   "note": "THE RIVAL'S BALL PICK WALKS THE TICK-TOP CHAIN, NOT THE POOL: sub_15080 (:18878) seeds from var_u32_36462[1] - the ball roster the tick head rebuilt at :52287-96 before any handler ran - and follows the +0 links to the end (:18919), so a ball MINTED MID-TICK is invisible to every rival brain until the next rebuild. mc1l4 t=257 is the human's castle teardown, which ejects five balls into free slots; the port's pool sweep saw the newborn slot 32 and re-pointed Vodor at it, where retail found NO eligible ball at all, fell through to the mana hunt and re-picked creature 85 (+146 85 and +148 728 both unchanged). Neither the model test nor the 0x400 test survives the move - the chain build has no life or flag filter and admits models 39 AND 40, and sub_15080 adds no model test of its own - ledger 2026-08-18d."
+  },
+  {
+   "t": 1016,
+   "file": "bucket-0-is-a-tick-top-snapshot-and-its-walkers.mgcr",
+   "source": "mc1l4",
+   "note": "BUCKET[0] IS A TICK-TOP SNAPSHOT AND ITS WALKERS CARRY NO LIFE TEST: the case-3 arm of the tick head (:52253-62) samples actLife >= 0 && (+16 & 0x10) == 0 ONCE and links the survivors into var_u32_36462[0]; the m9 mound's castle hunt (:23752) tests only +65 == 2 && +24 != own and the shared creature Scan A (:21519-42) only (+16 & 0x20) == 0, so a class-3 body that takes its fatal hit MID-tick is still every later walker's answer for the rest of that tick. mc1l4 t=1017: castle 71 goes to actLife -1 earlier in that very tick and all four (5,9) mounds (388/419/444/450, +63 200/225/250/0, all == 0 mod v_26 25) still write its bearing - +34 holds 1174/1102/1114/1137 and rand holds - where the port's live-pool scan lost it to its own act_life < 0 conjunct and fell through to the sub_19D70 two-draw wander jitter. Free-run horizon 1016 -> 1223 boundaries. WARN the previous session read these four rows as an m9 CADENCE defect and dug +63 for a phase offset; grading +63 with MGC_GRADE_TICK_BYTE=1 shows it identical to retail's on every tick. The four rows are the COMPLETE divergence (--max-diffs 200 prints the same eight): the cause is SHARED state - retail kills castle 71 in that tick too - so it can never appear in a divergence list at all - ledger 2026-08-19b."
+  },
+  {
+   "t": 1223,
+   "file": "a-standing-fire-is-born-on-the-ground-sub-3a730.mgcr",
+   "source": "mc1l4",
+   "note": "A STANDING FIRE IS BORN ON THE GROUND: sub_3A730 (:46620), the (10,6) ctor, ends its position work with a GROUND SNAP - v2[38] = sub_11F50(a1) (:46640), word 38 = +76 = z - sampled at the CALLER's axis and overwriting the z sub_41CF0's link just stored, exactly like the sibling ctors 4/5/7 (:46600/:46608/:46672). The port linked the spawner's z and left it. mc1l4 t=1224: trees 268/271/279 burn on ground the (10,0) fire in slot 63 scorched 68 units DOWN earlier in the same tick, so the tree records still read the pre-dig 2157/2097/2161 that the port planted its flames at while retail's flames read the post-dig ground 2089/2042/2148 - ledger 2026-08-19b."
+  },
+  {
+   "t": 1238,
+   "file": "the-burning-tree-s-flame-takes-the-killer-s-owne.mgcr",
+   "source": "mc1l4",
+   "note": "THE BURNING TREE'S FLAME TAKES THE KILLER'S OWNER TAG, NOT THE KILLER'S SLOT: :57683 writes pool[a1->+94].+24 into the new (10,6) - the OWNER TAG OF THE RECORD THAT BROADCAST, one hop past the mailbox source - and it reads that record BLIND, through a slot the tick-top reap may already have freed (the freed-slot stale-bytes law: a hard free zeroes only +64 and pushes the slot, the rest of the record stands until it is re-minted). mc1l4 t=1239: tree 279's killer is (10,1) spreader 224, dead and freed since the tick top, whose +24 still names the (10,0) fire 390 that seeded it, so retail's flame belongs to 390 where the port's took the raw 224. The port had this cited as an identity ('the mailbox source is already the broadcaster's +24 owner'); it is not, for any effect an effect spawned - ledger 2026-08-19b."
+  },
+  {
+   "t": 5375,
+   "file": "repeat-fireballs-23-is-a-launcher-its-command-ar.mgcr",
+   "source": "mc1l4",
+   "note": "REPEAT FIREBALLS (23) IS A LAUNCHER: its command arm is the bare LABEL_20->LABEL_32 flow (sub_46B00 :55893 - silent mana gate, +48 = +50 reload, hand restamp, NOTHING else) and its fire machine sub_58240 (:66296) is byte-identical to fireball's sub_56090 - fire at FULL from the TOKEN's tick, full-cost sub_55E80 delta debit, decrement; the stream is the +60==0 held re-issue re-arming +48 every tick. The port fired at the COMMAND site (and at cost/count per shot), running the whole stream one tick early. mc1l4 t=5376: retail's press@5375 arms in pair 5375->5376 and the first ball is born 5376->5377 into slot 267 (the id24-358 ball with charge cargo 12); the port minted it a tick early into 399 and the rival's legitimate ball slid to 267 - one extra (9,0), five graded lanes, segmented deviations 1,358 -> 4 on this law alone - ledger 2026-08-19c."
+  }
+ ]
+}
