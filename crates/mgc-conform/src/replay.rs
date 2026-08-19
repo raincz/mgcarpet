@@ -1373,6 +1373,7 @@ fn run_mc1(
                 // diff at the same tick is CLEAN.
                 if let Some(sh) = shadow.as_mut() {
                     sh.compare_ents_mc1(&world, &st, slot, tick.t);
+                    sh.compare_wiz_mc1(&world, &st, tick.t);
                     sh.compare_free_mc1(&world, &st, slot, tick.t);
                 }
                 let mut pd = compare(&obs, &port, slot);

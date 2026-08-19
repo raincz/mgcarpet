@@ -1094,6 +1094,15 @@ pub struct RetailMc1 {
     pub recycle_stack: Vec<u16>,
     /// Level number stashed in the tail (+232707).
     pub level: u16,
+    /// `gamedata+36` — the erupting-volcano register: the pool slot of
+    /// the (10,18) driver currently holding the eruption latch (0 =
+    /// none). Retail stores `(ptr − pool)/164` (:28783) and clears it
+    /// only on a clean death (:28828), so a driver that goes dead-idle
+    /// leaves it latched forever — state no pool census can recover
+    /// (the MC2 `vortex` law, same words at D41A0 +0x31/+0x33).
+    pub erupting: u16,
+    /// `gamedata+38` — the (10,19) plume register (:28792).
+    pub plume: u16,
 }
 
 pub fn decode_retail_ent_mc1(d: &[u8], slot: u16) -> RetailEntMc1 {
@@ -1870,6 +1879,8 @@ pub fn decode_retail_mc1(d: &[u8]) -> Result<RetailMc1, String> {
         free_stack,
         recycle_stack,
         level: u16_(d, 232_707),
+        erupting: u16_(d, 36),
+        plume: u16_(d, 38),
     })
 }
 

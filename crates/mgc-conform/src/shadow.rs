@@ -23,6 +23,7 @@
 
 use mgc_formats::mgcr::RetailMc1;
 use mgc_sim::engine::world::World;
+use mgc_sim::engine::world::conformance::norm_retail_ai_state_mc1;
 use std::collections::BTreeMap;
 use std::io::Write as _;
 
@@ -56,16 +57,25 @@ pub(crate) struct Lane {
 #[derive(Default)]
 pub(crate) struct Shadow {
     pub(crate) lanes: BTreeMap<(u8, u8, &'static str), Lane>,
+    /// The WIZEXT half (`World::wiz_shadow_mc1`), keyed `(wiz, field)`
+    /// — the Lane's slot census holds the ARRAY INDEX there (0 for
+    /// scalars).
+    pub(crate) wiz_lanes: BTreeMap<(u8, &'static str), Lane>,
     /// Free-stack verdict: mismatched pairs / compared pairs / first
     /// example.
     pub(crate) free: (u64, u64, String),
-    /// Optional per-row TSV (`MGC_RAW_SHADOW_ROWS=<path>`).
+    /// Optional per-row TSV (`MGC_RAW_SHADOW_ROWS=<path>`). Wizard
+    /// rows ride the same file with class 255, model = wiz, slot =
+    /// array index.
     rows: Option<std::io::BufWriter<std::fs::File>>,
     /// `MGC_RAW_SHADOW_LANE=<class>,<model>,<field>` — the lane
     /// magnifier: every row of exactly that lane prints to stdout as
     /// it lands, so the census line's one `e.g.` widens to the whole
     /// story without a TSV round-trip.
     watch: Option<(u8, u8, String)>,
+    /// `MGC_WIZ_SHADOW_LANE=<wiz>,<field>` — the wizard-lane twin of
+    /// the magnifier.
+    wiz_watch: Option<(u8, String)>,
 }
 
 impl Shadow {
@@ -111,9 +121,26 @@ impl Shadow {
             }
             Err(_) => None,
         };
+        let wiz_watch = match std::env::var("MGC_WIZ_SHADOW_LANE") {
+            Ok(v) => {
+                let mut it = v.splitn(2, ',');
+                match (it.next(), it.next()) {
+                    (Some(w), Some(f)) => {
+                        let w = w
+                            .trim()
+                            .parse()
+                            .map_err(|_| format!("MGC_WIZ_SHADOW_LANE: bad wiz in {v:?}"))?;
+                        Some((w, f.trim().to_string()))
+                    }
+                    _ => return Err(format!("MGC_WIZ_SHADOW_LANE={v:?}: want <wiz>,<field>")),
+                }
+            }
+            Err(_) => None,
+        };
         Ok(Some(Shadow {
             rows,
             watch,
+            wiz_watch,
             ..Default::default()
         }))
     }
@@ -138,6 +165,31 @@ impl Shadow {
             println!(
                 "  LANE ({},{}) {} t={t} slot {slot}: retail {a} port {b}",
                 key.0, key.1, key.2
+            );
+        }
+    }
+
+    /// The wizard-lane twin of [`Self::hit`]; `idx` is the array index
+    /// (0 for scalars).
+    fn wiz_hit(&mut self, key: (u8, &'static str), t: u64, idx: u16, a: i64, b: i64) {
+        let lane = self.wiz_lanes.entry(key).or_default();
+        lane.rows += 1;
+        if lane.example.is_empty() {
+            lane.first_t = t;
+            lane.example = format!("t={t} wiz {} [{idx}]: retail {a} port {b}", key.0);
+        }
+        lane.last_t = t;
+        lane.slots.insert(idx);
+        if let Some(w) = self.rows.as_mut() {
+            let _ = writeln!(w, "{t}\t{idx}\t255\t{}\t{}\t{a}\t{b}", key.0, key.1);
+        }
+        if let Some((ww, wf)) = self.wiz_watch.as_ref()
+            && *ww == key.0
+            && wf == key.1
+        {
+            println!(
+                "  WIZ LANE {} {} t={t} [{idx}]: retail {a} port {b}",
+                key.0, key.1
             );
         }
     }
@@ -243,6 +295,83 @@ impl Shadow {
         }
     }
 
+    /// Diff every ungraded WIZEXT/brain lane against the recording's
+    /// wizard slice — the Type_160 half of the shadow. Pair mode names
+    /// the handler that wrote a register wrong THIS tick; the free run
+    /// names the first tick the port's carried wizard state parts from
+    /// retail's, which is the only instrument that can explain a
+    /// carpet-motion break whose pair diff is CLEAN (the mc1l4 t=5378
+    /// family this was built for).
+    pub(crate) fn compare_wiz_mc1(&mut self, world: &World, st: &RetailMc1, t: u64) {
+        for ws in world.wiz_shadow_mc1() {
+            let Some(w) = st.wizards.get(ws.wiz as usize) else {
+                continue;
+            };
+            // Eliminated on either side, or a carpet-slot desync: the
+            // roster/graded comparison owns those stories.
+            if w.play_index == 0 || (ws.wiz != 0 && w.play_index != ws.ent) {
+                continue;
+            }
+            let ent = st.ents.get(w.play_index as usize);
+            for &(name, port) in &ws.scalars {
+                let retail: i64 = match name {
+                    "charge" => w.charge as i64,
+                    "knock_dir" => w.knock_dir as i64,
+                    "knock_mag" => w.knock_mag as i64,
+                    "danger" => w.danger as i64,
+                    "aggro" => w.aggro as i64,
+                    "banked_houses" => w.banked_houses as i64,
+                    "castle_alert" => w.castle_alert as i64,
+                    "player_alert" => w.player_alert as i64,
+                    "balloon_alert" => w.balloon_alert as i64,
+                    "kills" => w.kills as i64,
+                    "shots" => w.shots as i64,
+                    "hits" => w.hits as i64,
+                    "cmd_speed" => w.cmd_speed as i64,
+                    "strafe" => w.strafe as i64,
+                    "grace" => w.grace as i64,
+                    "regen_stall" => w.regen_stall as i64,
+                    "life_rate" => w.life_rate as i64,
+                    "ai_state" => norm_retail_ai_state_mc1(w.ai_state),
+                    "burst" => w.burst as i64,
+                    "poverty" => (w.poverty != 0) as i64,
+                    // The port's human-target sentinel is not retail's
+                    // computed sig; those rows have no retail twin.
+                    "target_sig" if port == u16::MAX as i64 => continue,
+                    "target_sig" => match ent {
+                        Some(e) => e.f148 as i64,
+                        None => continue,
+                    },
+                    "mana_delta" => match ent {
+                        Some(e) => e.f132 as i64,
+                        None => continue,
+                    },
+                    _ => continue,
+                };
+                if retail != port {
+                    self.wiz_hit((ws.wiz, name), t, 0, retail, port);
+                }
+            }
+            for (name, port) in &ws.arrays {
+                let retail: Vec<i64> = match *name {
+                    "hate" => w.hate.iter().map(|&v| v as i64).collect(),
+                    "war" => w.war.iter().map(|&v| (v != 0) as i64).collect(),
+                    "learn" => w.learn.iter().map(|&v| v as i64).collect(),
+                    "cooldown" => w.cooldown.iter().map(|&v| v as i64).collect(),
+                    "owned" => w.owned_slots.iter().map(|&v| v as i64).collect(),
+                    "acq" => w.spell_list.iter().map(|&v| v as i64).collect(),
+                    "balloon_reg" => w.balloon_reg.iter().map(|&v| v as i64).collect(),
+                    _ => continue,
+                };
+                for (i, (&a, &b)) in retail.iter().zip(port).enumerate() {
+                    if a != b {
+                        self.wiz_hit((ws.wiz, name), t, i as u16, a, b);
+                    }
+                }
+            }
+        }
+    }
+
     /// Diff the port's free list against the recording's, filtered the
     /// way the importer itself filters it — so any difference is the
     /// port's own allocator ORDER, never the importer's census.
@@ -313,6 +442,28 @@ impl Shadow {
                 k.0,
                 k.1,
                 k.2,
+                lane.rows,
+                lane.first_t,
+                lane.last_t,
+                lane.slots.len(),
+                lane.example
+            );
+        }
+        let wiz_total: u64 = self.wiz_lanes.values().map(|l| l.rows).sum();
+        let _ = writeln!(
+            s,
+            "  WIZEXT SHADOW (Type_160 wizard/brain lanes): {wiz_total} mismatches"
+        );
+        let mut keys: Vec<_> = self.wiz_lanes.iter().collect();
+        if by_first {
+            keys.sort_by_key(|(k, l)| (l.first_t, k.0, k.1));
+        }
+        for (k, lane) in keys {
+            let _ = writeln!(
+                s,
+                "    wiz {} {}: {} rows t={}..{} across {} idx  e.g. {}",
+                k.0,
+                k.1,
                 lane.rows,
                 lane.first_t,
                 lane.last_t,

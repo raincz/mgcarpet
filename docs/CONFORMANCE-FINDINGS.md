@@ -15731,3 +15731,680 @@ reads 2432 (one settle step down), the port's read 1536. Named by
   flags/aim family. mc1l5 t=4478: `(5,9)slot814:z` — a burrower birth
   z in the same wave (check the trigger/disposition spawner's z law
   the way the house one fell).
+
+## 🏆 mc1l4 CERTIFIED + THE VOLCANO AND SHIELD FAMILIES (2026-08-19e)
+
+**mc1l4 is the FIFTH certified take — ONE bit-exact segment in BOTH
+instruments (14,755 ticks), devs 4 → 0** — and mc1l3 moved 352 → 71
+deviations (horizon 2303 → 5288) with mc1l5 riding along 2,066 → 1,931.
+The session opened by building the WIZEXT SHADOW the 2026-08-19d
+verdict called for: `Rival::wiz_shadow_lanes` + `World::wiz_shadow_mc1`
+project every modeled Type_160 lane (knock, vdes/jink, grace, brain
+registers, cooldown/learn/hate/war/owned/acq arrays, the human's Gen
+mirrors + `mana_delta`) in retail convention; `Shadow::compare_wiz_mc1`
+diffs them under BOTH runners (same `MGC_RAW_SHADOW=1` switch,
+`MGC_WIZ_SHADOW_LANE=<wiz>,<field>` magnifier). Its first run named the
+l4 break in one line: `wiz 1 strafe t=5377 retail 0 port 80`.
+
+### The l4 certification laws
+
+1. ⭐⭐ **THE RIVAL DEFENSE SCAN WALKS THE TICK-TOP CLASS-9 ROSTER**
+   (`sub_16800` :19777 seeds `var_u32_36462[3]`, the case-9 arm of the
+   tick-head sweep :52279 — every class-9, NO life/flags test). The
+   port's live pool scan dodged the pelting stream's newborn ball
+   (jink 80 where retail holds 0, t=5377 — the pair-CLEAN inherited
+   family). New `Gen::proj_chain` (TickChain, severed-chain law
+   included); both range gates STRICT (`< 0x1900000`, `< 0x100000`);
+   the 0x400 exclusion deleted (a soft kill is not a free). Unit test
+   `the_defense_scan_is_tick_top_and_keeps_soft_kills`.
+2. ⭐ **THE PROJECTILE ACQUIRE'S CLASS-3 ARM IS BUCKET[0]** (:64016-37)
+   — tick-top membership, per-node gates = owner tag + cloak 0x20 +
+   sig gate ONLY. The port's live `act_life < 0` re-test lost a rival
+   that died earlier the same tick; retail's newborn ball locks the
+   corpse (t=6865, the reap+remint at the same LCG moment).
+3. ⭐ **THE JAR SCATTER WALKS +532 IN PICKUP ORDER** (:55519-49), not
+   the spell-id book — `Rival::acq` is new state (grants append at the
+   first zero entry :19421-31; the scatter rewrites entries to model
+   numbers; the respawn re-grant re-mints from the entries IN PLACE
+   :54884-923 — model 0 ≡ the empty sentinel is retail's own fireball
+   collision, kept). Imported verbatim from `RetailWizardMc1
+   .spell_list`; snapshot + hash lanes extended (level_005 GOLDEN
+   re-pinned at ALL SIX, LAYOUT-ONLY — OBSERVABLE holds byte-for-byte).
+4. ⭐ **THE VULTURE'S WANDER TRAILER HUNTS GRAVES ON THE BALL CHAIN**
+   (`sub_1B200` :22260-88): after the shared two-scan, same v_26
+   cadence, model-40 members of `var_u32_36462[1]`, nearest 2-D within
+   v_28², NO cone/awake/cloak test — a find OVERRIDES the scan's pick:
+   chase = the grave, state = base+0 (the gliding idle). t=6888.
+
+### The l3 movement (volcano + shield families)
+
+5. **The eruption blast fireball is an ARM-ONLY mint** (:28805-23):
+   pitch RAW −386 (65150 — consumers mask), no f34/f36, no acquire
+   latch (the ball's own first tick scans), + the +150 dest = driver
+   stepped 1536 along yaw, ground-sampled. 6. **The lava bomb's LCG
+   hand-off** (:28800-02): ONE driver step lands in BOTH records after
+   the ctor's own draws. 7. **The bomb flight** (sub_25CE0): raw vz
+   applies THEN decays; +150/152 clamp IN PLACE; fire-seed on EVERY
+   unburnt contact (resetting +26); signed `<= 28` rest; the
+   existence probe is `sub_11E50` (:17179 — 2×2 RECENTRED window,
+   3-D dist ≤ 128, NO 0x400 test); downhill = raw heightmap corner
+   differential + 250/256 toward-zero friction. 8. **The (10,17)
+   fire-field ctor never tile-links** (sub_3AC70 :46935). 9. **model
+   13 routes to its real ctor** in `spawn_creator` (the trigger
+   ambush cloud, t=4224). 10. ⭐ **SHIELD IS A LAUNCHER-FAMILY SPELL**:
+   its command arm is the bare LABEL_20 arm-only flow; the token's +48
+   machine (`sub_566C0` :65266-89) does everything — the gate
+   (sub_55DD0: cost tested on the FULL tick only), the shield bit, the
+   sub_55E80 full-tick debit + mid-burst regen pin, the decrement.
+   11. ⭐⭐ **THE SHIELD BIT IS CLEARED PER-ABSORB, NOT AT EXPIRY**
+   (:55700-07): a lapsed machine's standing 0x40 quarters exactly ONE
+   more hit (t=4596: −112/−112 on a 448 raw hit, 70 ticks after the
+   duration ran out). The importer now restores the bit (flags 0x4000).
+
+### NEXT
+
+- **mc1l3 t=5289**: `missing(9,0)slot95x1` — a victim's death cascade:
+  retail spawns fire@227 + @131 + the human's ball@95; the port mints
+  only the ball (into 227). The dead ball 227 (chase 130, delivered
+  5288) was reaped; the victim's fatal-mail processing this tick
+  (human hits 222→223) spawns retail's extras. Also slot 130
+  target_yaw ±7 same pair.
+- **mc1l5 t=4478**: `(5,9)slot814:z` — the banked burrower birth z
+  (try the house-z shape on the trigger/disposition spawner).
+- Fixtures for the l3 session laws are OWED (the l4 three are cut:
+  6864/6884/6887 rows in conformance/mc1l4.json).
+
+## 🏆🏆 mc1l3 CERTIFIED + THE WALLED-IN PARTING SHOT + THE CASTLE-TOKEN
+## MACHINE (2026-08-20)
+
+**mc1l3 CERTIFIED — bit-exact END to end (11,992 boundaries, ONE
+segment, ZERO devs) in BOTH instruments** (`replay --segmented` and
+the app's `--replay-check`), the SEVENTH certified take alongside
+l0/l1/l2/l4/l42 (which all held END through every law below).
+**mc1l5 horizon 4,477 → 11,340** (devs 1,931 → 1,837) on four laws.
+762 tests green, `level_005` GOLDEN re-pinned A..E for the ladder
+stamp — **LAYOUT-ONLY, OBSERVABLE holds byte-for-byte at all six**.
+11 new fixtures (7 in mc1l3.json incl. the owed volcano/shield/m13
+rows, 4 in mc1l5.json), every one DIRTY on its pre-law rig and
+conforming at HEAD. `brief-baseline.txt` regenerated.
+
+### ⭐⭐ THE MOVER'S WALLED-IN KILL DOES NOT END THE TICK (mc1l3 t=5289
+### — the certification law)
+
+`sub_196E0`'s all-candidates-blocked arm writes `actLife = -1` and
+returns (:21293), leaving `+30` at the last-tried reverse probe
+(1027+1024 → 3) — and **no retail handler re-tests its own life after
+the mover**. All 18 caller sites (:21503 wander, :21654 chase, :21769
+pack, :22541 militia idle, :22869 m5 wander, :23057 m5 eat, :23205/
+:24188 m7/m9 chases, :23468, :23747 m9 hidden, :24469/:24632 genie
+wander/chase, :25068/:25380/:25556 villagers, :26145 wyvern, …) fall
+straight through to their think/scan/fire bodies, so the dying tick
+still draws from the private LCG, still re-bears, and still FIRES —
+death is taken by the NEXT tick's prologue (`actLife < 0` sits ABOVE
+the mover, outside the `+58` gate). :24469 is retail's own witness:
+the genie wander's regen add explicitly floors at −1, proof the body
+knowingly runs on a mover-killed tick. The port carried an invented
+post-move `act_life < 0` early-return at THIRTEEN sites — every one
+deleted. mc1l3 t=5289: militia 130 (5,3 chase, f70=0x14 → sub_1B520 =
+`sub_1A120(18, sub_1A8E0)`) walls in mid-chase against terrain, and
+retail still re-bears (+34 → 1034, the human's pre-carpet-move
+bearing) and mints its 500-damage dart — the port's missing third
+spawn, which shifted the whole free-stack cascade (fire→234 instead
+of 227, ball→227 instead of 95). ⚠ TWO METHOD NOTES: the banked
+"death cascade" framing was wrong twice — the port spawned 2 of 3
+(not 1 of 3), and slot 130's death was TERRAIN, not combat (mail was
+empty at both boundaries; the exactly-−1 boundary value is the
+mover's write, not damage arithmetic). ⚠ Table positions are HEX:
+`f70=20` is table pos 0x14 (sub_1B520), NOT 0x20 (sub_1C110, the m5
+chase) — half an hour lost to that misread.
+
+### THE l5 LAWS (horizon 4,477 → 11,340)
+
+1. ⭐ **THE m9 CTOR GROUND-SNAPS ITS Z** (t=4478 → 4575): `sub_38E70`
+   ends `+76 = sub_11F50(+72)` (:45289) after the place — the
+   standing-fire ctor's exact shape (:46640), and a ctor census finds
+   it on model 9 ALONE of the seventeen class-5 ctors. The hidden
+   mound converts militia 780 mid-descent (walker z 337 over ground
+   334) and retail's newborn burrower lands ON the ground.
+2. ⭐⭐ **THE CONVERT'S VICTIM SCAN IS TICK-TOP, GATELESS** (t=4576 →
+   5151): the mound's militia-conversion scan walks the per-model
+   roster `+36382 + 4*model` (:23887-98) with NO per-node tests — a
+   militiaman another mound converted and soft-killed EARLIER THE
+   SAME TICK is still a valid victim, so two mounds mint TWO
+   burrowers on one corpse (t=4576: mounds convert militia 792 twice,
+   newborns 796+813 at one axis; `sub_41E80` re-kills idempotently).
+   The port's pool scan carried live life/0x400/state-120 re-tests —
+   the chain-vs-pool bug in its per-node-gate-set costume, again.
+3. ⭐⭐ **THE RIVAL'S CASTLE UPGRADE IS THE REAL CAST CHAIN** (t=5152 →
+   5154; DEVIATIONS "rival_cast_castle (upgrade token)" RETIRED by
+   the graded-lane rule): retail's commit case 0x10 (:19191-97) gates
+   BOTH arms on the token being idle (+48 == 0, the in-transit pin)
+   and affordability (wiz +140 vs token +136), then with a BOUND
+   castle arms the token (+48 = +50 = 101) + cooldown[16] = 40 — the
+   castle-less FREE PLANT stays direct (no debit, no cooldown, and it
+   "succeeds" even when the pool refuses). The castle token's OWN
+   machine `sub_57610_57B40` (class-12 state 48, ported as
+   `Gen::rival_castle_token_tick`) fires ONCE at full: sub_55DD0 gate
+   (refusal ZEROES the counter), sub_55E80 debit, the (9,10) castle
+   ball minted at the WIZARD's axis (+126 += owner speed, +44/+140
+   from the token, +76 += owner +84, yaw/pitch copied, the +326
+   charge meter banked into ball +26 and zeroed — Vodor's recorded
+   200 → 0), split on the ESTABLISHED castle (bound → homing ball,
+   explode child (10,43); none → the 4096-ahead build lob, child
+   (3,2)) — then +48 parks at +50−1, the pin `sub_46D20` releases. A
+   failed allocation leaves it FULL (the child-allocation guard
+   family). `sub_55EF0`'s hand-muzzle sidestep is 0x100/0x200-gated
+   and both are clear for rivals — hull launch, no-op. Retail's
+   same-tick slot arithmetic reproduced free: the reaped-at-tick-top
+   husk 790 takes the ball, the mid-tick-delivered (9,13) at 737
+   recycles into the (10,43). Plus the Upgrade state's z-hover is the
+   REFUSED arm's alone (:18120-27) — a fired cast tick returns
+   without hovering, the RaidCastle shape.
+4. ⭐⭐ **THE CASTLE-TOKEN LADDER STAMP IS BIND-GATED, NOT HUMAN-GATED**
+   (t=5155 → 11,340): `sub_47DD0`'s every-tick re-price of the
+   owner's Create-Castle token (+136 = CAP[level], +140 = CAP/101)
+   runs for ANY owner whose castle is BOUND — retail's wizext+50,
+   written only by the level-up commit (:56484), cleared at removal
+   (:56534); the port's stand-in is the FIRST-COMMIT LATCH the
+   commit already stamps (flags bit 1, :56057-62). ⚠ THE OLD
+   "HUMAN-ONLY" READING IS CORRECTED: the banked "Vodor's token
+   holds the ctor 1000/9 (t=0..)" was TWO TICKS of pre-commit
+   window, not a standing fact — the recorded token reads 10000/99
+   from t=2 (measured this session with dump-state) and 20000/198
+   after his t=5153 upgrade. The
+   `rival_rebuild_waits_out_poverty_at_the_death_stamp` unit test
+   asserted the overread and was corrected (CAP[authored level]).
+
+### RECEIPTS
+
+- The 7 mc1l3 fixtures: volcano 2304/2305/2306/2341 + m13 4223 +
+  shield-launcher 4275 (all dirty on rig-volc @ a24a739) and the
+  walled-in law at 5288 (dirty on rig-prev @ e94b8fa: 28 field + 1
+  missing). ⚠ the banked candidate ticks 4224/4277/5289 were all
+  BOUNDARY ticks — a fixture's `t` is the PAIR-START; and the banked
+  shield-absorb tick 4596 makes NO fixture (the player flag word is
+  not a pair lane) — it got the
+  `a_lapsed_shield_machines_standing_bit_quarters_exactly_one_more_hit`
+  unit test instead, proven non-vacuous by reverting the clear.
+- The 4 mc1l5 fixtures (4477/4575/5151/5154): all dirty on rig-prev,
+  conforming at HEAD.
+- l3 pair mode: 213 field + 1 missing → 185 field + 0 missing. ⚠ THE
+  185 ARE UN-LEDGERED RESIDUE in the two verify-only lanes (f26
+  87 rows first t=2416 slot 624; mana/player.mana 49+49 rows first
+  t=4334) — pre-existing before this session, invisible to the
+  certified free run, NOT yet attributed. A future pair-mode dig owes
+  them an attribution or a known-deviations entry.
+
+### NEXT
+
+- **mc1l5 t=11341**: `(3,1)slot675:chase` — the rival PICKER retargets
+  onto the human (retail f146 332 → 650, f148 → 1034, ai_state
+  13 → 8, the human holding 20,393 mana) where the port keeps
+  creature 332. The selector cascade (hunt-mana vs attack-wizard
+  ordering or a scan gate) is the suspect; open with the wizext
+  shadow's ai_state/hate lanes on the pair.
+- The l3 pair-mode 185-row residue above (verify-only lanes).
+- mc1l32 still wants its v2 re-record (terrain channel) — player task.
+
+## 🏆 THE RIVAL'S WAR, REBUILD AND THE TELEPORT-BACK WAKE (2026-08-20b)
+
+**mc1l5 horizon 11,340 → 14,772; devs 1,837 → 472; clean 23,207 of
+23,679.** All six certified takes (l0/l1/l2/l3/l4/l42) held END through
+every law. 762 tests green, `brief-baseline.txt` regenerated. ⚠ NO
+FIXTURES CUT THIS SESSION — the retroactive extraction is OWED (see
+RECEIPTS OWED below).
+
+### The laws, in landing order
+
+1. ⭐⭐ **THE WAR ARM OF THE WIZARD PICK SHORT-CIRCUITS** (`sub_145B0`
+   :18563-68, rewritten whole): walking the tick-top wiz chain
+   (candidates `+65 <= 1`, not self, not spell-12-cloaked — no other
+   per-node test), the FIRST candidate whose war flag is set is
+   stamped rangelessly. Only hated/bully enter the nearest election,
+   and the range gate (`v_28+10`, strict `<`) applies to that winner
+   alone. The hated threshold reads the CANDIDATE ENTITY's `+136`
+   (`50000 − agg·(f136/10)/255 <= hate`, inclusive); the bully arm
+   wants UNBOUND (`wizext+50 == 0`) + knows-16 + poorer-by-`+140`;
+   and a castle-capable-but-unbound rival returns 0 outright
+   (:18549). mc1l5 t=11341: the human shells Vodor's castle from
+   ~14,200 units; war latched at t=11308 and retail retargets him
+   rangelessly at his next think tick (f63 % (64−tempo/4), read
+   pre-increment) where the port's in-election range test kept a bee.
+   This ONE family was two-thirds of the take's deviations
+   (1,837 → 646).
+2. ⭐⭐ **THE MC1 CASTLE-ARM WAR THRESHOLD IS FLAT 50000**: the
+   listing scales it by an aggression word read through the victim
+   CASTLE's `+160` (`*(v3+160)+522`) — a wizext pointer only CARPETS
+   carry; a castle's is mint-zero, so the term never contributes
+   (the l42 null-probe constant class). Corpus ×4: war latches at
+   50518/50659/51518 (first crossing above 50000), never at
+   49518/49659, and window 4 peaks 49531 → decays out unlatched. The
+   rival's true agg = 115 (the decay's 256−agg = 141, measured at
+   t=14600) would have latched five ticks early. The MC2 twin
+   (EF:7402-03) reads real wizard structs — MC1's ruling only.
+   (The port's early latch also explained the +141/tick hate-lane
+   offset: an early war pins the decay.)
+3. ⭐⭐ **THE RIVAL'S AT-CASTLE TEST RESOLVES THROUGH wizext+50 AND
+   PROBES THE FULL SUMMED AABB** (:17971-79): the castle comes from
+   the BOUND register (an unleveled authored castle grants nothing),
+   and the probe is `sub_11950` = `ent_overlap` (summed extents,
+   signed `+78` z leg) — the same law the human's `regen_boost`
+   already wears (mc1l0 t=1827). mc1l5 t=11681: Vodor brushes his
+   keep's summed box at |dx| 3362 vs 3328+125 and retail flips him to
+   the at-castle mana delta (+1000/tick, the register applied one
+   tick later) where the port's bare `<= f80/f82` point test kept
+   +100.
+4. ⭐⭐ **A STALE TARGET DOES NOT RESET THE STATE**: every combat
+   handler opens on the sig-vs-stored test and returns with NO
+   writes on mismatch (sub_13BA0 :18246, sub_13CA0 :18281, sub_13DD0
+   :18323) — state and target KEEP; the think cascade is the only
+   mover. There is NO Fresh transition in the retail machine. mc1l5
+   t=12158: the claimed ball dies, retail idles in Possess 450 ticks;
+   the port's invented drop-to-Fresh went hunting off-cadence.
+5. ⭐⭐ **THE CASTLE CAST'S BOUND ARM PRE-GATES SPACE AND AIM**
+   (sub_15A00 case 0x10 :19304-42): with wizext+50 bound, readiness
+   re-tests the upgrade SPACE (`sub_12D10` = the extents-at-level+1
+   probe) and the accuracy cone (`(255−acc)/4+20` degrees, `+30` vs
+   `+34`, `>=` refuses); the free-plant arm is cooldown+mana only.
+   mc1l5 t=13646: retail hovers re-aiming (aim error 154 vs cone
+   ~130, charge climbing) where the port's coneless commit armed the
+   token and fired a castle ball retail never cast.
+6. ⭐⭐ **THE WAKE PASS READS THE CARPET SETTLED LAST TICK — AND THE
+   REPLAY DRIVERS ALREADY HOLD IT IN `player`** (sub_54F00's
+   :64352-53 pool read): under the replay drivers the `human_pose_prev`
+   echo is settled(N−2) — one tick TOO DEEP — indistinguishable at
+   carpet speeds against the 24-tile gate and exposed only by the
+   castle teleport's 30k jump. mc1l5 t=14420: the human teleports
+   BACK from his keep into bee 338's wake radius; retail's t=14421
+   pass arms the bee, it consumes Vodor's 6,400 letter and dies —
+   the port's bee slept one extra tick. ⚠ NATIVE play feeds
+   this-tick's live pose as `player`, so there the echo IS correct
+   (mc1l0 t=414 pinned that side); `strict_retail` is the drive-mode
+   witness. ⚠⚠ The first fix (ctx for both modes) moved the MC2 cave
+   goldens — the native arm has its own corpus.
+7. ⭐⭐ **THE SCOUT'S HOME SUPERCELL IS THE SIGNED x/y OVER 16384,
+   TRUNCATING TOWARD ZERO** (:18362-67's CFSHL idiom): a wizard in
+   the upper half of the wrap (i16-negative) starts at cell 0/wrap,
+   not `u16 >> 14`. mc1l5 t=14694: Vodor rebuilds at x=65333 (i16
+   −203 → cell 0) and retail's FIRST candidate is literally (0,0) —
+   accepted at once (the human's castle wraps to Chebyshev 31232 >
+   12288) — where the port started at cell 3 and planted a
+   map-quadrant away. Plus: the occupancy scan is `sub_15260` = the
+   TICK-TOP WIZ CHAIN (`+24 != mine && +65 == 2`, NO 0x400 test —
+   a husk soft-killed mid-tick still vetoes).
+8. ⭐⭐ **THE FREE PLANT: NO (0,0) SENTINEL, AND A LEVEL-0 PLANT IS A
+   BARE FLAG** (:19200-08): (0,0) is a legal site value (the port's
+   invented empty-site test refused Vodor's rebuild forever); the
+   recorded birth row (t=14771 slot 478) is state 5 (TRANSFORM),
+   sprite 177 FLAT (art extents 184), ceiling 0, and NO terrain
+   stamp — BUILD row 0 is empty; the pad is painted by the level-up
+   commit's (10,42) painter. The port's immediate stamp raised tile
+   (0,0) under the class-11 trigger volume at (128,128), whose
+   every-8th-tick ground snap (`sub_5A090` :67642 — retail's own)
+   then witnessed the phantom mound.
+9. ⭐⭐ **`Gen::castle_reg` — THE REAL wizext+50** (new field, one per
+   player slot): written by the level-up commit (:56484, inside the
+   painter-spawn guard), the rival plant (:19206), cleared by the
+   teardown-to-0 (:56534, blind); imported raw each pair; the graded
+   `rival.castle` lane now projects it directly (the old
+   established-level pool scan could not represent a bound level-0
+   plant and a fresh unbound flag at once). Hash-SILENT via the
+   `CastleReg` newtype (PalFlash precedent) — every consequence is
+   hashed through entity lanes; save-silent like the tick chains.
+10. ⭐ **BUILD WRITES NO STATE** (sub_138F0): the handler aims,
+    arrives, casts — the old plant→Fresh invention cost the
+    follow-up tick, where retail's still-Build handler re-casts 16
+    through the NOW-bound arm and arms the upgrade token on the
+    day-old castle (t=14772's (9,10)).
+
+### ⚠ TRAPS
+
+- ⚠⚠ **THE rsel TRACE PRINTS AT SELECTOR ENTRY** — a state set later
+  the same tick shows only in the NEXT tick's print; half the Build
+  timeline was misread by one tick until the phase was checked.
+- ⚠⚠ **A NEW Gen FIELD ENTERS THE DERIVED HASH** — the cave goldens
+  (the one ungated hash assert) caught it; level_005's are
+  MGC_REQUIRE_GOLDENS-gated and would have failed silently later.
+  Hash-silent newtype or transparent-at-pristine, decide at the
+  field.
+- ⚠ `verify-deltas --tick T` does not scope the WRITE/WIZ tracers —
+  grep the full-run output by tick instead.
+
+### RECEIPTS OWED (next session)
+
+- **Fixtures** (rig at this session's parent): pair-start candidates
+  t=11340 (the war retarget, graded f146), t=13645 (the cone refusal
+  — the port armed cooldown[16] from imported state), t=14770/14771
+  (the plant + its ctor stamps). ⚠ several laws are PAIR-INVISIBLE
+  (the pair imports the very lanes that were wrong) → unit tests
+  instead: flat-50000 war latch, the wake phase (replay arm), the
+  scout's signed cell, stale-target-keep, Build-no-Fresh,
+  castle_reg bind/clear.
+- The l5 dig continues at **t=14773** `(3,1)slot675:z` — Vodor's z 4
+  units high over the freshly painted pad: the (10,42) painter's
+  row-height arithmetic vs the hover clamp, the next family.
+
+## 🏆 THE SITE-DATUM HOVER, THE LIVE PRICE GATE AND THE BALL PICK'S TWO BASES (2026-08-21)
+
+**mc1l5 horizon 14,772 → 16,211; devs 472 → 234; clean 23,445 of
+23,679.** All six certified takes held END through every law; the
+receipts debt from 2026-08-20b is PAID (six fixtures cut with rig
+receipts, six unit-test laws pinned, 11 rival tests green).
+
+### The receipts (first — the 2026-08-20b debt)
+
+- **Fixtures cut** (rig re-pointed at 3f95041, the uncommitted-work
+  parent; each fails at the rig with exactly its own lanes, passes at
+  HEAD): the war-arm short-circuit at **t=15948** (the banked t=11340
+  pair carries the at-castle mana-register residue — `tools/
+  fixture_candidates.py` found the clean 15-tick cluster), the cone
+  refusal at **t=13646** (the banked 13645 was the off-by-one-bracket
+  trap AGAIN), the free plant at **t=14770**, and this session's
+  Build-hover at **t=14772**. ⚠ the banked t=14771 (bare-flag ctor)
+  is VACUOUS in pair mode — pairs run on measured terrain, so a
+  terrain-stamp law can never show — dropped for unit tests.
+- **Unit tests** (rivals.rs): flat-50000 war latch (strict >, agg
+  never contributes), the signed scout cell + the scratch walk, the
+  stale-target-keep, the bare-flag plant + Build-no-state + the
+  next-tick bound re-cast + castle_reg bind/teardown-clear (one
+  test), the wake pass's settled-last-tick phase (native echo vs
+  `strict_retail` arg, both arms), and the claim gate below.
+
+### The laws
+
+1. ⭐⭐ **THE BUILD HANDLER'S REFUSED CAST Z-HOVERS TOWARD THE SITE
+   DATUM +154** (sub_138F0 :18160-66): arrived with cast-16 refused,
+   `z += sign(z − (site_z + 512)) · v_14`. +154 is stamped at
+   scout-accept (:18381-83) with THE SCRATCH RECORD'S z — sub_13F00
+   walks its candidates through slot 0's x/y (:18374-86) and never
+   writes slot 0's z, the parting-shot family's costume on the
+   SCOUT. The band-settle floor (ground + v_12) and this nudge run
+   in alternation, parking Vodor 4 BELOW the floor: t=14772-14800
+   retail z 975 = floor 979 − 4 at every tick; the hover-less port
+   parked ON the floor. The port's scout now walks slot 0 per probe
+   and stamps the wizard's dest_x/dest_y/site_z at accept.
+   ⚠ REFUTED ON THE WAY: the banked "(10,42) painter row-height"
+   framing — pair mode (measured terrain) showed the same +4, the
+   castle build rows 1..8 are ALL SQUARE, and the ±4 was constant
+   across four interpolation fractions and both triangle arms — a
+   second WRITER, not a terrain or interp error. (Real but inert
+   side-find: retail's live painter sub_285C0 walks its inner row
+   rects TRANSPOSED — x-half from byte 5, RLE rows from byte 4 —
+   where sub_27D30/sub_279D0 and the port walk straight; square
+   castle rows make it unobservable for the pad.)
+2. ⭐⭐ **THE CLAIM GATE READS THE TOKEN'S LIVE +136 PRICE CACHE**
+   (sub_14230 :18452): `wiz +136 <= manifestation +136` — CAP[level]
+   housed, 1000 ctor, 5000 after a raze — and NO gate at all when 16
+   is unowned. Claiming re-opens after every upgrade AND while
+   razed. t=16081: razed Vodor (ceiling 1768, token 5000) re-picks
+   the wild 2000-ball into Possess; the port's static-cost stand-in
+   (1768 > 1000) fell through to HuntMana. Unit-test-pinned (the
+   exemplar pair is register-polluted).
+3. ⭐⭐ **THE BALL PICK (sub_15080) IS TWO-BASED AND FLAG-BLIND**,
+   rewritten verbatim: (a) the war test is the LIVE wealth-scaled
+   hate formula (:18886-90) off the owner ENTITY's +136 — the
+   latched war[] flag is the castle sweep's lane and is NOT read
+   (Vodor's flag vs the human stays latched at 16081 while the live
+   hate has decayed out); (b) at-war balls score from the BOUND
+   CASTLE REGISTER's entity — `v9 = pool + 164·wizext+50`, which
+   for an UNBOUND rival is pool slot 0, THE SCRATCH RECORD, whose
+   x/y the scout mutates; (c) a tag whose ENTITY is not class 3
+   takes the ungated wild arm; (d) the neutral-owned guard is the
+   nearest FOREIGN CARPET to the BALL (sub_15340 — no carpet at
+   all → no take; 5120 gate) plus the castle-overlap veto
+   (sub_15260 unbound / sub_153B0 bound). ⚠⚠ THE PORT'S HUMAN
+   CARPET RIDES OUT-OF-POOL, so the tick-top wiz chain never holds
+   it — the guard must weigh the pose-driven human or every
+   human-claimed ball reads guarded: the mid-session regression
+   (horizon 252!) was exactly this, retail's Vodor taking ball 362
+   the human had wandered 5,900 units from. Fixture at t=253 pins
+   the guard; t=15948's fixture pins the war arm.
+
+### ⚠ TRAPS
+
+- ⚠⚠ **A `cd` INTO A RIG WORKTREE POISONS EVERY LATER RELATIVE
+  PATH** — half an hour of reads ran against rig-post's stale
+  checkout (old fixtures.rs, old manifests) before `pwd` exposed
+  it. Absolute paths in rig sessions, always.
+- ⚠⚠ the MGC_RIVAL_TRACE selector lines under `--segmented` reflect
+  the RE-ANCHORED (retail) state after each reset — a post-reset
+  entry print is not the free run's product.
+- ⚠ the at-castle +1000 mana-delta REGISTER is a systematic
+  pair-mode artifact on human-at-castle ticks (the register is Gen
+  state a pair import cannot rebuild): it polluted both banked
+  exemplars (11340, 16080). Check candidate pairs for
+  `field:3,0:mana` before cutting.
+
+### NEXT
+
+- **mc1l5 t=16212** `(3,1)slot675:life`: a STANDING VOLCANO —
+  slot 18, a self-owned (10,13) with a chain via next20, f26
+  counting — ERUPTS (player-identified: volcano projectiles, not
+  lightning): ~12 (10,13) BOMBS minted around/at Vodor (id24=18,
+  f26=1, f44=100, one reviving a reaped (9,1) possess-lob slot), a
+  200 ch0 letter on Vodor (life −200 +20 regen = the recorded
+  −180, knock 20/396, residue (200,0)), and a (10,13)→(10,6)
+  revive in the same swarm. This is the l4 volcano family's m13
+  creator routing on a PERSISTENT ambient volcano — the port's
+  (10,13) handler misses this eruption/strike arm here. The pair
+  16211→16212 reproduces it (import-clean), so it is
+  pair-workable.
+- The l3 pair-mode 185-row residue (f26 t=2416 slot 624, mana
+  t=4334) — untouched this session, still un-attributed.
+- mc1l32 v2 re-record (player task).
+
+## 🏆🏆🏆 mc1l5 CERTIFIED — THE PLUME FIELD, THE SITE DATUM, THE DISARMED
+## CASCADE AND THE FIRE-STORM TAIL (2026-08-22)
+
+**mc1l5 is the EIGHTH certified take: ONE bit-exact segment in BOTH
+instruments** (`replay --segmented` and `mgcarpet --replay-check`),
+23,679/23,679 clean from 16,211/234-dev. All seven corpus takes now
+read `segments=1 devs=0 horizon=END`. Eleven laws in one sitting; 8
+fixtures rig-receipted at c5a8e13 (`tools/conform-rig prev` re-pointed
+and rebuilt), 4 unit tests, brief-baseline regenerated.
+
+1. **THE ERUPTION PLUME IS A DAMAGE FIELD FOR ITS WHOLE LIFE**
+   (16,211 → 17,644). `sub_26140` closes UNCONDITIONALLY with
+   `sub_120B0(a1, 0, +44)` — 200 ch0 per tick over the 512 extents,
+   running on the death tick too (the call sits after the free,
+   outside the life branch). The banked "OPEN" note in `plume_tick`
+   was this exact law; t=16212 finally exercised it (Vodor at ~800
+   units: life 10000→9820, knock 20/396). The rest of the eruption
+   (12 puff mints + 2 revives + the (10,6) strike) already conformed
+   — the memory's "handler misses the eruption arm" was over-scoped,
+   the miss was the broadcast alone.
+2. **THE CASTLE CTOR GROUNDS THE RAW AXIS INTO THE SITE DATUM**
+   (17,644 → 19,576). `sub_37920` (:44251/:44256) runs ONE
+   `sub_11F50` on the PRE-SNAP axis and writes it to both the link z
+   and `+154`; the caller's z is ignored. The transform's painter
+   mints AT the `+150` triple (`sub_47020` :56100), so the port's
+   unstamped `+154` bore a painter at z 0 — t=17645, Vodor's
+   post-raze rebuild at scouted site (0,0), dest (0,0) + site_z 1632
+   (tile (0,0) is LEGAL — the wrap corner next to Vodor's quarter).
+   `spawn_class3`'s model-2 arm now mirrors `spawn_castle`. Unit
+   test; pair-invisible (imports carry the triple).
+3. **A BALLOON AT ITS OWNER'S CASTLE IS EXEMPT BY SUMMED-AABB
+   OVERLAP, NOT A DISTANCE DISC** (19,576 → 22,390). `sub_147E0`'s
+   docked test (:18628-33) is `sub_11950` vs the owner's BOUND castle
+   (wizext+50; unbound → slot 0, the scratch). The human's level-6
+   castle carries 6784-unit extents — balloons sheltered ~7000 out.
+   t=19577: balloon 900 at dx 5852 / dy 2636 is AT HOME, the raid
+   refuses, Vodor falls to the ball claim (the recorded 9→6 Possess
+   on ball 393) where the port's invented 2048-disc kept the raid.
+   The pick is now retail-shaped end to end: tick-top wiz-chain walk
+   (no life/0x400 per-node tests), global-nearest election, range
+   gate on the WINNER only (strict `>= v_28²`, no runner-up
+   fallback). ⭐ The dig ruled out, in order: the sub_16920 offense
+   pre-gate (Vodor still owned fireball — landed anyway as arm 6's
+   missing gate, listing-verbatim, unit-test-pinned), the war
+   threshold (hate 65535 saturated, wealth = the human entity's
+   +136 = 176,026 — `wizard_wealth` was already right), and the
+   range constant (row 8 v_28 = 8192 — the BEHAVIOR field names
+   drift from byte offsets after the u32 at +20; values are
+   positionally faithful).
+4. **A MID-BURST RAPID-FIREBALL PAIR CARRIES THE PENDING −600
+   DELTA** (devs 222 → 35, segments 223 → 36 — ONE import law, 187
+   reset clusters). The wizard-apply pipeline is one frame deep
+   (f132 stamped at t applies at t+1 — 19577's `f132 −50 → 0` with
+   `f140 −50` is the pipeline photographed), so the import must seed
+   the recorded f132 for a mid-burst spell-23 token exactly as for
+   the other launchers — the keep-list in `conformance.rs` had
+   0-22's launcher set and MISSED 23, zeroing the human's pending
+   debit at every re-anchor while the take autofired. Fixture
+   @22390. ⚠ `spell_cast_cost(23)` was RIGHT all along —
+   `SpellDef.possess_mana` is badly named but IS the a4 total (600).
+5. **THE M7 WANDERER SNAPS TO FULL LIFE ON ITS THINK CADENCE**
+   (22,880 head + 22,963 sibling). `sub_1C900` opens with the
+   `f63 % v_26 == 0` heal: any nonzero life → max_life. The
+   decompile's arithmetic is a mangled bool; the recording arbitrates
+   the literal snap (t=22881 slot 57: 3200 → 4000 in ONE tick — a
+   1/64 rate would read 3262). Hoisted as `(7,1)` prework. Fixture
+   @22880.
+6. **THE M7 CHASE HEAD COUNTS ITS DUG-IN TIMER ON HIT TICKS TOO**
+   (22,390 → 22,880 + the three INHERITED heads 22391/22821/23033 —
+   the whole (5,7) 20-vs-3 flee-speed family). `sub_1C960`'s f26
+   decrement + takeoff flip sit ABOVE the shared core's damage
+   prologue; the port's intake abort ate the decrement on hit ticks
+   (a thrower standing in the fire wall froze at f26=9 while retail
+   counted 9→8). Hoisted as `(7,2)` prework beside m2/m8/m9 — the
+   HIT-ABORT RESTRUCTURE class claims another member. Fixture
+   @23064.
+7. **THE NAPALM CLOUD DRAWS ONCE BEFORE THE CELL LOOP** (the 27-pair
+   tail family 23404-23430 → gone; devs 35 → 11). `sub_29780` steps
+   the cloud's LCG at :31160 — after the ring iterator opens, before
+   the per-cell jitter pairs — and stamps each flame's `f26 = 7` (an
+   ASSIGN, the port accumulated). Without the pre-draw every flame's
+   jitter read one draw early: 15 re-popped free slots a tick
+   carrying fractionally shifted corpse x/y (the graded lanes were
+   the free-stack corpses of 1-tick flame sheets — the fire wall
+   re-pops the same slots every wave). Fixture @23404.
+8. **THE NAPALM CLOUD CTOR IS UNLINKED, SPEED 256, FLAGS |= 1**
+   (23404's residual flags/speed rows). `sub_3B8E0` writes position
+   DIRECT (+72/+76 — no `sub_41CF0` anywhere in the ctor) with
+   `+126 = 256` and `+16 |= 1`; the port linked it (stamping the
+   port's link bit 4) and skipped both writes. The recorded cloud
+   reads flags exactly 1, speed 256, OFF the tile chain.
+9. **THE FIRE STORM BOLT MINT IS ARM-ONLY AND BANKS THE CHARGE**
+   (23,381). `sub_57D40` writes yaw/pitch into +30/+32 alone — no
+   +34/+36, no acquire latch — and moves wizext+326 into the bolt's
+   +26, zeroing the meter (the recorded born row: f26 166, f34 0).
+   Fixture @23381.
+10. **BASE MC1'S M16 BOLT RUNS THE ACQUIRE CONE TOO** (23,382).
+    The first flight tick carries `sub_54520`'s whole signature —
+    the head clamp (+26 166→16), the flags-bit-2 latch, a pick
+    (f146=773) and the heading SNAP (620/31 → 664/21, f34/f36
+    mirrored). remc1's `sub_54520` shows NO case 16 — the same
+    listing whose truncated class-9 state table hid this handler's
+    +44 copy. The recording is the oracle; the SURVEY-MC1HW §3a
+    "base flies straight" note is RETIRED and the HW seam removed
+    (cone 0x100/0x71 both variants). Fixture @23382; the old unit
+    test now asserts BOTH game ids acquire.
+11. **THE FIRE-STORM TAIL: CRUISE, ROW AND DEST** (23,383/23,389 —
+    the take's last two devs, all pair-invisible). `sub_3A270`: +128
+    keeps the ctor's 384 (the carpet's launch boost rides +126 alone
+    and decays at the ±2 ease — the port's `f128 = f126` pin held
+    432); `+156 = &behavior[5]` (v_2 = 5 is the homing tail's whole
+    turn authority — the port's row 0 swung 664→720 where retail
+    eased 664→669); and `sub_57D40`'s dest triple projects 0x4000
+    along the aim FROM THE CARPET'S RAW AXIS, not the muzzle (the
+    residual offset was exactly muzzle − carpet). One unit test pins
+    all three.
+
+⚠ METHOD NOTES. (a) The balloon dig burned four hypotheses because
+each gate was CHECKED IN ISOLATION against a model of the pick — the
+kill came from instrumenting the port's own pick and reading all
+gates side by side in one line. Instrument first, hypothesize second.
+(b) `dump-state --port` (free-run) vs `--start t-1` (pair view)
+DISAGREEING on a lane is itself the diagnosis: the mint is wrong and
+the import was masking it — dest/row/f128 all fell to this one move.
+(c) A conforming pair plus a diverging free run at the SAME tick =
+inherited through an ungraded lane; the free-run dump's ≠ rows on
+the SAME slot found site_z, dest and row156 in seconds each.
+
+NEXT: the l3 pair-mode 185-row residue (f26 t=2416 slot 624, mana
+t=4334) — still un-attributed; mc1l32 v2 is RECORDED and now
+UNBLOCKED (l5 reached END; the deferral is over); the MC2 playtest
+remains deferred.
+
+## 🏆 mc1l3 PAIR-PERFECT — THE DROWNING BOMB'S TICK, THE SHIELD'S
+## KEEP-LIST SEAT AND THE CAPTURED VOLCANO LATCH (2026-08-23)
+
+The banked l3 pair-mode 185-row residue (f26 87 rows, mana 2×49 rows)
+attributed and CLOSED in one sitting: **verify-deltas mc1l3 now reads
+11,992/11,992 conforming, 0 field / 0 missing / 0 extra** — the first
+take pair-perfect on top of its free-run certification. Three laws,
+one per family; all seven certified takes hold END in BOTH instruments
+after each; 445 mgc-sim tests; 129 fixtures green; the three new
+fixtures rig-receipted at 01dc934, each regressing with exactly its
+own lane.
+
+1. **THE (10,18) FAMILY WAS THE IMPORT, NOT THE DRIVER** (76 of the 87
+   f26 rows, t=5009..9667, all slot 347). The port's eruption machine
+   was already exact — what diverged was the PAIR IMPORT forcing
+   `erupting`/`plume` to 0. Retail's registers live at
+   **gamedata+36/+38** (:28783/:28792, slot = (ptr−pool)/164, cleared
+   only by the clean death :28828) — INSIDE the captured struct
+   image, between `spawn_count` (+12..32) and the free-stack top
+   (+40), captured in every MC1 take since the recorder's first day
+   and never decoded. Slot 347 erupted at t≈2303, missed its 1/5
+   roll at c=127 and went DEAD-IDLE — the authentic
+   no-more-eruptions-anywhere quirk — so retail's latch held forever
+   while the port's forced 0 let the dormant driver re-arm (f26 → 0)
+   on every private `d%100==0` roll: 76 hits over ~7400 dormant ticks
+   ≈ the 1/100 rate, the whole family in one arithmetic. The MC1 face
+   of the MC2 vortex/fire_col law (D41A0 +0x31/+0x33), which called
+   this state "NOT reconstructable from entity state" — true here
+   too, but for MC1 nothing needed reconstructing: it was in the
+   image all along. `decode_retail_mc1` now lifts both words;
+   `dump-state` prints them (`erupting=347 plume=336` at t=5009, the
+   one-line confirmation). Fixture @5009.
+2. **THE LAVA BOMB'S WATER SPLASH IS NOT AN EARLY-OUT** (the other 11
+   f26 rows, t=2416..2550, one per drowned bomb). `sub_25A60`'s
+   splash arm (:28628-33) spawns the (10,5) at the NEW position,
+   kills the bomb ONLY inside `if (v9)` — a pool-refused splash
+   leaves it FLYING — and then FALLS THROUGH to the unconditional
+   `+26 += 1`, the relink and the grounded roll. The port's
+   `return false` after `splash_and_die` was the walled-in-parting-
+   shot disease in a projectile's splash arm: the dying tick still
+   counts. explain @2417 names it in one row: slot 624 reap-flagged,
+   bounced (f46 −28→14), splash 331 born, f26 2→3. Fixture @2416;
+   the corpus-silent refusal arm → unit test
+   `a_drowning_lava_bomb_still_counts_its_tick`.
+3. **SHIELD (4) TAKES ITS KEEP-LIST SEAT** (the mana 2×49 rows,
+   t=4334..4525). The import's `mana_delta` keep-list — the l5
+   spell-23 law's machinery — was missing spell 4, though the shield
+   token machine (`sub_566C0`, the l3 t=4275 law) has run live under
+   strict since 2026-08-19e. The (12,4) token's 251-tick +48
+   countdown is one long mid-burst (f48=192 at t=4334 = 251−59 from
+   the t=4275 cast), so the clamp zeroed the recorded f132 at EVERY
+   anchor while the human autofired fireballs: 49 pending −200 stamps
+   gone, the family ending EXACTLY at the 4275+251 lapse (last row
+   t=4525). One list entry = all 98 rows. Fixture @4334.
+
+Side receipts: mc1l5's pair residue rode down 1613→1591 pairs
+(3563→3541 rows) and mc1hwl0's free-run devs 9648→8362 (+1286 clean)
+on the same three laws — neither take was touched. mc1l1 (3 pairs),
+mc1l4 (3 pairs / 40+3 rows) and mc1l42 (1 row) read IDENTICAL at the
+rig: pre-existing, still un-attributed, now the corpus's whole
+pair-mode debt along with l5's 1591. l3's POSE channel keeps its
+pre-existing 4+4 rows at t=2287 (reported separately, never part of
+the 185).
+
+⚠ METHOD. (a) The 76-row family's shape WAS the diagnosis: port
+value 0 against a retail value that grows 1/tick from a fixed birth,
+appearing only on scattered ticks ≈ a 1/100 rate — a re-arm the
+retail side refuses. One global register question ("what gates the
+re-arm?") closed it before any code was read. (b) When a pair-mode
+residue survives certification, ask FIRST what the import cannot
+know — two of the three families were import laws, not sim laws.
+(c) The keep-list's `.any()` clamps on ANY off-list mid-burst token,
+so one missing seat poisons every CONCURRENT debit — the failure
+signature (pending stamps of a DIFFERENT, on-list spell going
+missing) points one token sideways from the culprit.
+
+NEXT (player-set order): **mc1l32 v2 intake/grading** (recorded,
+unblocked, expected gentler than l5) — PAUSED at the session gate for
+the player's go-ahead; then the un-attributed pair residues (l5 1591
+pairs, l4 40+3, l42 1, l1's ledgered 3) whenever a session wants
+them; the MC2 playtest remains deferred; `cast_bomb` still wears the
+f128-pin shape (no corpus row yet).

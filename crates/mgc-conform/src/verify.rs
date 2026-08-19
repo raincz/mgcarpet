@@ -406,6 +406,7 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     let port = world.obs_project_mc1(&pin);
                     if let Some(sh) = shadow.as_mut() {
                         sh.compare_ents_mc1(&world, &st, report.human_slot, pt);
+                        sh.compare_wiz_mc1(&world, &st, pt);
                         // A fallback pair started from a SCANNED free
                         // list, not retail's, so it has nothing to say.
                         if report.stack_fallback.is_none() {

@@ -496,11 +496,13 @@ fn dump_state(args: &Args) -> i32 {
         // Pop order: retail pops the recycle stack first, each stack
         // from its END — print both tails, next-pop last.
         println!(
-            "t={t} free_stack len {} tail {:?}  recycle_stack len {} tail {:?}",
+            "t={t} free_stack len {} tail {:?}  recycle_stack len {} tail {:?}  erupting={} plume={}",
             st.free_stack.len(),
             &st.free_stack[st.free_stack.len().saturating_sub(12)..],
             st.recycle_stack.len(),
             &st.recycle_stack[st.recycle_stack.len().saturating_sub(12)..],
+            st.erupting,
+            st.plume,
         );
         if wiz || all {
             for (i, w) in st.wizards.iter().enumerate() {

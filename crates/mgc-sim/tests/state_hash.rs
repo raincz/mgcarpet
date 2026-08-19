@@ -825,12 +825,43 @@ fn level_005_golden_state_hashes() {
         // hold byte-for-byte — nothing casts 23 before D. Corpus:
         // mc1l4's segmented deviations 1,358 → 4 on this law alone,
         // l0/l1/l2/l42 each still ONE bit-exact segment.
-        0xc200e23f98576fde, // post-init
-        0xd63f61f04f30e5e3, // A
-        0x94b0e2c5ee0dd745, // B
-        0x7b0b11359dea8314, // C
-        0xfa3da7ee6dbf5c19, // D: 64 ticks of two-hand fireball combat
-        0x7fd27fccf8bb901d, // E: 100 aftermath ticks
+        // ⭐ ALL SIX re-pinned for THE mc1l4 CERTIFICATION SESSION —
+        // LAYOUT-ONLY by the companion's construction: OBSERVABLE
+        // holds byte-for-byte at every window. What moved is the
+        // rivals hash lane's serialized bytes: `Rival::acq`, the +532
+        // ACQUISITION LIST (pickup order — the death scatter and the
+        // respawn re-grant iterate IT, not the spell-id book), is
+        // state from init on, so every window's digest shifts while
+        // nothing inside them plays differently. The session's other
+        // laws (the tick-top class-9 roster `var_u32_36462[3]` under
+        // the rival defense scan, the tick-top bucket[0] membership
+        // under the projectile acquire, the m1 vulture's grave-hunt
+        // trailer sub_1B200) never fire inside these windows — no
+        // rival is pelted, dies or leaves a grave here. Corpus:
+        // mc1l4 devs 4 → 0, CERTIFIED in BOTH instruments; mc1l5
+        // devs 2,066 → 2,054; l0/l1/l2/l42 each still ONE bit-exact
+        // segment.
+        // ⭐ A..E re-pinned for THE CASTLE-TOKEN LADDER STAMP (the
+        // mc1l3-certification session): sub_47DD0's every-tick
+        // re-price of the owner's Create-Castle token runs for ANY
+        // owner whose castle is BOUND (the first-commit latch, flags
+        // bit 1 — retail's wizext+50 written only by the level-up
+        // commit :56484), not for the human alone. Level 005's
+        // authored rival castles commit their authored level on
+        // their first tick, so every rival token re-prices from t≈2
+        // and the hashed rivals/pool lanes shift at every window
+        // after post-init. LAYOUT-ONLY, PROVEN: OBSERVABLE holds
+        // byte-for-byte at ALL SIX — no rival casts the castle spell
+        // inside these windows. Corpus: mc1l5's rival upgrade at
+        // t=5152-5155 pins the machine (token 679 reads 10000/99 at
+        // t=3 and 20000/198 after the t=5153 upgrade, both matched);
+        // l0/l1/l2/l3/l4/l42 all bit-exact END in both instruments.
+        0xf51e27b4fd17e7d2, // post-init
+        0x2284a50b1bb99645, // A
+        0x5dcad133edb720a3, // B
+        0x92aa6a185053821e, // C
+        0xa06ec233dd58731f, // D: 64 ticks of two-hand fireball combat
+        0xd1ee1a60430e5fd7, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,

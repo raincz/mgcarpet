@@ -132,6 +132,35 @@ pub struct RawShadowMc1 {
     pub site_z: i16,
 }
 
+/// One wizard's ungraded wizext/brain lanes — see
+/// [`World::wiz_shadow_mc1`]. The Type_160 counterpart of
+/// [`RawShadowMc1`]: the recording carries the whole wizard slice,
+/// [`World::retail_import_mc1`] restores it every pair, and the graded
+/// diff sees none of it — a knock impulse or a brain register written
+/// wrong reads CLEAN in pair mode forever and only bites a free run,
+/// as the carpet's graded x/y/target_yaw parting ticks later.
+///
+/// Lane names match [`RetailWizardMc1`]'s fields. Values are already
+/// in retail convention except where the doc on
+/// `Rival::wiz_shadow_lanes` says otherwise (`ai_state` canonical
+/// byte, `poverty`/`war` as 0/1). `ent` is [`PLAYER_TARGET`] for the
+/// human (wiz 0).
+#[derive(Debug, Clone)]
+pub struct WizShadowMc1 {
+    pub wiz: u8,
+    pub ent: u16,
+    pub scalars: Vec<(&'static str, i64)>,
+    pub arrays: Vec<(&'static str, Vec<i64>)>,
+}
+
+/// Collapse a retail `+415` brain byte onto the byte the port's
+/// [`WizShadowMc1::scalars`] `ai_state` lane reports — the cut states
+/// (2/4/5/10) read back as Fresh's 0, exactly as retail's own dispatch
+/// treats them.
+pub fn norm_retail_ai_state_mc1(v: u8) -> i64 {
+    crate::mc1::rivals::AiState::from_retail(v).to_retail() as i64
+}
+
 /// The pinned human context the projection needs: where the carpet
 /// sits in the recording and the pose the runner is driving.
 #[derive(Debug, Clone, Copy)]
@@ -545,10 +574,18 @@ impl World {
         // Globals in the closure.
         self.g.rand = st.rand;
         self.g.spawn_count = st.spawn_count;
-        // Outside the closure (retail leaves them unsaved too).
+        // Outside the closure: the retile LCG (pseudo) has no capture.
         self.g.pseudo = 0;
-        self.g.erupting = 0;
-        self.g.plume = 0;
+        // The volcano registers (gamedata+36/+38) sit INSIDE the
+        // captured struct image, between spawn_count and the free-stack
+        // top. They are NOT reconstructable from entity state — a
+        // dead-idle (10,18) reads identically latched or not, and a
+        // forced 0 lets every dormant driver re-arm on its 1/100 roll
+        // where retail holds the latch (mc1l3 slot 347 after its
+        // t≈2303 eruption goes dead-idle at c=127: 76 f26 rows, one
+        // per d%100==0 tick, the MC1 face of the MC2 vortex law).
+        self.g.erupting = st.erupting;
+        self.g.plume = st.plume;
 
         // The wizext+84 GUARD REGISTER is not in the recording:
         // rebuild its LIVE half from the owner-stamped (5,15) roster
@@ -611,11 +648,22 @@ impl World {
         self.g.hits = wiz.hits;
         self.g.player_invisible = carpet.flags & 0x20 != 0;
         self.g.player_rebound = carpet.flags & 0x8000 != 0;
+        // The SHIELD bit (+17 0x40 — our 0x4000) rides the same
+        // flags word: without it every pair's damage intake runs
+        // unshielded (mc1l3 t=4596: retail life −112/mana −112 on a
+        // 450 hit, the port −450/−0).
+        self.player.shield = carpet.flags & 0x4000 != 0;
         for i in 1..8 {
             self.g.rival_ents[i] = st.wizards[i].play_index;
             self.g.rival_wanted[i] = st.wizards[i].aggro;
         }
         self.g.rival_ents[0] = 0;
+        // The ESTABLISHED-castle register (wizext+50) imports RAW —
+        // pool slots map 1:1 — so a bound-at-plant level-0 castle
+        // and a stale/cleared bind both arrive exactly as recorded.
+        for i in 0..8 {
+            self.g.castle_reg[i] = st.wizards.get(i).map_or(0, |w| w.castle);
+        }
 
         // Re-anchor the rival AI records to the imported pool. The
         // records were built for the fresh world's spawn slots, and
@@ -664,6 +712,7 @@ impl World {
                 &w.hate,
                 &w.war,
                 &w.owned_slots,
+                &w.spell_list,
                 w.life_rate,
                 w.regen_stall.min(u16::MAX as u32) as u16,
                 st.ents[w.play_index as usize].f148,
@@ -735,6 +784,14 @@ impl World {
             // Clamping on it cost the recorded regen outright
             // (mc1l42 t=10677/10684/10696: retail 800/400/500 against
             // our 700/300/400, two rows a tick).
+            //
+            // SHIELD (4) COUNTS AS LIVE TOO — its `sub_566C0` machine
+            // (the l3 t=4275 law) runs under strict, and its burst is
+            // the full 251-tick +48 countdown: clamping on it zeroed
+            // every CONCURRENT pending debit for four minutes of play
+            // (mc1l3 t=4334-4525: 49 fireball −200 stamps, one per
+            // autofire anchor, gone until the shield lapsed at
+            // 4275+251).
             mana_delta: if st.ents.iter().any(|e| {
                 e.class64 == 12
                     && e.f144 == 0
@@ -746,6 +803,7 @@ impl World {
                             0 | 1
                                 | 2
                                 | 3
+                                | 4
                                 | 6
                                 | 7
                                 | 8
@@ -760,6 +818,7 @@ impl World {
                                 | 20
                                 | 21
                                 | 22
+                                | 23
                         ))
             }) {
                 0
@@ -1006,6 +1065,66 @@ impl World {
             .collect()
     }
 
+    /// Every wizard's ungraded wizext/brain lanes, retail convention —
+    /// the Type_160 counterpart of [`Self::raw_shadow_mc1`]. Wiz 0 is
+    /// the human's Gen mirrors; each live rival contributes the
+    /// registers `Rival::wiz_shadow_lanes` projects plus the
+    /// World-held charge meter, wanted timer and balloon register.
+    /// Eliminated rivals are omitted (the roster comparison owns that
+    /// story).
+    pub fn wiz_shadow_mc1(&self) -> Vec<WizShadowMc1> {
+        let breg = |key: u16| -> Vec<i64> {
+            let mut v: Vec<i64> = self
+                .g
+                .mc1_balloon_reg
+                .0
+                .get(&key)
+                .map(|r| r.iter().map(|&s| s as i64).collect())
+                .unwrap_or_default();
+            v.resize(3, 0);
+            v
+        };
+        let mut out = vec![WizShadowMc1 {
+            wiz: 0,
+            ent: PLAYER_TARGET,
+            scalars: vec![
+                ("charge", self.wiz_charge[0] as i64),
+                ("knock_dir", self.g.player_knock.0 as i64),
+                ("knock_mag", self.g.player_knock.1 as i64),
+                ("danger", self.g.player_danger as i64),
+                ("aggro", self.g.player_aggro as i64),
+                ("banked_houses", self.g.banked_houses as i64),
+                ("castle_alert", self.g.castle_alert as i64),
+                ("player_alert", self.g.player_alert as i64),
+                ("balloon_alert", self.g.balloon_alert as i64),
+                ("kills", self.g.kills as i64),
+                ("shots", self.g.shots as i64),
+                ("hits", self.g.hits as i64),
+                // The regen/debit accumulator (carpet +132) — the
+                // lane every mana divergence rides one tick before
+                // the graded f140 moves.
+                ("mana_delta", self.player.mana_delta as i64),
+            ],
+            arrays: vec![("balloon_reg", breg(PLAYER_TARGET))],
+        }];
+        for r in &self.rivals {
+            if r.eliminated {
+                continue;
+            }
+            let (mut scalars, mut arrays) = r.wiz_shadow_lanes();
+            scalars.push(("charge", self.wiz_charge[r.slot as usize] as i64));
+            scalars.push(("aggro", self.g.rival_wanted[r.slot as usize] as i64));
+            arrays.push(("balloon_reg", breg(r.ent)));
+            out.push(WizShadowMc1 {
+                wiz: r.slot,
+                ent: r.ent,
+                scalars,
+                arrays,
+            });
+        }
+        out
+    }
+
     /// The port's free list, bottom-to-top (`new_event` pops the END) —
     /// the WORLD-level counterpart of [`Self::raw_shadow_mc1`].
     ///
@@ -1224,31 +1343,13 @@ impl World {
                 rand: e.rand,
             });
         }
-        let castle_of = |owner: u16| -> u16 {
-            if owner == 0 {
-                return 0;
-            }
-            // Retail's wizard +50 is written ONLY by the level-up arm
-            // (sub_47960 :56484) and cleared by the level-down-to-0 /
-            // removal path (:56534) — a freshly landed level-0 flag is
-            // NOT yet bound (mc1l0 t=562: flag live, +50 still 0), so
-            // the scan requires an established level. (Rival direct
-            // mint :19206 binds at spawn; the port mints leveled — the
-            // one-tick level-0 window is the rival-cast-phase lane.)
-            self.g
-                .ent
-                .iter()
-                .enumerate()
-                .skip(1)
-                .find(|(_, e)| {
-                    e.class64 == 3
-                        && e.model65 == 2
-                        && e.id24 == owner
-                        && e.flags & 0x400 == 0
-                        && e.f26 > 0
-                })
-                .map_or(0, |(s, _)| s as u16)
-        };
+        // Retail's wizard +50 is the live [`Gen::castle_reg`]: written
+        // only by the level-up commit (:56484) and the rival's direct
+        // plant (:19206), cleared by the teardown to level 0
+        // (:56534). The old established-level pool scan could not
+        // represent a bound-at-plant level-0 castle (mc1l5 t=14771)
+        // nor a fresh unbound flag (mc1l0 t=562) simultaneously.
+        let castle_of = |wiz: usize| -> u16 { self.g.castle_reg[wiz & 7] };
         // A CORPSE SHOWS EMPTY HANDS. The raw +940/+944 registers
         // survive the death untouched, but the list they index has
         // been rewritten to MODEL numbers by the landing (:55523), so
@@ -1263,11 +1364,6 @@ impl World {
         let wizards: Vec<WizardMc1> = (0..8u16)
             .map(|i| {
                 let localw = i == pin.local;
-                let owner = if localw {
-                    PLAYER_TARGET
-                } else {
-                    self.g.rival_ents[i as usize]
-                };
                 WizardMc1 {
                     index: i,
                     play_index: if localw {
@@ -1285,7 +1381,7 @@ impl World {
                     } else {
                         None
                     },
-                    castle: castle_of(owner),
+                    castle: castle_of(i as usize),
                     flight: FlightMc1 {
                         cmd_speed: if localw { pin.pose.speed } else { 0 },
                         strafe: 0,
@@ -3542,6 +3638,8 @@ mod tests {
             free_stack: stack.clone(),
             recycle_stack: Vec::new(),
             level: 0,
+            erupting: 0,
+            plume: 0,
         };
         let report = w.retail_import_mc1(&st).expect("import");
         assert_eq!(report.active, 1, "only the bolt counts active");

@@ -623,6 +623,33 @@ impl std::hash::Hash for PalFlash {
     fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {}
 }
 
+/// The ESTABLISHED-castle register array (see [`Gen::castle_reg`]).
+/// Hash-SILENT like [`PalFlash`]: every retail-visible consequence
+/// of the bind (the ladder stamp's flags bit 1, the AI's cast and
+/// state choices, the graded `rival.castle` conformance lane) is
+/// hashed through entity lanes already, and hashing the register
+/// itself would have moved every pinned state golden the day the
+/// field landed.
+#[derive(Default, Clone)]
+pub(crate) struct CastleReg(pub(crate) [u16; 8]);
+
+impl std::hash::Hash for CastleReg {
+    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {}
+}
+
+impl std::ops::Index<usize> for CastleReg {
+    type Output = u16;
+    fn index(&self, i: usize) -> &u16 {
+        &self.0[i]
+    }
+}
+
+impl std::ops::IndexMut<usize> for CastleReg {
+    fn index_mut(&mut self, i: usize) -> &mut u16 {
+        &mut self.0[i]
+    }
+}
+
 /// The pool's SCRATCH slot — retail's `str_29795[0]` /
 /// `Entities_EA3E4[0]`, the always-present entity 0 that routines
 /// borrow to run a handler on a synthetic event without allocating
@@ -656,6 +683,13 @@ pub(crate) struct Gen {
     /// Tick-start CLASS-3 roster — bucket[0], `var_u32_36462[0]`
     /// (see [`TickChain`]; the case-3 arm of the same sweep, :52253).
     pub(crate) wiz_chain: TickChain,
+    /// Tick-start CLASS-9 roster — `var_u32_36462[3]` (+36474), the
+    /// case-9 arm of the same sweep (:52279). Membership is EVERY
+    /// class-9 record, no life or flags test — a projectile born
+    /// MID-tick is invisible to this tick's walkers, and a soft-killed
+    /// one stays a member until the next rebuild. Its measured walker
+    /// is the rival incoming-projectile defense (`sub_16800` :19777).
+    pub(crate) proj_chain: TickChain,
     /// Tick-start per-model class-5 roster chains (see [`MobChains`]).
     pub(crate) mob_chains: MobChains,
     /// MC2's recycle-victim stack — the allocator's FALLBACK once
@@ -739,6 +773,20 @@ pub(crate) struct Gen {
     /// claims of an eliminated wizard keep their color (property
     /// persists).
     pub(crate) rival_ents: [u16; 8],
+    /// The ESTABLISHED-castle register (retail wizext+50), one per
+    /// player slot: written by the level-up commit (:56484) and the
+    /// rival's direct plant (:19206), cleared by the teardown to
+    /// level 0 (:56534) — nothing else touches it. The AI cascade's
+    /// castle predicates and the graded `rival.castle` lane read it:
+    /// a freshly PLANTED level-0 castle is bound while an authored
+    /// level-0 flag is not (mc1l0 t=562), which no pool scan can
+    /// tell apart (mc1l5 t=14771: Vodor's post-raze plant at slot
+    /// 478 is bound the tick it lands, mid-transform at level 0).
+    /// Save-silent like the tick chains: every retail-visible
+    /// consequence (the ladder stamp's flags bit 1, the AI's
+    /// choices) is hashed through entity lanes; conformance imports
+    /// seed it from the recorded wizext each pair.
+    pub(crate) castle_reg: CastleReg,
     /// Per-color MC2 Life scalar for the castle-HP ladder (see
     /// [`Mc2LifeScale`]); written by the MC2 rival spawn.
     pub(crate) mc2_life_scale: Mc2LifeScale,
@@ -1306,6 +1354,20 @@ impl Gen {
             }
         }
     }
+
+    /// The CLASS-9 arm of the same sweep (:52279) — `var_u32_36462[3]`,
+    /// for tests that drive a bare `Gen`. Membership is every class-9
+    /// record, NO life or flags test.
+    #[cfg(test)]
+    pub(crate) fn rebuild_proj_chain(&mut self) {
+        self.proj_chain.list.clear();
+        self.proj_chain.cut = usize::MAX;
+        for s in 1..self.ent.len() {
+            if self.ent[s].class64 == 9 {
+                self.proj_chain.list.push(s as u16);
+            }
+        }
+    }
 }
 
 /// One sound request: engine sound id (the SNDS bank-0 index), the
@@ -1371,6 +1433,7 @@ impl Gen {
             free: (1..chassis.pool_slots as u16).rev().collect(),
             ball_chain: TickChain::default(),
             wiz_chain: TickChain::default(),
+            proj_chain: TickChain::default(),
             mob_chains: MobChains::default(),
             mc2_recycle: Mc2Recycle::default(),
             mc1_guard_reg: Mc1GuardReg::default(),
@@ -1386,6 +1449,7 @@ impl Gen {
             player_spin: PlayerSpin::default(),
             mc2_debuffs: Mc2PlayerDebuffs::default(),
             rival_ents: [0; 8],
+            castle_reg: CastleReg::default(),
             mc2_life_scale: Mc2LifeScale::default(),
             player_aggro: 0,
             rival_wanted: [0; 8],
@@ -1556,6 +1620,10 @@ impl Gen {
         // link, the same wipe.
         if let Ok(pos) = self.wiz_chain.list.binary_search(&(idx as u16)) {
             self.wiz_chain.cut = self.wiz_chain.cut.min(pos + 1);
+        }
+        // …and the class-9 roster (`var_u32_36462[3]`).
+        if let Ok(pos) = self.proj_chain.list.binary_search(&(idx as u16)) {
+            self.proj_chain.cut = self.proj_chain.cut.min(pos + 1);
         }
         // The same severed-chain law for the per-model class-5 roster
         // chains ([`MobChains`]): the memset below wipes +0, so any
@@ -2370,11 +2438,13 @@ impl Gen {
         // fire-trap records behind dispositions (they erupt as the
         // 10-tick blast ring when fired).
         match model {
-            // 14: the mana-scatter puff (sub_3AB40) — authored THING
-            // records behind trigger dispositions mint it (mc1l1's
-            // t=344 scatter); the generic arm below skipped its two
-            // ctor rand draws and left it stateless.
-            0 | 1 | 5 | 14 | 17 | 23 | 25 => return self.spawn_effect(model as u8, x, y, z),
+            // 13/14: the rising smoke / mana-scatter puffs (sub_3AAA0
+            // / sub_3AB40) — authored THING records behind trigger
+            // dispositions mint them (mc1l1's t=344 scatter; mc1l3's
+            // t=4224 ambush cloud); the generic arm below skipped
+            // their two ctor rand draws and left them stateless,
+            // spriteless and lifeless.
+            0 | 1 | 5 | 13 | 14 | 17 | 23 | 25 => return self.spawn_effect(model as u8, x, y, z),
             39 => return self.spawn_mana_ball(x, y, z),
             _ => {}
         }
@@ -4665,6 +4735,12 @@ impl Gen {
                 let Some(p) = self.spawn_creator(42, x, y, site_z) else {
                     return;
                 };
+                // The commit binds the owner's wizext+50 (:56484) —
+                // inside the painter-spawn guard, like everything
+                // else in the commit.
+                if let Some(ws) = self.owner_team(own) {
+                    self.castle_reg[ws as usize] = i as u16;
+                }
                 let lvl = (self.ent[i].f26 + 1).clamp(1, 8);
                 self.ent[i].f26 = lvl;
                 self.ent[i].f136 = Self::CASTLE_CAP[(lvl as usize).min(7)];
@@ -5015,13 +5091,17 @@ impl Gen {
         }
         if lvl <= 0 {
             // Total destruction (:56531-37): the owner's castle
-            // binding drops (ours is registry/scan-derived) and the
-            // entity soft-kills — the wrapper tail below still runs
-            // on it this tick, exactly like retail's freed-but-live
-            // record. (The sub_46D20(a1, 0) call in that arm is the
-            // spell-16 charge-pin clear on the owner's Create Castle
-            // manifestation slot — wizext +708 — not a balloon
-            // release; the world-side death stamp handles the token.)
+            // binding drops — retail clears wizext+50 blind
+            // (:56534) — and the entity soft-kills; the wrapper
+            // tail below still runs on it this tick, exactly like
+            // retail's freed-but-live record. (The sub_46D20(a1, 0)
+            // call in that arm is the spell-16 charge-pin clear on
+            // the owner's Create Castle manifestation slot — wizext
+            // +708 — not a balloon release; the world-side death
+            // stamp handles the token.)
+            if let Some(ws) = self.owner_team(self.ent[i].id24) {
+                self.castle_reg[ws as usize] = 0;
+            }
             self.ent[i].flags |= 0x400;
         }
         // The state-6 wrapper's tail (sub_470E0 :56147-50) — BOTH
@@ -6203,6 +6283,9 @@ impl Gen {
             player_spin: _,
             mc2_debuffs,
             rival_ents,
+            // Save-silent (see the field doc): consequences ride
+            // hashed entity lanes; imports reseed it every pair.
+            castle_reg: _,
             mc2_life_scale,
             player_aggro,
             rival_wanted,
@@ -6257,6 +6340,7 @@ impl Gen {
             // Rebuilt at every tick top — never saved.
             ball_chain: _,
             wiz_chain: _,
+            proj_chain: _,
             mob_chains: _,
         } = self;
         w.put(t);
@@ -6689,6 +6773,37 @@ mod tests {
             g2.t.angle[court] & 7,
             1,
             "the authored stamp converts the yard (sub_279D0's law)"
+        );
+    }
+
+    /// sub_37920 (:44251/:44256): ONE sub_11F50 on the RAW pre-snap
+    /// axis feeds both the link z and the +154 site datum; the
+    /// caller's z is ignored. The transform's painter mints AT the
+    /// +150 triple (sub_47020 :56100), so a zero +154 is a painter
+    /// born at z 0 — mc1l5 t=17645, Vodor's post-raze rebuild at
+    /// scouted site (0,0). Pair-invisible (imports carry the triple);
+    /// pinned here.
+    #[test]
+    fn the_castle_ctor_grounds_the_raw_axis_into_the_site_datum() {
+        let mut g = Gen::new(
+            flat_land(8),
+            synthetic_assets(),
+            1,
+            ChassisParams::MC1,
+            VerbSet::MC1,
+        );
+        let (x, y) = (0x8140u16, 0x8140u16);
+        let i = g.spawn_class3(2, x, y, -12345).unwrap();
+        let gz = g.ground_z(x, y) as i16;
+        assert_eq!(
+            g.ent[i].site_z, gz,
+            "+154 = the ground at the raw landing point"
+        );
+        assert_eq!(g.ent[i].z, gz, "the link z is the same sample");
+        assert_eq!(
+            (g.ent[i].dest_x, g.ent[i].dest_y),
+            (0x8100, 0x8100),
+            "+150/152 keep the parity-snapped anchor"
         );
     }
 
@@ -7964,6 +8079,10 @@ mod tests {
             g.ent[i].f58 = 0; // asleep: no wizard scan, no wake-arm
             g.ent[i].f63 = 0; // cadence hit, phase 0 → m4 militia
             let v = g.spawn_creature(4, 0x4100, 0x4000, 0).unwrap();
+            // The convert's victim scan walks the TICK-TOP per-model
+            // roster (:23887-98) — rebuild it the way the tick head
+            // does, or the scan sees an empty chain.
+            g.rebuild_mob_chains();
             let ctx = ctx_at(0x7F00, 0x7F00, 0); // player far away
             g.creature_tick(i, &ctx);
             assert_ne!(

@@ -1,24 +1,84 @@
 {
- "dir": "fixtures/mc1l3",
- "pin_pose": "n1",
- "fixtures": [
-  {
-   "t": 497,
-   "file": "a-146-of-0-is-the-scratch-record-and-it-steers-t.mgcr",
-   "source": "mc1l3",
-   "note": "A +146 OF 0 IS THE SCRATCH RECORD, AND IT STEERS THE EXIT BEARING: sub_1A120 forms `v12 = &pool[+146]` with NO validity test (:21655) and re-bears off it (:21657) BEFORE the lost test reads v12's own life and flags (:21658), so slot 0's coordinates land in +34 on the way out. The PACK-DEATH HANDOFF is what puts a survivor there - it hands `+146 = the dier's +40` (:21746), and +40 is 0 whenever the fatal change did not arrive through that entity's own +94 mailbox slot on the handoff tick (:21716). mc1l3 t=498: slot 417 dies and hands 421 over, 421 aims at slot 0 (41472,40960) for 275 and only then drops to base+1; the port's `t == 0` early return skipped the re-bear and left +34 stale at 590. Same law at mc1l4 t=406 (slot 56 hands 39 over, 1145). \u26a0 the `class64 == 0` conjunct in the lost test is load-bearing once the guard goes - the port's SCRATCH record carries flags 0 where retail's carries 0x400 - ledger 2026-08-18d."
-  },
-  {
-   "t": 1858,
-   "file": "the-corpse-keeps-its-jink-the-death-fall-sub-45f.mgcr",
-   "source": "mc1l3",
-   "note": "THE CORPSE KEEPS ITS JINK: the death fall (sub_45FC0 :55463) opens with the FULL shared mover sub_455D0, whose strafe lane (:55199-203) consumes wizext v_16 at yaw+0x200 - and nothing updates a dead AI's wizext, so the corpse sidesteps by the SAME residue every fall tick until touchdown (the live AI's 4/tick jink decay is the brain's own write; dead brains don't run). The port's rival_death_fall modeled forward + knock and dropped the strafe lane. mc1l3 t=1859: rival 585 falls with v_16 = 7 and the port lands (-5,+5)/tick short - a residual every (10,1) trail puff inherits at birth (slot 347) - ledger 2026-08-19c."
-  },
-  {
-   "t": 1889,
-   "file": "the-mover-s-flutter-draw-reaches-the-corpse-sub.mgcr",
-   "source": "mc1l3",
-   "note": "THE MOVER'S FLUTTER DRAW REACHES THE CORPSE: sub_455D0's tail (:55294-99) rolls the entity's PRIVATE LCG once on every tick its +63 & 0x3F == 0, 1-in-11 -> sound 46. The live AI never runs sub_455D0, so for a rival this fires only during the death fall; the human's copy already lived in mc1_move. mc1l3 t=1890: the corpse's f63 crosses 192 and retail's rand steps exactly once (450387334 -> 1329188389, one 9377-step) where the port's held - the write trace names no port writer and explain counts the draw - ledger 2026-08-19c."
-  }
- ]
+  "dir": "fixtures/mc1l3",
+  "pin_pose": "n1",
+  "fixtures": [
+    {
+      "t": 497,
+      "file": "a-146-of-0-is-the-scratch-record-and-it-steers-t.mgcr",
+      "source": "mc1l3",
+      "note": "A +146 OF 0 IS THE SCRATCH RECORD, AND IT STEERS THE EXIT BEARING: sub_1A120 forms `v12 = &pool[+146]` with NO validity test (:21655) and re-bears off it (:21657) BEFORE the lost test reads v12's own life and flags (:21658), so slot 0's coordinates land in +34 on the way out. The PACK-DEATH HANDOFF is what puts a survivor there - it hands `+146 = the dier's +40` (:21746), and +40 is 0 whenever the fatal change did not arrive through that entity's own +94 mailbox slot on the handoff tick (:21716). mc1l3 t=498: slot 417 dies and hands 421 over, 421 aims at slot 0 (41472,40960) for 275 and only then drops to base+1; the port's `t == 0` early return skipped the re-bear and left +34 stale at 590. Same law at mc1l4 t=406 (slot 56 hands 39 over, 1145). \u26a0 the `class64 == 0` conjunct in the lost test is load-bearing once the guard goes - the port's SCRATCH record carries flags 0 where retail's carries 0x400 - ledger 2026-08-18d."
+    },
+    {
+      "t": 1858,
+      "file": "the-corpse-keeps-its-jink-the-death-fall-sub-45f.mgcr",
+      "source": "mc1l3",
+      "note": "THE CORPSE KEEPS ITS JINK: the death fall (sub_45FC0 :55463) opens with the FULL shared mover sub_455D0, whose strafe lane (:55199-203) consumes wizext v_16 at yaw+0x200 - and nothing updates a dead AI's wizext, so the corpse sidesteps by the SAME residue every fall tick until touchdown (the live AI's 4/tick jink decay is the brain's own write; dead brains don't run). The port's rival_death_fall modeled forward + knock and dropped the strafe lane. mc1l3 t=1859: rival 585 falls with v_16 = 7 and the port lands (-5,+5)/tick short - a residual every (10,1) trail puff inherits at birth (slot 347) - ledger 2026-08-19c."
+    },
+    {
+      "t": 1889,
+      "file": "the-mover-s-flutter-draw-reaches-the-corpse-sub.mgcr",
+      "source": "mc1l3",
+      "note": "THE MOVER'S FLUTTER DRAW REACHES THE CORPSE: sub_455D0's tail (:55294-99) rolls the entity's PRIVATE LCG once on every tick its +63 & 0x3F == 0, 1-in-11 -> sound 46. The live AI never runs sub_455D0, so for a rival this fires only during the death fall; the human's copy already lived in mc1_move. mc1l3 t=1890: the corpse's f63 crosses 192 and retail's rand steps exactly once (450387334 -> 1329188389, one 9377-step) where the port's held - the write trace names no port writer and explain counts the draw - ledger 2026-08-19c."
+    },
+    {
+      "t": 2304,
+      "file": "the-lava-bomb-flies-on-raw-vz-then-decays-the-10.mgcr",
+      "source": "mc1l3",
+      "note": "THE LAVA BOMB FLIES ON RAW VZ THEN DECAYS: the (10,16) bomb's flight applies the RAW +150/+152 velocity before the per-tick decay, clamping both IN PLACE, and its mint took the eruption driver's LCG hand-off - ONE driver step landing in BOTH records AFTER the ctor's own draws (:28800-02). Pre-law pair signature: (10,16) slot 335 flags/z/f26."
+    },
+    {
+      "t": 2305,
+      "file": "the-10-17-fire-field-ctor-never-tile-links-sub-3.mgcr",
+      "source": "mc1l3",
+      "note": "THE (10,17) FIRE-FIELD CTOR NEVER TILE-LINKS (sub_3AC70), and the bomb fire-seeds on EVERY unburnt contact, resetting +26, with the sub_11E50 probe - a 2x2 RECENTRED window ((pos-128)>>8), 3-D dist <= 128, NO 0x400 test. Pre-law pair signature: (10,16) slot 335 z/f26 + (10,17) slot 549 flags."
+    },
+    {
+      "t": 2306,
+      "file": "the-bomb-s-clamp-decay-continue-in-place-tick-ov.mgcr",
+      "source": "mc1l3",
+      "note": "THE BOMB'S CLAMP + DECAY CONTINUE IN PLACE tick over tick ((10,16) slot 335 z/f26) - the raw-vz-then-decay order compounds, so one wrong tick pushes every later boundary."
+    },
+    {
+      "t": 2341,
+      "file": "the-grounded-bomb-rolls-downhill-on-the-raw-heig.mgcr",
+      "source": "mc1l3",
+      "note": "THE GROUNDED BOMB ROLLS DOWNHILL ON THE RAW HEIGHTMAP CORNER DIFFERENTIAL with 250/256 toward-zero friction and a signed <= 28 rest test; the port's wrong rest/roll left five (10,16) bombs off their recorded z and minted an extra (10,12) at slot 874."
+    },
+    {
+      "t": 2416,
+      "file": "the-lava-bomb-s-water-splash-is-not-an-early-out.mgcr",
+      "source": "mc1l3",
+      "note": "THE LAVA BOMB'S WATER SPLASH IS NOT AN EARLY-OUT (sub_25A60 :28628-33): the splash arm spawns the (10,5) at the NEW position, kills the bomb ONLY if the pool granted the splash (`if (v9)` wraps both writes), and falls through to the UNCONDITIONAL +26 increment, the relink and the grounded roll - retail never re-tests its own life after a kill (the walled-in-parting-shot family, this time in a projectile's splash arm). The port's `return false` after splash_and_die skipped the increment: pair 2416->2417 slot 624 f26 retail 3 port 2, one row per drowned bomb across the bombardment (11 rows t=2416..2550). The refusal arm (pool-dry splash leaves the bomb FLYING) is corpus-silent -> unit test a_drowning_lava_bomb_still_counts_its_tick."
+    },
+    {
+      "t": 4334,
+      "file": "a-mid-burst-shield-token-keeps-concurrent-pendin.mgcr",
+      "source": "mc1l3",
+      "note": "A MID-BURST SHIELD TOKEN KEEPS CONCURRENT PENDING DEBITS: the import's mana_delta keep-list (conformance.rs) was missing spell 4, so the (12,4) token's 251-tick +48 countdown (cast t=4275, f48=192 at this anchor = 251-59) tripped the clamp and zeroed the recorded f132 at EVERY anchor while the human autofired fireballs - 49 player.mana +200 rows (t=4334..4525, ending exactly at the 4275+251 lapse). The shield machine (sub_566C0, the l3 t=4275 law) runs live under strict, so its pairs must seed the recorded delta raw like the launcher family's - the l5 spell-23 keep-list law's sibling."
+    },
+    {
+      "t": 5009,
+      "file": "the-dead-idle-volcano-holds-the-eruption-latch-a.mgcr",
+      "source": "mc1l3",
+      "note": "THE DEAD-IDLE VOLCANO HOLDS THE ERUPTION LATCH ACROSS A PAIR IMPORT: gamedata+36/+38 (the erupting/plume slot registers, :28783/:28792, cleared only by a clean activation at counter>=127 :28828) sit INSIDE the captured struct image between spawn_count and the free-stack top, and the import was forcing them to 0 - so slot 347 (erupted t~2303, went dead-idle at c=127, the authentic no-more-eruptions-anywhere quirk) re-armed its dormant counter to 0 on every private d%100==0 roll where retail's latch held: 76 f26 rows (want t-2303, got 0), one per roll over ~7400 dormant ticks. NOT reconstructable from entity state (a dead-idle driver reads identical latched or not) - the MC1 face of the MC2 vortex/fire_col law (D41A0 +0x31/+0x33)."
+    },
+    {
+      "t": 4223,
+      "file": "creator-model-13-routes-to-its-real-two-draw-cto.mgcr",
+      "source": "mc1l3",
+      "note": "CREATOR MODEL 13 ROUTES TO ITS REAL TWO-DRAW CTOR - the trigger ambush cloud (mc1l4-certified-2026-08-19e law: m13 creator routing); pre-law the pair minted the wrong family at slot 86 ((10,13) sclass/smodel/flags/life)."
+    },
+    {
+      "t": 4275,
+      "file": "shield-is-a-launcher-family-spell-the-command-ar.mgcr",
+      "source": "mc1l3",
+      "note": "SHIELD IS A LAUNCHER-FAMILY SPELL: the command arm is the bare LABEL_20 arm-only flow (sub_46B00 branches on the token's +65 - only 2/21/16 are special); the token's +48 machine sub_566C0 does everything (gate sub_55DD0 with cost on the FULL tick only, the shield bit, sub_55E80 full-tick debit + mid-burst regen pin, decrement). Pre-law pair: player mana 2000 short (69198 vs 71198) + the (12,4) token f26 off by one from the arm tick on."
+    },
+    {
+      "t": 5288,
+      "file": "the-mover-s-walled-in-kill-does-not-end-the-tick.mgcr",
+      "source": "mc1l3",
+      "note": "THE MOVER'S WALLED-IN KILL DOES NOT END THE TICK (:21293 + :21654): sub_196E0 writes actLife = -1 when all four yaw candidates fail (+30 left at the reverse probe, 1027+1024 -> 3) and NO handler re-tests its own life after the mover - the dying militia still re-bears (+34 -> 1034) and FIRES its 500-damage sub_1A8E0 dart at the human. The port's post-move early return in mob_chase (and 12 sibling sites) lost the parting shot: pre-fix pair 5288->5289 reads missing (9,0) slot 95 with the whole three-spawn cascade shifted (fire into 234, ball into 227)."
+    }
+  ]
 }

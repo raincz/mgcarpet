@@ -988,9 +988,13 @@ impl Gen {
         // holds every live class-3 body — rival carpets, CASTLES and
         // mana BALLOONS; the walk carries NO model filter (the
         // membership ruling on [`Self::nearest_wizard_target`]).
-        // Per-node gates: not the shooter's own team, not cloaked
-        // (+16 0x20; 0x420 folds the port's removed bit), inside the
-        // 3-D sig gate at the node's RAW position. Wizards/balloons
+        // ⭐ MEMBERSHIP IS THE TICK-TOP SNAPSHOT ([`TickChain`],
+        // bucket[0] law): the per-node gates re-read only the owner
+        // tag and the cloak bit (+16 0x20) plus the 3-D sig gate at
+        // the node's RAW position — NO life re-test, so a wizard that
+        // died mid-tick stays a lock candidate for the rest of the
+        // tick (mc1l4 t=6865: the pelting stream's next ball locks the
+        // rival's corpse the very tick it fell). Wizards/balloons
         // score through the generic scorer sub_54A90, whose sub_524C0
         // bracket lifts the aim z by +78; castles route to the castle
         // scorer sub_54BD0 (:64231 — same cones/range/score) at the
@@ -1012,12 +1016,13 @@ impl Gen {
                 &mut best,
             );
         }
-        for j in 1..self.ent.len() {
+        for k in 0..self.wiz_chain.visible_len() {
+            let j = self.wiz_chain.list[k] as usize;
             let c = &self.ent[j];
-            if c.class64 != 3 || c.model65 == 0 {
-                continue; // model 0 = the human's body, handled above
+            if c.model65 == 0 {
+                continue; // the human's body, handled above
             }
-            if c.act_life < 0 || c.flags & 0x420 != 0 || c.id24 == own {
+            if c.flags & 0x20 != 0 || c.id24 == own {
                 continue;
             }
             if Self::dist3d(px, py, pz, c.x, c.y, c.z) > sig_gate {
@@ -2158,7 +2163,11 @@ impl Gen {
     /// 88x100, so the swap is look AND collision.
     pub(crate) fn spawn_firewall_bolt(&mut self, x: u16, y: u16, z: i16) -> Option<usize> {
         let sprite = if self.is_hidden_worlds() { 76 } else { 42 };
-        self.spawn_projectile(16, 17, x, y, z, 384, 21, 0, sprite)
+        // Behavior ROW 5 (sub_3A270 :46349 `+156 = &unk_98F38[5]`) —
+        // its v_2 = 5 is the homing tail's whole turn authority
+        // (mc1l5 t=23389: retail eases 664 → 669 where row 0's 56
+        // swung the port to 720).
+        self.spawn_projectile(16, 17, x, y, z, 384, 21, 5, sprite)
     }
 
     /// The m16 firewall flight (state 17): generic ease + move, no
@@ -2176,13 +2185,16 @@ impl Gen {
     fn proj_firewall_tick(&mut self, i: usize, ctx: &MobCtx) -> bool {
         let e = &mut self.ent[i];
         e.f126 += (e.f128 - e.f126).clamp(-2, 2);
-        // Hidden Worlds turns Fire Storm (spell 20) into a homing meteor:
-        // the m16 child is acquire-switch case 0x10 (remc1hw :60322) —
-        // while untargeted it scans awake entities within a WIDENED yaw
-        // cone 0x100 (pitch stays 0x71) and homes on the pick. Base MC1
-        // has no case 16, so f146 stays 0 and the child flies straight
-        // (the fire-rain wall). Seamed on TargetingVerb::Mc1Hw; every
-        // other acquire site treats HW exactly as MC1. SURVEY-MC1HW §3a.
+        // The m16 child runs the acquire cone in BOTH variants —
+        // HW's case 0x10 (remc1hw :60322: widened yaw cone 0x100,
+        // pitch 0x71) and, the mc1l5 take settled, base MC1 too:
+        // t=23383 slot 227's first flight tick carries the acquire's
+        // whole signature — the sub_54520 head clamp (+26 166 → 16),
+        // the latch (flags 4 → 6), a pick (f146 = 773) and the
+        // heading SNAP onto it (620/31 → 664/21, f34/f36 mirrored).
+        // remc1's sub_54520 shows no case 16 — the same listing whose
+        // truncated class-9 state table hid this handler's +44 copy;
+        // the recording is the oracle. SURVEY-MC1HW §3a note RETIRED.
         //
         // Acquisition is ONE-SHOT, latched on flags bit 2 even on a
         // miss (remc1hw :58731-49): a miss flies straight forever, a
@@ -2190,20 +2202,17 @@ impl Gen {
         // :58742-43). Only the post-lock tracker eases (sub_52550,
         // :58754 = home()). Same idiom as the m9 beam (proj_m9_tick).
         //
-        // ⚠ THE LATCH ITSELF IS NOT HW's — it is the shared
-        // `sub_52770` prologue (:62640-60, and see
-        // [`Gen::proj_generic_tick`], which is the other half of the
-        // same retail function). Only the SCAN is Hidden Worlds':
-        // base MC1's `sub_54520` has no case 16, so it returns 0 and
-        // the bolt takes the MISS arm — which still sets the bit and
-        // still mirrors the live heading into the aim fields. An
-        // earlier note here claimed the shared MC1 path never writes
-        // flags bit 2; that was our seam talking, not retail's.
+        // ⚠ THE LATCH ITSELF IS SHARED — the `sub_52770` prologue
+        // (:62640-60, and see [`Gen::proj_generic_tick`], the other
+        // half of the same retail function).
         if self.ent[i].f146 == 0 && self.ent[i].flags & 2 == 0 {
             self.ent[i].flags |= 2;
-            if self.is_hidden_worlds() {
-                self.aim_assist_mc1_cone(i, ctx, 0x100, 0x71);
+            // The sub_54520 head clamp (:63945-46) — the banked
+            // charge rides +26 only until the first acquire tick.
+            if self.ent[i].f26 > 16 {
+                self.ent[i].f26 = 16;
             }
+            self.aim_assist_mc1_cone(i, ctx, 0x100, 0x71);
             if self.ent[i].f146 != 0 {
                 self.ent[i].f30 = self.ent[i].f34;
                 self.ent[i].f32 = self.ent[i].f36;
@@ -3407,33 +3416,45 @@ impl Gen {
                     None => 0,
                 };
             }
-            // One ballistic lava bomb per activation (:28795-801):
-            // owner AND the driver's LCG seed pass on.
-            let seed = self.ent[i].rand;
+            // One ballistic lava bomb per activation (:28795-802):
+            // the ctor's own three draws ride the BOMB's fresh LCG,
+            // then ONE step of the DRIVER's LCG lands in BOTH records
+            // (:28800-02 — the seed passes on STEPPED, and only when
+            // the spawn succeeded).
             if let Some(b) = self.spawn_lava_bomb(x, y) {
                 self.ent[b].id24 = own;
-                self.ent[b].rand = seed;
+                let v = self.ent_rand(i);
+                self.ent[b].rand = v;
             }
             // Heading advances 0x500 per activation (:28804).
             self.ent[i].f30 = self.ent[i].f30.wrapping_add(0x500);
             if c == 0 {
                 // The eruption-start blast fireball (:28805-23):
-                // pitch -386, life 1, detonates into the (10,17)
-                // fire-field. APPROX: the +150 position-target
-                // steering is skipped (aim assist suppressed) — it
-                // flies the armed heading.
+                // owner, the driver's heading (high byte & 7), pitch
+                // RAW −386 (:28814 — the u16 65150; every consumer
+                // masks on read), life 1, the (10,17) fire-field
+                // detonation, and the +150 DESTINATION = the driver's
+                // position stepped 1536 along the launch yaw with the
+                // ground sampled under it (:28819-23). `+34`/`+36`
+                // and the acquire latch stay NewEvent-clear — the
+                // ball's own first tick runs the one-shot acquire
+                // like any fireball (mc1l3 t=2304: the pair graded
+                // the old pre-aimed, pre-latched, masked-pitch mint).
                 let yaw = self.ent[i].f30 & 0x7FF;
+                let mut dest = (x, y, z);
+                Self::polar_step(&mut dest, yaw, 0, 1536);
+                let dg = self.ground_z(dest.0, dest.1) as i16;
                 if let Some(p) = self.spawn_fireball(x, y, z) {
                     let e = &mut self.ent[p];
                     e.id24 = own;
                     e.f30 = yaw;
-                    e.f34 = yaw;
-                    e.f32 = (-386i16 as u16) & 0x7FF;
-                    e.f36 = e.f32;
+                    e.f32 = -386i16 as u16;
                     e.f68 = 10;
                     e.f69 = 17;
                     e.act_life = 1;
-                    e.flags |= 2;
+                    e.dest_x = dest.0;
+                    e.dest_y = dest.1;
+                    e.site_z = dg;
                 }
             }
             if c >= 127 {
@@ -3451,7 +3472,7 @@ impl Gen {
     /// 256 up, yaw = rand & 0x7FF; speed applies as +52; spawned
     /// map-linked at ground+64 with the horizontal velocity vector
     /// pre-advanced into +150/+152 (our dest_x/dest_y), sprite 210.
-    fn spawn_lava_bomb(&mut self, x: u16, y: u16) -> Option<usize> {
+    pub(crate) fn spawn_lava_bomb(&mut self, x: u16, y: u16) -> Option<usize> {
         let b = self.new_event()?;
         {
             let e = &mut self.ent[b];
@@ -3501,43 +3522,79 @@ impl Gen {
             self.ent[i].flags |= 0x400;
             return false;
         }
-        let mut vx = (self.ent[i].dest_x as i16).clamp(-80, 80);
-        let mut vy = (self.ent[i].dest_y as i16).clamp(-80, 80);
-        let mut vz = (self.ent[i].f46 - 28).clamp(-384, 256);
+        // :28597-99 — the family's `& 2` latch, set with no other
+        // effect on this model (a pure mark, but a GRADED lane).
+        if self.ent[i].flags & 2 == 0 {
+            self.ent[i].flags |= 2;
+        }
+        // :28600-07 — the held velocity clamps IN PLACE, before the
+        // step (the downhill add below stores UNclamped; this is
+        // where it comes back into range).
+        let vx = (self.ent[i].dest_x as i16).clamp(-80, 80);
+        let vy = (self.ent[i].dest_y as i16).clamp(-80, 80);
+        self.ent[i].dest_x = vx as u16;
+        self.ent[i].dest_y = vy as u16;
+        // :28612-19 — the RAW vz applies to z FIRST, THEN decays 28
+        // with the [-384, 256] clamp (the port had the order flipped:
+        // one whole decay early, 28 units short on every flight tick).
         let (x0, y0, z0) = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
         let x = x0.wrapping_add(vx as u16);
         let y = y0.wrapping_add(vy as u16);
-        let mut z = z0.wrapping_add(vz);
+        let mut z = z0.wrapping_add(self.ent[i].f46);
+        self.ent[i].f46 = (self.ent[i].f46 - 28).clamp(-384, 256);
         let g = self.ground_z(x, y) as i16;
-        let mut grounded = false;
-        if z <= g {
+        if g > z {
             z = g;
-            grounded = true;
-            if self.on_water_pub(x, y) {
-                self.move_relink(i, x, y, z);
-                self.splash_and_die(i);
-                return false;
-            }
-            vz = -vz / 4; // bounce (:28625)
-            if vz.abs() <= 28 {
-                vz = 0;
-                // Seed a standing fire at rest if the cell has none
-                // (:28637-47): life 30, damage 3× the FRESH fire's own
-                // ctor +44 (50 → 150) — retail reads the just-spawned
-                // fire's +44 (:28642), NOT the bomb's +44 (=200, a dead
-                // store). The bomb dealing no in-flight damage, this is
-                // the lava's only bite.
+            // The bounce reads the DECAYED value (:28626-27),
+            // quarter toward zero.
+            self.ent[i].f46 = -(self.ent[i].f46 / 4);
+            // :28628 — the water probe runs at the OLD position
+            // (`sub_11810(a1 + 72)`), the splash spawns at the new —
+            // and the kill lands ONLY if the pool granted the splash
+            // (:28630-33: the `if (v9)` wraps both writes; a refused
+            // splash leaves the bomb flying). No return either way:
+            // the splash arm falls through to the +26 increment, the
+            // relink and the grounded roll like every other arm —
+            // retail never re-tests its own life after a kill (mc1l3
+            // t=2416 slot 624: the dying bomb still counts f26 2→3;
+            // 11 pair rows, one per drowned bomb).
+            if self.on_water_pub(x0, y0) {
+                let own = self.ent[i].id24;
+                if let Some(s) = self.spawn_effect(5, x, y, z) {
+                    self.ent[s].id24 = own;
+                    self.ent[i].flags |= 0x400;
+                }
+            } else {
+                // Seed a standing fire on EVERY unburnt ground contact
+                // (:28637-47) — not only at rest: life 30, damage 3× the
+                // FRESH fire's own ctor +44 (50 → 150; retail reads the
+                // just-spawned fire's +44 at :28642, NOT the bomb's 200,
+                // a dead store) — and the SEED RESETS the bomb's +26.
+                // The existence probe is `sub_11E50` (:17179): the 2×2
+                // RECENTRED window (`(pos−128)>>8` and +1 on both axes),
+                // class/model match AND 3-D distance ≤ 128 — with NO
+                // 0x400 test, a soft-killed fire still counts (mc1l3
+                // t=2341: the single-tile, 0x400-excluded probe seeded
+                // an extra fire one cell over from a live one).
                 let mut burning = false;
-                let mut j = self.map_entity[tile((x >> 8) as u8, (y >> 8) as u8)] as usize;
-                while j != 0 {
-                    if self.ent[j].class64 == 10
-                        && self.ent[j].model65 == 6
-                        && self.ent[j].flags & 0x400 == 0
-                    {
-                        burning = true;
-                        break;
+                let px = (x.wrapping_sub(128) >> 8) as u8;
+                let py = (y.wrapping_sub(128) >> 8) as u8;
+                'probe: for dy in 0..2u8 {
+                    for dx in 0..2u8 {
+                        let mut j = self.map_entity[tile(px.wrapping_add(dx), py.wrapping_add(dy))]
+                            as usize;
+                        while j != 0 {
+                            let c = &self.ent[j];
+                            if c.class64 == 10
+                                && c.model65 == 6
+                                && Self::dist3d(x, y, z, c.x, c.y, c.z) <= 0x80
+                            {
+                                burning = true;
+                                break 'probe;
+                            }
+                            j = c.next20 as usize;
+                        }
                     }
-                    j = self.ent[j].next20 as usize;
                 }
                 if !burning {
                     let own = self.ent[i].id24;
@@ -3545,26 +3602,37 @@ impl Gen {
                         self.ent[f].id24 = own;
                         self.ent[f].act_life = 30;
                         self.ent[f].f44 *= 3;
+                        self.ent[i].f26 = 0;
                     }
+                }
+                // :28650-51 — rest is the SIGNED test: any bounce at or
+                // below +28 (including every downward value) parks vz.
+                // Land contacts only — the splash arm has no rest park.
+                if self.ent[i].f46 <= 28 {
+                    self.ent[i].f46 = 0;
                 }
             }
         }
-        if grounded {
-            // Downhill roll + friction (:28655-67).
-            let gxm = self.ground_z(x.wrapping_sub(256), y) as i16;
-            let gxp = self.ground_z(x.wrapping_add(256), y) as i16;
-            let gym = self.ground_z(x, y.wrapping_sub(256)) as i16;
-            let gyp = self.ground_z(x, y.wrapping_add(256)) as i16;
-            vx = (vx + (gxm - gxp) / 8).clamp(-80, 80);
-            vy = (vy + (gym - gyp) / 8).clamp(-80, 80);
-            vx = ((250 * vx as i32) >> 8) as i16;
-            vy = ((250 * vy as i32) >> 8) as i16;
-        }
-        let e = &mut self.ent[i];
-        e.dest_x = vx as u16;
-        e.dest_y = vy as u16;
-        e.f46 = vz;
+        self.ent[i].f26 += 1;
         self.move_relink(i, x, y, z);
+        if g == z {
+            // Downhill roll (:28655-67): the 2x2 CELL-CORNER raw
+            // heightmap differential (`sub_41F50` :52547 — byte
+            // units, no scaling) adds straight into the held
+            // velocity, then 250/256 friction rounding toward zero;
+            // the result stores UNclamped (next tick's top clamp
+            // brings it back).
+            let (tx, ty) = ((x >> 8) as u8, (y >> 8) as u8);
+            let h = |dx: u8, dy: u8| {
+                self.t.height[tile(tx.wrapping_add(dx), ty.wrapping_add(dy))] as i16
+            };
+            let sx = (h(0, 0) + h(0, 1)) - (h(1, 0) + h(1, 1));
+            let sy = (h(0, 0) + h(1, 0)) - (h(0, 1) + h(1, 1));
+            let nvx = (self.ent[i].dest_x as i16).wrapping_add(sx);
+            let nvy = (self.ent[i].dest_y as i16).wrapping_add(sy);
+            self.ent[i].dest_x = ((250 * nvx as i32) / 256) as i16 as u16;
+            self.ent[i].dest_y = ((250 * nvy as i32) / 256) as i16 as u16;
+        }
         false
     }
 
@@ -3583,13 +3651,15 @@ impl Gen {
     /// the retail rand cadence is 3/5/7/9 draws a tick — the port drew
     /// zero, which is the whole (10,19) `rand` column in mc1hwl0.
     ///
-    /// OPEN (banked, not ported): retail closes the handler with an
-    /// UNCONDITIONAL `sub_120B0(a1, 0, +44)` — 200 ch0 per tick over
-    /// the ctor's 512 extents, i.e. the plume is a damage field for its
-    /// whole 240-tick life. That is a gameplay law of its own and no
-    /// take in the corpus exercises a volcano; left out pending a
-    /// measured eruption window.
-    fn plume_tick(&mut self, i: usize) -> bool {
+    /// Retail closes the handler with an UNCONDITIONAL
+    /// `sub_120B0(a1, 0, +44)` — a 200 ch0 write per tick over the
+    /// ctor's 512 extents, i.e. the plume is a damage field for its
+    /// whole 240-tick life, and the write runs on the death tick too
+    /// (the call sits after the free, outside the life branch).
+    /// Witness: mc1l5 t=16212 — the standing volcano's plume overlaps
+    /// Vodor at ~800 units, life 10000 → 9820 (−200 letter + 20
+    /// regen), knock 20/396 bearing away from the vent.
+    fn plume_tick(&mut self, i: usize, ctx: &MobCtx) -> bool {
         let life = self.ent[i].act_life;
         self.ent[i].act_life = life - 1;
         if life < 0 {
@@ -3597,39 +3667,41 @@ impl Gen {
             if self.plume == i as u16 {
                 self.plume = 0;
             }
-            return false;
-        }
-        self.ent[i].f26 = 0;
-        let (x, y, z, owner) = {
-            let e = &self.ent[i];
-            (e.x, e.y, e.z, e.id24)
-        };
-        for (dx, dy) in self.ring_cells_pub(0, 0) {
-            // The skip test and the jitter pair are the spreader's
-            // (:28860-70): the draw order is skip, then jitter ONLY on
-            // the spawn branch.
-            let s = self.ent_rand(i);
-            if s % 0x9D < 79 {
-                continue;
-            }
-            let j1 = (self.ent_rand(i) % 0x81) as i32 - 64;
-            let px = x.wrapping_add((192 * dx as i32 + j1 - 96) as u16);
-            let j2 = (self.ent_rand(i) % 0x81) as i32 - 64;
-            let py = y.wrapping_add((192 * dy as i32 + j2 - 96) as u16);
-            if self.ent[i].act_life & 1 == 0 {
-                continue;
-            }
-            let mut yaw = (((self.ent[i].act_life / 2) & 1) << 8) as u16;
-            while yaw < 0x800 {
-                if let Some(p) = self.spawn_effect(13, px, py, z) {
-                    let e = &mut self.ent[p];
-                    e.id24 = owner;
-                    e.f30 = yaw;
+        } else {
+            self.ent[i].f26 = 0;
+            let (x, y, z, owner) = {
+                let e = &self.ent[i];
+                (e.x, e.y, e.z, e.id24)
+            };
+            for (dx, dy) in self.ring_cells_pub(0, 0) {
+                // The skip test and the jitter pair are the spreader's
+                // (:28860-70): the draw order is skip, then jitter ONLY
+                // on the spawn branch.
+                let s = self.ent_rand(i);
+                if s % 0x9D < 79 {
+                    continue;
                 }
-                yaw = yaw.wrapping_add(512);
+                let j1 = (self.ent_rand(i) % 0x81) as i32 - 64;
+                let px = x.wrapping_add((192 * dx as i32 + j1 - 96) as u16);
+                let j2 = (self.ent_rand(i) % 0x81) as i32 - 64;
+                let py = y.wrapping_add((192 * dy as i32 + j2 - 96) as u16);
+                if self.ent[i].act_life & 1 == 0 {
+                    continue;
+                }
+                let mut yaw = (((self.ent[i].act_life / 2) & 1) << 8) as u16;
+                while yaw < 0x800 {
+                    if let Some(p) = self.spawn_effect(13, px, py, z) {
+                        let e = &mut self.ent[p];
+                        e.id24 = owner;
+                        e.f30 = yaw;
+                    }
+                    yaw = yaw.wrapping_add(512);
+                }
             }
+            self.ent[i].z = self.ground_z(x, y) as i16;
         }
-        self.ent[i].z = self.ground_z(x, y) as i16;
+        let amt = self.ent[i].f44 as u32;
+        self.area_write(i, 0, amt, ctx, false, false);
         false
     }
 
@@ -4222,13 +4294,19 @@ impl Gen {
                 self.set_sprite(s, 284);
             }
             // sub_3AC70 (:46935): the invisible fire-ring blast driver.
+            // sub_3AC70 (:46935): the eruption blast fire-field —
+            // life 10, damage 3000, and a RAW position write: the
+            // ctor never tile-links it (mc1l3 t=2306 graded the
+            // port's linked flags 0x4).
             17 => {
                 let e = &mut self.ent[s];
                 e.tick70 = 17;
                 e.max_life = 10;
                 e.f44 = 3000;
                 e.flags &= !8;
-                self.link(s, x, y, z);
+                e.x = x;
+                e.y = y;
+                e.z = z;
                 self.refill_life(s);
             }
             // sub_3AA10 (:46790): the POSSESS detonation flash —
@@ -4290,16 +4368,26 @@ impl Gen {
                 if hw {
                     e.max_life = 6;
                     e.f44 = 3000;
+                    self.link(s, x, y, z);
                 } else {
                     e.max_life = 128;
+                    // :47654 — the ctor's speed word, and :47664-66:
+                    // the position lands DIRECT (+72/+76, no sub_41CF0
+                    // anywhere in sub_3B8E0) with `+16 |= 1` — the
+                    // recorded cloud reads flags exactly 1, speed 256,
+                    // OFF the tile chain (mc1l5 t=23404, slot 772).
+                    e.f126 = 256;
                     e.f44 = 100;
                     let d = lcg32(&mut e.rand);
                     e.f30 = (d & 0x7FF) as u16;
+                    e.x = x;
+                    e.y = y;
+                    e.z = z;
+                    e.flags |= 1;
                     e.f80 = 1024;
                     e.f82 = 1024;
                     e.f84 = 0x4000;
                 }
-                self.link(s, x, y, z);
                 self.refill_life(s);
             }
             // sub_3BA00 (:47705): the GLOBAL DEATH field (state 60).
@@ -4531,7 +4619,7 @@ impl Gen {
             16 => self.lava_bomb_tick(i),
             17 => self.blast_ring_tick(i, ctx),
             18 => self.eruption_tick(i, ctx),
-            19 => self.plume_tick(i),
+            19 => self.plume_tick(i, ctx),
             23 => self.hit_flash_tick(i, ctx),
             26 => self.duel_tether_tick(i, ctx),
             25 => self.steal_flash_tick(i, ctx),
@@ -4723,6 +4811,12 @@ impl Gen {
             (e.x, e.y, e.z, e.id24, e.f44)
         };
         let cells = self.ring_cells_pub(0, 1);
+        // :31160 — ONE cloud-LCG step after the iterator opens,
+        // BEFORE the per-cell jitter pairs. Without it every flame's
+        // jitter reads one draw early and the cloud's own rand lane
+        // trails — the mc1l5 t=23404-23430 family: 15 re-popped free
+        // slots a tick carrying fractionally shifted corpse x/y.
+        self.ent_rand(i);
         for (dx, dy) in cells {
             let d1 = self.ent_rand(i);
             let d2 = self.ent_rand(i);
@@ -4737,7 +4831,7 @@ impl Gen {
                 e.f44 = f44;
                 e.act_life = if wave == 0 { 14 } else { 1 };
                 e.type86 += 7;
-                e.f26 += 7;
+                e.f26 = 7; // :31180 — an ASSIGN, not an accumulate
                 e.f46 = wave * 128;
                 // :31169 — +18 bit0 (0x10000): NO ch0 broadcast, the
                 // flames are pure light show (without it all 15 live

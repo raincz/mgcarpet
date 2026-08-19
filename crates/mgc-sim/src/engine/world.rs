@@ -146,7 +146,7 @@ pub struct Player {
     pub right: Option<SpellId>,
     /// Pool slot of each owned spell's class-12 manifestation entity,
     /// 0 = not owned (var_676).
-    owned: [u16; SPELL_COUNT],
+    pub(crate) owned: [u16; SPELL_COUNT],
     /// Active toggle effects (carpet flag bits: shield +17 0x40,
     /// invisible +16 0x20, rebound +17 0x80). Derived each tick from
     /// the manifestations' burst counters.
@@ -2471,9 +2471,17 @@ impl World {
         // command-site fire ran the whole stream ONE TICK EARLY (and
         // at cost/count per shot) — retail's press@5375 arms in pair
         // 5375→5376 and the first ball is born 5376→5377, slot 267.
+        // ⭐ 4 SHIELD IS ONE OF THEM AS WELL — `sub_46B00`'s branch is
+        // on the token's +65: 4 is `< 0x10`, not 2, so it takes the
+        // same LABEL_20 arm-only flow, and everything else — the
+        // shield bit, the full-cost debit, the duration — is the
+        // token's +48 machine (`sub_566C0`,
+        // [`Self::mc1_shield_token_tick`]). The command-site cast
+        // debited one lap early: mc1l3 t=4275, the wizext shadow's
+        // `wiz 0 mana_delta retail 100 port -2000` row.
         if matches!(
             id,
-            0 | 1 | 3 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 16 | 17 | 18 | 19 | 20 | 22 | 23
+            0 | 1 | 3 | 4 | 6 | 7 | 8 | 9 | 10 | 11 | 13 | 16 | 17 | 18 | 19 | 20 | 22 | 23
         ) {
             // 23's held re-issue (the +60==0 input law) is a LEVEL,
             // not an edge: every held tick re-arms the burst. The
@@ -3013,6 +3021,14 @@ impl World {
         // walkers carry no life test of their own.
         let mut wiz_chain = std::mem::take(&mut self.g.wiz_chain.list);
         wiz_chain.clear();
+        // The CLASS-9 roster (`var_u32_36462[3]`, the case-9 arm at
+        // :52279): every class-9 record, NO life or flags test. Its
+        // measured walker is the rival incoming-projectile defense —
+        // a ball born MID-tick is invisible to this tick's scan
+        // (mc1l4 t=5377: the port dodged a pelting ball retail's
+        // tick-top chain could not yet hold).
+        let mut proj_chain = std::mem::take(&mut self.g.proj_chain.list);
+        proj_chain.clear();
         // The per-model class-5 roster chains ([`MobChains`]) rebuild
         // in the same sweep — ascending, retail's tick-top membership.
         let mc1_family = matches!(self.game, GameId::Mc1 | GameId::Mc1Hw);
@@ -3036,6 +3052,9 @@ impl World {
             {
                 any_transient = true;
             }
+            if e.class64 == 9 {
+                proj_chain.push(s as u16);
+            }
             // The mana-ball chain rebuild (:52290-97, the case-10
             // arm of the same sweep — see [`TickChain`]).
             if e.class64 == 10 && matches!(e.model65, 39 | 40) {
@@ -3049,6 +3068,8 @@ impl World {
         self.g.ball_chain.cut = usize::MAX;
         self.g.wiz_chain.list = wiz_chain;
         self.g.wiz_chain.cut = usize::MAX;
+        self.g.proj_chain.list = proj_chain;
+        self.g.proj_chain.cut = usize::MAX;
         self.g.mob_chains = mob_chains;
 
         let mut ctx = MobCtx {
@@ -3225,20 +3246,28 @@ impl World {
         //
         // The proximity gate reads the local player's POOL entity
         // (:64352-53 index → +72), and as a PRE-pass that entity
-        // still holds the PREV frame's carpet — the pooled walk hook
-        // hasn't run yet. Feeding this tick's pose instead wakes a
-        // bucket one tick early whenever the wizard crosses the
-        // 24-tile gate mid-tick (mc1l0 t=414: the worm chain woke at
-        // 414 where retail arms at 415 — corpus-pinned). The
-        // `human_pose_prev` echo IS that value in every lane (the
-        // conformance import seeds it to the carpet's recorded
-        // pose@N; the carpet-slot record itself is out-of-pool
-        // there, so it can't be read directly).
+        // still holds the carpet SETTLED LAST TICK — the pooled walk
+        // hook hasn't run yet. Where that value lives depends on the
+        // driver: the REPLAY drivers (free and pair) feed tick N the
+        // pre-move pose (settled N−1, the pose pair's sample n) as
+        // the `player` arg itself, while NATIVE play feeds this
+        // tick's live input pose, so there settled(N−1) is the
+        // `human_pose_prev` echo (mc1l0 t=414: the worm chain arms
+        // at 415, off the pose settled during 414 — feeding native's
+        // this-tick arg armed it a tick early). ⚠ Under the replay
+        // drivers the echo is ONE TICK DEEPER (settled N−2) —
+        // indistinguishable at carpet speeds against the 24-tile
+        // gate, exposed by the castle teleport's 30k-unit jump:
+        // mc1l5 t=14421, the human teleports BACK into bee 338's
+        // wake radius during 14420 and retail's pass arms the bee
+        // that very tick (it consumes Vodor's 6400 letter and dies),
+        // where the echo still held the castle-side pose and the
+        // port's bee slept one more tick. `strict_retail` is the
+        // drive-mode witness: both conformance import paths set it,
+        // native play (the pooled cave carpet included) never does.
         wt_check!("tick-head passes (chains/duel/hate/mana/objective/casts/stagevar)");
         let wake_ctx = {
-            let (wx, wy) = if self.human_pose_prev == (0, 0, 0) {
-                // Unseeded echo (first tick of a fresh World): the
-                // pool wizard would already hold the placement pose.
+            let (wx, wy) = if self.strict_retail || self.human_pose_prev == (0, 0, 0) {
                 (player.x, player.y)
             } else {
                 (self.human_pose_prev.0, self.human_pose_prev.1)
@@ -3249,6 +3278,15 @@ impl World {
                 ..ctx
             }
         };
+        if std::env::var_os("MGC_WAKE_TRACE").is_some() {
+            eprintln!(
+                "[wake t={}] ctx=({}, {}) prev={:?}",
+                crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                wake_ctx.px,
+                wake_ctx.py,
+                self.human_pose_prev,
+            );
+        }
         match self.g.verbs.awake {
             AwakeVerb::Mc1 => self.g.mob_awake_pass(&wake_ctx),
             AwakeVerb::Mc2 => self.g.mc2_awake_pass(&wake_ctx),
@@ -3867,24 +3905,28 @@ impl World {
                     // the stamp is retail's own state evolution —
                     // only the READ (spell_cast_cost) forks, so
                     // hashes and snapshots stay arm-independent
-                    // while a castle stands. HUMAN-ONLY: the mc1l5
-                    // take pins Vodor's token at the ctor 1000/9
-                    // under his STANDING authored castle (t=0..), so
-                    // the every-tick re-stamp is the local player's
-                    // wizard handler alone — rival tokens move only
-                    // on castle EVENTS (the death stamp below; the
-                    // rival init order leaves AI+708 empty at the
-                    // authored-castle init, so even that stamp
-                    // misses them at level start).
-                    if self.g.ent[i].f26 > 0 && self.g.ent[i].flags & 0x400 == 0 {
+                    // while a castle stands. GATED ON THE BIND, NOT
+                    // THE OWNER: retail reads wizext+50, which ONLY
+                    // the level-up commit writes (:56484) and the
+                    // removal clears (:56534) — an AUTHORED castle
+                    // that has never leveled is UNBOUND, which is why
+                    // the mc1l5 take pins Vodor's token at the ctor
+                    // 1000/9 under his standing authored castle
+                    // (t=0..5151) and then stamps it CAP[2]/101 the
+                    // moment his first upgrade commits (t=5155, the
+                    // castle-token machine session). The port's bind
+                    // stand-in is the FIRST-COMMIT LATCH the case-0
+                    // commit already stamps: flags bit 1 (:56057-62).
+                    if self.g.ent[i].f26 > 0
+                        && self.g.ent[i].flags & 0x400 == 0
+                        && self.g.ent[i].flags & 2 != 0
+                    {
                         let lvl = self.g.ent[i].f26;
                         let cap = crate::engine::features::Gen::CASTLE_CAP[(lvl as usize).min(7)];
                         let own = self.g.ent[i].id24;
-                        if own == PLAYER_TARGET {
-                            if let Some(m) = self.castle_owner_token(own) {
-                                self.g.ent[m].f136 = cap;
-                                self.g.ent[m].f140 = cap / 101;
-                            }
+                        if let Some(m) = self.castle_owner_token(own) {
+                            self.g.ent[m].f136 = cap;
+                            self.g.ent[m].f140 = cap / 101;
                         }
                     } else if self.g.ent[i].flags & 0x400 != 0 {
                         // The castle died INSIDE this castle_tick.
@@ -4402,10 +4444,11 @@ impl World {
         if self.g.player_mail[0].1 != 0 {
             let (mut amt, src) = self.g.player_mail[0];
             // Shield (:55700-07): quarter the damage, and the
-            // quarter is ALSO paid from mana. (The original clears
-            // the +17 0x40 flag per absorb; the manifestation
-            // re-arms it every tick, so the quartering is
-            // continuous while the spell runs.)
+            // quarter is ALSO paid from mana. The original CLEARS the
+            // +17 0x40 flag per absorb; the machine re-publishes it
+            // every admitted tick, so the quartering is continuous
+            // while the spell runs — and a LAPSED machine's standing
+            // bit quarters exactly one more hit (mc1l3 t=4596).
             if self.player.shield {
                 amt /= 4;
                 self.debit_mana(amt);
@@ -4413,6 +4456,7 @@ impl World {
                 // the shield shrinks the residue too — the next hit
                 // accumulates onto the absorbed amount, not the raw one.
                 self.g.player_mail[0].0 = amt;
+                self.player.shield = false;
             }
             self.g.player_damage += amt as u64;
             self.player.life -= amt as i32;
@@ -6899,17 +6943,39 @@ impl World {
         let def = &self.spells()[20];
         let per_shot = (def.possess_mana / def.count.max(1) as u32) as i32;
         let e = &mut self.g.ent[pr];
+        // :66143 — the carpet's speed rides the LIVE +126 only;
+        // +128 keeps the ctor's 384, so the launch boost decays
+        // back at the flight's ±2 ease (mc1l5 t=23383: retail
+        // 432 → 430 where the port's f128 pin held 432).
         e.f126 += p.speed;
-        e.f128 = e.f126;
         e.id24 = PLAYER_TARGET;
+        // :66144-45 — yaw/pitch land in +30/+32 ONLY: no +34/+36
+        // stamp, no acquire latch (the arm-only mint family — the
+        // straight-flight tracker mirrors on its first tick). The
+        // port's invented +34 copy read back as a phantom
+        // target_yaw on the recorded born row (mc1l5 t=23382).
         e.f30 = p.heading;
-        e.f34 = p.heading;
         e.f32 = p.pitch;
-        e.f36 = p.pitch;
         e.f44 = def.damage.min(u16::MAX as u32) as u16;
         e.f140 = per_shot;
         e.f68 = 10;
         e.f69 = 53;
+        // :66146-47 — the charge meter banks into the bolt's +26 and
+        // zeroes (every manifestation bolt spawner's shared law).
+        e.f26 = self.wiz_charge[0] as i16;
+        self.wiz_charge[0] = 0;
+        // :66148-50 — the dest triple: the CARPET's raw axis (+72/+76,
+        // not the muzzle) projected 0x4000 along the live aim
+        // (sub_41EC0). Pair imports carry it and masked the missing
+        // stamp; the free run's (0,0,0) bent the homing tail
+        // (mc1l5 t=23389, the take's last dev — the residual offset
+        // was exactly muzzle − carpet).
+        let mut d = (p.x, p.y, p.z);
+        Gen::polar_step(&mut d, p.heading, p.pitch, 0x4000);
+        let e = &mut self.g.ent[pr];
+        e.dest_x = d.0;
+        e.dest_y = d.1;
+        e.site_z = d.2;
         self.entities_dirty = true;
     }
 
@@ -6996,6 +7062,63 @@ impl World {
         self.g.ent[i].f26 -= 1;
     }
 
+    /// Shield's own body under the strict encoding — `sub_566C0`
+    /// (:65266-89), the +48 duration machine (state 12 = spell 4
+    /// phase 0). While the counter runs: the `sub_55DD0` gate admits
+    /// the tick (caster alive, castle store, and the +136 cost tested
+    /// on the FULL `+48 == +50` tick only — mid-burst re-admits
+    /// freely, :64921-28), the owner wears the shield bit
+    /// (`+17 |= 0x40` — the out-of-pool human's is `Player::shield`),
+    /// and `sub_55E80` debits the full cost on the full tick then
+    /// pins positive regen mid-burst; a failed gate buzzes 29
+    /// (:64931) and forces `+48 = 1` so the shared decrement expires
+    /// it. mc1l3 t=4277: the picked-up ambush jar's running duration
+    /// — the inert strict arm never decremented `+48` nor debited the
+    /// human's mana.
+    /// ⚠ THE SHIELD BIT IS SET-ONLY HERE. Retail's +17 0x40 is
+    /// published by the machine and cleared PER-ABSORB by the damage
+    /// intake (:55700-07) — an expired machine leaves the bit
+    /// standing, so the shield quarters exactly ONE more hit after
+    /// its duration lapses (mc1l3 t=4596: the machine died at 4526,
+    /// the 448-raw hit 70 ticks later still lands quartered −112/−112
+    /// and only THEN does the flags word drop 0x4000).
+    fn mc1_shield_token_tick(&mut self, i: usize) {
+        if self.g.ent[i].f26 <= 0 {
+            return;
+        }
+        let full = self.g.ent[i].f26 == self.g.ent[i].f50;
+        let cost = {
+            let f136 = self.g.ent[i].f136;
+            if f136 > 0 {
+                f136 as u32
+            } else {
+                SPELLS[4].possess_mana
+            }
+        };
+        let admitted = self.dev_spells
+            || (self.player.state == LifeState::Alive
+                && {
+                    let req = self.spell_castle_req(4);
+                    req == 0
+                        || self
+                            .player_castle()
+                            .is_some_and(|c| self.g.ent[c].f140.max(0) as u32 >= req)
+                }
+                && (!full || self.player.mana >= cost));
+        if admitted {
+            self.player.shield = true;
+            if full {
+                self.mana_debit(cost);
+            } else {
+                self.suppress_regen();
+            }
+        } else {
+            self.g.snd_player(29);
+            self.g.ent[i].f26 = 1;
+        }
+        self.g.ent[i].f26 -= 1;
+    }
+
     /// Class-12 dispatch: pre-placed JARS wait for pickup; owned
     /// manifestations run their burst countdown + continuous effects.
     fn class12_tick(&mut self, i: usize, ctx: &MobCtx) {
@@ -7017,6 +7140,11 @@ impl World {
                 } {
                     if matches!(spell, 2 | 21) {
                         self.rival_speed_token_tick(i, ri, spell);
+                    } else if spell == 16 {
+                        // The castle token's own +48 machine
+                        // (sub_57610 — fire once at full, then the
+                        // in-transit charge pin).
+                        self.rival_castle_token_tick(i, ri);
                     } else {
                         self.rival_manifestation_tick(i, ri, spell);
                     }
@@ -7074,6 +7202,12 @@ impl World {
                     self.mc1_heal_token_tick(i);
                     return;
                 }
+                // SHIELD RUNS TOO, on its own +48 duration body
+                // (`sub_566C0` — [`Self::mc1_shield_token_tick`]).
+                if spell == 4 && self.player.owned[4] == i as u16 {
+                    self.mc1_shield_token_tick(i);
+                    return;
+                }
                 if self.player.owned[spell] == i as u16
                     && matches!(
                         spell,
@@ -7113,6 +7247,11 @@ impl World {
                 } {
                     if matches!(spell, 2 | 21) {
                         self.rival_speed_token_tick(i, ri, spell);
+                    } else if spell == 16 {
+                        // The castle token's own +48 machine
+                        // (sub_57610 — fire once at full, then the
+                        // in-transit charge pin).
+                        self.rival_castle_token_tick(i, ri);
                     } else {
                         self.rival_manifestation_tick(i, ri, spell);
                     }
@@ -7542,7 +7681,14 @@ impl World {
                     }
                 }
             }
-            4 => self.player.shield = active,
+            // SET-only (the +17 0x40 law): the damage intake's absorb
+            // is the only clear, so an expired shield's standing bit
+            // still quarters one hit.
+            4 => {
+                if active {
+                    self.player.shield = true;
+                }
+            }
             5 => self.player.beyond_sight = active,
             12 => self.player.invisible = active,
             14 => self.player.rebound = active,
@@ -12575,6 +12721,50 @@ mod tests {
         }
     }
 
+    /// THE SHIELD BIT CLEARS PER-ABSORB, NOT AT EXPIRY (:55700-07):
+    /// the token's +48 machine re-SETS +17 0x40 every admitted tick
+    /// and only the ch0 intake's absorb clears it, so a LAPSED
+    /// machine's standing bit quarters exactly ONE more hit — mc1l3
+    /// t=4596, a 448 raw hit landing −112 life / −112 mana 70 ticks
+    /// after the spell expired, and only THEN does the flag drop.
+    /// Pair mode cannot pin this (the player flag word is not a pair
+    /// lane), so the unit test is the guard. Non-vacuous: reverting
+    /// the `shield = false` clear in `apply_player_damage` makes the
+    /// second hit quarter too.
+    #[test]
+    fn a_lapsed_shield_machines_standing_bit_quarters_exactly_one_more_hit() {
+        let mut w = flat_world();
+        w.player.shield = true; // the standing bit; no machine runs to re-publish it
+        let life0 = w.player.life;
+        let delta0 = w.player.mana_delta;
+        w.g.player_mail[0] = (448, 7);
+        w.apply_player_damage(away());
+        assert_eq!(
+            w.player.life,
+            life0 - 112,
+            "the standing bit quarters the hit"
+        );
+        assert_eq!(
+            w.player.mana_delta,
+            delta0 - 112,
+            "the quarter is also paid from mana (:55703)"
+        );
+        assert_eq!(
+            w.g.player_mail[0].0, 112,
+            "the QUARTERED value is written back into the residue (:55704)"
+        );
+        assert!(!w.player.shield, "the bit clears per absorb");
+        // With the machine lapsed nothing re-publishes the bit: the
+        // next hit lands whole.
+        w.g.player_mail[0] = (448, 7);
+        w.apply_player_damage(away());
+        assert_eq!(
+            w.player.life,
+            life0 - 112 - 448,
+            "the second hit is unshielded"
+        );
+    }
+
     /// The m4 militia / m8 griffon `wanted_only` gate: a rival is a
     /// target only while its `rival_wanted` slot is live, and a village
     /// offense arms that slot through `flag_village_wanted`. Before the
@@ -14334,10 +14524,14 @@ mod tests {
 
     #[test]
     fn hidden_worlds_firewall_child_homes_in_the_widened_cone() {
-        // The m16 Fire Storm child (state 17) runs acquire case 0x10 in
-        // HW (yaw cone 0x100) but has NO acquire case in base MC1. A
-        // creature at yaw offset 0xA0 (> 0x71, < 0x100), pitch aligned,
-        // is picked up only under HW (SURVEY-MC1HW §3a).
+        // The m16 Fire Storm child (state 17) runs the acquire cone
+        // (yaw 0x100, pitch 0x71) in BOTH variants — the old "base
+        // MC1 has no case 16" reading came from remc1's truncated
+        // sub_54520 and was retired by the mc1l5 take (t=23383: the
+        // base bolt's first flight tick carries the head clamp, the
+        // latch, a pick and the heading snap). A creature at yaw
+        // offset 0xA0 (> 0x71, < 0x100), pitch aligned, is picked up
+        // under both game ids.
         fn acquires(game: GameId) -> bool {
             let planes = Planes {
                 height: vec![0; 0x10000],
@@ -14391,8 +14585,8 @@ mod tests {
             "HW firewall child homes (case 0x10, cone 0x100)"
         );
         assert!(
-            !acquires(GameId::Mc1),
-            "base MC1 firewall child flies straight (no case 16)"
+            acquires(GameId::Mc1),
+            "base MC1 homes too (mc1l5 t=23383 — the remc1 no-case-16 reading is the listing's gap)"
         );
     }
 
@@ -18779,6 +18973,62 @@ mod tests {
         assert_eq!(count(&w, 10, 16), 0, "eruption activity ended");
     }
 
+    /// The lava bomb's WATER SPLASH is not an early-out (sub_25A60
+    /// :28628-33): the kill lands only when the pool grants the
+    /// (10,5) splash — `if (v9)` wraps both writes — and either way
+    /// the arm falls through to the unconditional +26 increment
+    /// (mc1l3 t=2416 slot 624: the drowning bomb still counts f26
+    /// 2→3, one pair row per drowned bomb). A refused splash leaves
+    /// the bomb alive and flying.
+    #[test]
+    fn a_drowning_lava_bomb_still_counts_its_tick() {
+        use crate::engine::features::tile;
+        let mut w = flat_world();
+        let (btx, bty) = (112u8, 110u8);
+        let (bx, by) = (((btx as u16) << 8) + 128, ((bty as u16) << 8) + 128);
+        // Water under the flight path — the probe reads the bomb's
+        // OLD position, the splash spawns at the new.
+        for dx in 0..3u8 {
+            for dy in 0..3u8 {
+                w.g.t.tile_type[tile(btx + dx - 1, bty + dy - 1)] = 0;
+            }
+        }
+        let gz = w.g.ground_z(bx, by) as i16;
+        let b = w.g.spawn_lava_bomb(bx, by).unwrap();
+        // Park it just above ground on a hard descent so this tick is
+        // the grounding tick.
+        w.g.ent[b].z = gz + 8;
+        w.g.ent[b].f46 = -200;
+        w.g.ent[b].f26 = 5;
+        w.tick(away(), PlayerCommand::default());
+        assert!(
+            w.g.ent[b].flags & 0x400 != 0,
+            "the water contact killed the bomb"
+        );
+        assert_eq!(count(&w, 10, 5), 1, "the splash spawned");
+        assert_eq!(w.g.ent[b].f26, 6, "the dying tick still counts +26");
+        // The refusal arm: a dry pool grants no splash, and the bomb
+        // must survive the contact. Fresh world — the first arm's
+        // tick-top reap would hand its freed slots right back.
+        let mut w = flat_world();
+        for dx in 0..3u8 {
+            for dy in 0..3u8 {
+                w.g.t.tile_type[tile(btx + dx - 1, bty + dy - 1)] = 0;
+            }
+        }
+        let b2 = w.g.spawn_lava_bomb(bx, by).unwrap();
+        w.g.ent[b2].z = gz + 8;
+        w.g.ent[b2].f46 = -200;
+        w.g.ent[b2].f26 = 5;
+        w.g.free.clear();
+        w.tick(away(), PlayerCommand::default());
+        assert!(
+            w.g.ent[b2].flags & 0x400 == 0,
+            "a refused splash leaves the bomb flying"
+        );
+        assert_eq!(w.g.ent[b2].f26, 6, "the surviving tick counts too");
+    }
+
     #[test]
     fn possess_homes_on_and_claims_a_mana_ball() {
         use crate::mc1::spells::SpellId;
@@ -19062,6 +19312,48 @@ mod tests {
         }
         assert!(saw_cloud, "impact spawned the (10,53) napalm cloud");
         assert!(saw_flames, "the cloud waves standing flames over the ring");
+    }
+
+    /// The mc1l5-certified mint tail (pair-invisible: the import
+    /// carries all three lanes, so only the free run ever exposed
+    /// them — t=23383/23389, the take's last two devs).
+    #[test]
+    fn the_firewall_bolt_mint_decays_to_the_ctor_cruise_and_aims_from_the_carpet() {
+        use crate::mc1::spells::SpellId;
+        let mut w = flat_world();
+        w.set_dev_spells(true);
+        w.player.left = Some(SpellId(20));
+        let p = firing_line();
+        w.tick(
+            p,
+            PlayerCommand {
+                fire_left: true,
+                ..Default::default()
+            },
+        );
+        w.tick(p, PlayerCommand::default()); // the token fires at arm+1
+        let bolt = find_slot(&w, 9, 16);
+        let e = &w.g.ent[bolt];
+        // sub_3A270 (:46344-45): +128 keeps the ctor's 384 — the
+        // carpet's launch boost rides +126 alone and decays back at
+        // the flight's ±2 ease (mc1l5 t=23383: retail 432 → 430).
+        assert_eq!(
+            e.f128, 384,
+            "cruise target is the ctor's, not the boosted mint"
+        );
+        // :46349 — behavior row 5, whose v_2 = 5 is the homing
+        // tail's whole turn authority (t=23389: 664 → 669, not 720).
+        assert_eq!(e.row156, 5, "the m16 bolt wears behavior row 5");
+        // :66148-50 — dest = the CARPET's raw axis projected 0x4000
+        // along the live aim (not the muzzle: the take's residual
+        // offset was exactly muzzle − carpet).
+        let mut d = (p.x, p.y, p.z);
+        Gen::polar_step(&mut d, p.heading, p.pitch, 0x4000);
+        assert_eq!(
+            (e.dest_x, e.dest_y, e.site_z),
+            (d.0, d.1, d.2),
+            "the dest triple projects from the carpet axis"
+        );
     }
 
     #[test]
@@ -19588,9 +19880,13 @@ mod tests {
         let m = w.rivals[0].owned[16] as usize;
         assert_ne!(m, 0, "the mint registered the manifestation");
         assert_eq!(
-            w.g.ent[m].f136, 1000,
-            "rival token keeps the ctor seed while housed (no \
-             every-tick stamp for rivals — mc1l5 t=0, Vodor 1000/9)"
+            w.g.ent[m].f136, 20000,
+            "a housed rival's token mirrors the ladder — CAP[level]/101 \
+             once the castle's first commit binds it (mc1l5 recorded \
+             truth: Vodor's authored level-1 castle stamps his token \
+             10000/99 from t=2 on; the ctor 1000/9 holds only through \
+             the pre-commit window). This config's castle commits to \
+             its authored level 2, so the stamp reads CAP[2]"
         );
         // Raze it — one lethal write per tick until every level is
         // knocked down (the downgrade eats one rung per hit). The
@@ -23603,6 +23899,7 @@ mod tests {
         }
         let b = w.g.spawn_fireball(bx, by, bz).expect("bolt");
         w.g.arm_projectile(b, PLAYER_TARGET, 0xFF, 0xFF, 0, bx, 92 << 8, bz, 100, 0, 0);
+        w.g.rebuild_wiz_chain();
         w.g.proj_tick(b, &ctx);
         assert_eq!(
             w.g.ent[b].f146, balloon as u16,
@@ -23631,6 +23928,7 @@ mod tests {
             }
             let b = w.g.spawn_fireball(bx, by, bz).expect("bolt");
             w.g.arm_projectile(b, owner as u16, 0xFF, 0xFF, 0, bx, 90 << 8, bz, 100, 0, 0);
+            w.g.rebuild_wiz_chain();
             w.g.proj_tick(b, &ctx);
             assert_eq!(
                 w.g.ent[b].f146 == balloon as u16,

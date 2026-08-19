@@ -271,7 +271,13 @@ impl Gen {
             }
             // sub_37920 (:44229): the castle. Spawn position snaps to a
             // tile corner of even parity; +150/152 keep the snapped
-            // position (the castle's anchor).
+            // position (the castle's anchor) and +154 the ground at
+            // the RAW pre-snap axis (:44251/:44256 — one sub_11F50,
+            // used for both the link z and the site datum; the
+            // caller's z is ignored). The transform's painter mints
+            // AT the +150 triple (sub_47020 :56100), so a zero +154
+            // is a painter born at z 0 (mc1l5 t=17645, the post-raze
+            // rebuild's first level-up at site (0,0)).
             2 => {
                 let e = &mut self.ent[i];
                 e.tick70 = 5;
@@ -284,9 +290,11 @@ impl Gen {
                     tx = tx.wrapping_add(1);
                 }
                 let (sx, sy) = (tx << 8, ty << 8);
+                let gz = self.ground_z(x, y) as i16;
                 self.ent[i].dest_x = sx;
                 self.ent[i].dest_y = sy;
-                self.link(i, sx, sy, z);
+                self.ent[i].site_z = gz;
+                self.link(i, sx, sy, gz);
                 self.refill_life(i);
                 self.set_sprite(i, 177);
             }
@@ -563,6 +571,17 @@ impl Gen {
         }
 
         self.link(i, x, y, z);
+        // The m9 ctor GROUND-SNAPS its z after the place — sub_38E70
+        // ends `+76 = sub_11F50(+72)` (:45289), overwriting the z the
+        // link just stored, exactly the standing-fire ctor's shape
+        // (:46640). A ctor census finds it on model 9 ALONE of the
+        // seventeen class-5 ctors. mc1l5 t=4478: the hidden mound
+        // converts militia 780 mid-descent (z 337, ground 334) and
+        // retail's newborn burrower lands ON the ground.
+        if model == 9 {
+            let (px, py) = (self.ent[i].x, self.ent[i].y);
+            self.ent[i].z = self.ground_z(px, py) as i16;
+        }
         // m7 sets +12 = +8 inline instead of RefillLife (:45118) —
         // identical result.
         self.refill_life(i);
@@ -796,7 +815,18 @@ impl Gen {
             }
         }
         if !committed {
-            self.ent[i].act_life = -1; // :21293
+            // :21293 — the walled-in kill. It does NOT end the tick:
+            // no retail handler re-tests its own life after the mover
+            // (:21503 wander, :21654 chase, :21769 pack, :23057 m5 eat,
+            // :23205/:24188 m7/m9 chases, :23747 m9 hidden, :24469/
+            // :24632 genie, :25068/:25380/:25556 villagers, :26145
+            // wyvern — every one falls straight into its think/scan/
+            // fire body), so the dying tick still draws, re-bears and
+            // SHOOTS; the death is taken by the NEXT tick's prologue.
+            // mc1l3 t=5289: militia 130 walls in mid-chase (all four
+            // candidates refused, +30 left at the reverse probe) and
+            // retail still mints its 500-damage dart at the human.
+            self.ent[i].act_life = -1;
             return;
         }
         let e = &self.ent[i];
@@ -1093,9 +1123,6 @@ impl Gen {
     /// crowds up onto the unbounded pack accel).
     fn mob_wander(&mut self, i: usize, base: u8, ctx: &MobCtx) {
         self.creature_move(i);
-        if self.ent[i].act_life < 0 {
-            return; // walled in — dies via the prologue next tick
-        }
         let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26;
         if (self.ent[i].f63 as i16) % v26 == 0 {
             let d1 = self.ent_rand(i);
@@ -1120,6 +1147,40 @@ impl Gen {
         }
     }
 
+    /// m1's WANDER-wrapper trailer (`sub_1B200` :22260-88): after the
+    /// shared two-scan, the SAME v_26 cadence walks the TICK-TOP ball
+    /// chain for GRAVES — model 40 on the models-39|40 chain — nearest
+    /// by 2-D distance within v_28², NO facing cone, NO awake or cloak
+    /// test — and a find OVERRIDES whatever the shared scan just
+    /// picked: chase = the grave, state = base+0, the vulture's moving
+    /// idle (the glide-in). mc1l4 t=6888: the rival's three-tick-old
+    /// grave out-pulls the human the shared Scan A had locked.
+    fn m1_grave_hunt(&mut self, i: usize, base: u8) {
+        let e = &self.ent[i];
+        let row = &BEHAVIOR[e.row156 as usize];
+        if (e.f63 as i16) % row.v_26 != 0 {
+            return;
+        }
+        let (ex, ey) = (e.x, e.y);
+        let r2 = (row.v_28 as i32) * (row.v_28 as i32);
+        let mut best: Option<(usize, i32)> = None;
+        for k in 0..self.ball_chain.visible_len() {
+            let j = self.ball_chain.list[k] as usize;
+            let c = &self.ent[j];
+            if c.model65 != 40 {
+                continue;
+            }
+            let d2 = Self::dist2_sq(ex, ey, c.x, c.y);
+            if d2 <= r2 && best.is_none_or(|(_, bd)| d2 < bd) {
+                best = Some((j, d2));
+            }
+        }
+        if let Some((j, _)) = best {
+            self.ent[i].f146 = j as u16;
+            self.ent[i].tick70 = base;
+        }
+    }
+
     /// CHASE sub_1A120 (:21580): move; bearing to the target every 4th
     /// tick; every v_26 ticks either drop back to WANDER when the 3D
     /// distance reaches v_28 (un-squared — asymmetric with the scan's
@@ -1135,9 +1196,6 @@ impl Gen {
     fn mob_chase(&mut self, i: usize, base: u8, ctx: &MobCtx) -> bool {
         let model = self.ent[i].model65;
         self.creature_move(i);
-        if self.ent[i].act_life < 0 {
-            return false;
-        }
         let tgt = self.ent[i].f146;
         // tf66/tf67 = the target's OWN filter fields (the player
         // entity keeps NewEvent's -1/-1): m6/m8 copy them onto their
@@ -1406,7 +1464,30 @@ impl Gen {
     /// Only the ODD-ordinal variant participates: the ctor's parity
     /// arm gives the even one sprite 199 (:45101-13), which matches
     /// neither pose test, so it never plants and never restores.
-    fn m7_chase(&mut self, i: usize, base: u8, ctx: &MobCtx) {
+    /// m7's CHASE HEAD (:23325-32) — the dug-in timer decrement and
+    /// the takeoff flip sit ABOVE the shared core's damage prologue
+    /// (retail runs them before `sub_1A120`), so a hit tick still
+    /// counts the timer down. Hoisted into `creature_tick` with the
+    /// m2/m8/m9 preworks: mc1l5 t=23065 slot 55 eats the fire wall's
+    /// −400 letter every tick and retail's f26 steps 9→8 where the
+    /// port's intake abort froze it — the phase slip behind the whole
+    /// (5,7) 20-vs-3 flee-speed family.
+    /// m7's WANDER HEAD (sub_1C900 :23305-12): every `v_26`-th tick
+    /// (`f63 % v_26 == 0`) a wanderer with nonzero life SNAPS TO
+    /// FULL. The decompile's arithmetic is a mangled bool (`v1 =
+    /// (max>>6) > max`, always 0) but its effective behavior is the
+    /// measured one — mc1l5 t=22881 slot 57: 3200 → 4000 in ONE tick
+    /// (a 1/64 regen would read 3262). Sits above the shared core's
+    /// damage prologue like the other family preworks — a hit tick
+    /// still heals first.
+    fn m7_wander_prework(&mut self, i: usize) {
+        let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26.max(1);
+        if (self.ent[i].f63 as i16) % v26 == 0 && self.ent[i].act_life != 0 {
+            self.ent[i].act_life = self.ent[i].max_life as i32;
+        }
+    }
+
+    fn m7_chase_prework(&mut self, i: usize) {
         let v1 = self.ent[i].f26;
         if v1 != 0 {
             self.ent[i].f26 = v1 - 1;
@@ -1415,6 +1496,9 @@ impl Gen {
                 self.ent[i].f126 = self.ent[i].f128;
             }
         }
+    }
+
+    fn m7_chase(&mut self, i: usize, base: u8, ctx: &MobCtx) {
         if self.mob_chase(i, base, ctx) && self.ent[i].type86 == 85 {
             self.set_sprite(i, 198);
             self.ent[i].f26 = 30;
@@ -1486,9 +1570,6 @@ impl Gen {
     /// (:26178-90).
     fn wyvern_chase(&mut self, i: usize, base: u8, ctx: &MobCtx) {
         self.creature_move(i);
-        if self.ent[i].act_life < 0 {
-            return;
-        }
         let tgt = self.ent[i].f146;
         let (tx, ty, tz, tclass, tdead) = if tgt == PLAYER_TARGET {
             (ctx.px, ctx.py, ctx.pz, 3u8, false)
@@ -1737,9 +1818,6 @@ impl Gen {
     /// range or cone gate, → ambush. (Hit-retaliation is the inbox's.)
     fn genie_wander(&mut self, i: usize, base: u8, ctx: &MobCtx) {
         self.creature_move(i);
-        if self.ent[i].act_life < 0 {
-            return;
-        }
         let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26.max(1);
         if (self.ent[i].f63 as i16) % v26 != 0 {
             return;
@@ -1828,9 +1906,6 @@ impl Gen {
     /// a ruling on a GRADED lane.)
     fn genie_chase(&mut self, i: usize, base: u8, ctx: &MobCtx) {
         self.creature_move(i);
-        if self.ent[i].act_life < 0 {
-            return;
-        }
         let tgt = self.ent[i].f146;
         // `v9` (:24633) is resolved ONCE, ahead of every branch, and
         // every later read — the re-bear, the range drop-out, the
@@ -1928,65 +2003,63 @@ impl Gen {
     /// nearest ball and lay an egg when 500 over max mana.
     fn m5_wander(&mut self, i: usize, base: u8, ctx: &MobCtx) {
         self.creature_move(i);
-        if self.ent[i].act_life >= 0 {
-            let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26;
-            if (self.ent[i].f63 as i16) % v26 == 0 {
-                if let Some(t) = self.nearest_wizard_target(i, ctx, false, false) {
-                    self.ent[i].f146 = t;
-                    self.ent[i].tick70 = base + 2;
-                } else if self.ent[i].f146 != 0 {
-                    let t = self.ent[i].f146 as usize;
-                    let is_ball = t < self.ent.len()
-                        && self.ent[t].class64 == 10
-                        && self.ent[t].model65 == 39
-                        && self.ent[t].flags & 0x400 == 0;
-                    if is_ball {
-                        let e = &self.ent[i];
-                        let (bx, by) = (self.ent[t].x, self.ent[t].y);
-                        let d = Self::isqrt(Self::dist2_sq(e.x, e.y, bx, by) as u32);
-                        if d > (e.f128 as u32) << 7 {
-                            self.ent[i].f34 = Self::angle_between(e.x, e.y, bx, by);
-                        } else {
-                            self.ent[i].f26 = 15;
-                            self.ent[i].tick70 = base + 3; // EAT (state 0x21)
-                        }
+        let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26;
+        if (self.ent[i].f63 as i16) % v26 == 0 {
+            if let Some(t) = self.nearest_wizard_target(i, ctx, false, false) {
+                self.ent[i].f146 = t;
+                self.ent[i].tick70 = base + 2;
+            } else if self.ent[i].f146 != 0 {
+                let t = self.ent[i].f146 as usize;
+                let is_ball = t < self.ent.len()
+                    && self.ent[t].class64 == 10
+                    && self.ent[t].model65 == 39
+                    && self.ent[t].flags & 0x400 == 0;
+                if is_ball {
+                    let e = &self.ent[i];
+                    let (bx, by) = (self.ent[t].x, self.ent[t].y);
+                    let d = Self::isqrt(Self::dist2_sq(e.x, e.y, bx, by) as u32);
+                    if d > (e.f128 as u32) << 7 {
+                        self.ent[i].f34 = Self::angle_between(e.x, e.y, bx, by);
                     } else {
-                        self.ent[i].f146 = 0;
+                        self.ent[i].f26 = 15;
+                        self.ent[i].tick70 = base + 3; // EAT (state 0x21)
                     }
                 } else {
-                    // Nearest loose ball, any range (:22928-45).
-                    let (ex, ey) = (self.ent[i].x, self.ent[i].y);
-                    let mut best: Option<(usize, i32)> = None;
-                    for j in 1..self.ent.len() {
-                        let c = &self.ent[j];
-                        if c.class64 != 10 || c.model65 != 39 || c.flags & 0x400 != 0 {
-                            continue;
-                        }
-                        let d2 = Self::dist2_sq(ex, ey, c.x, c.y);
-                        if best.is_none_or(|(_, bd)| d2 < bd) {
-                            best = Some((j, d2));
-                        }
+                    self.ent[i].f146 = 0;
+                }
+            } else {
+                // Nearest loose ball, any range (:22928-45).
+                let (ex, ey) = (self.ent[i].x, self.ent[i].y);
+                let mut best: Option<(usize, i32)> = None;
+                for j in 1..self.ent.len() {
+                    let c = &self.ent[j];
+                    if c.class64 != 10 || c.model65 != 39 || c.flags & 0x400 != 0 {
+                        continue;
                     }
-                    if let Some((j, _)) = best {
-                        self.ent[i].f146 = j as u16;
+                    let d2 = Self::dist2_sq(ex, ey, c.x, c.y);
+                    if best.is_none_or(|(_, bd)| d2 < bd) {
+                        best = Some((j, d2));
                     }
+                }
+                if let Some((j, _)) = best {
+                    self.ent[i].f146 = j as u16;
+                }
 
-                    // Egg-laying (:22945-55): 500 over max mana buys a
-                    // class-10 m52 egg (1 own-LCG draw). The creator's
-                    // f26=600 is overwritten here with the real
-                    // 100..190-tick hatch timer; the egg then incubates
-                    // (`tick_egg_incubate`) and hatches a wild m5 crab
-                    // (`tick_egg_hatch`).
-                    if self.ent[i].f136 + 500 < self.ent[i].f140 {
-                        let (x, y, z) = {
-                            let e = &self.ent[i];
-                            (e.x, e.y, e.z)
-                        };
-                        if let Some(egg) = self.spawn_creator(52, x, y, z) {
-                            let d = self.ent_rand(i);
-                            self.ent[egg].f26 = (10 * (d % 10) + 100) as i16;
-                            self.ent[i].f140 -= 500;
-                        }
+                // Egg-laying (:22945-55): 500 over max mana buys a
+                // class-10 m52 egg (1 own-LCG draw). The creator's
+                // f26=600 is overwritten here with the real
+                // 100..190-tick hatch timer; the egg then incubates
+                // (`tick_egg_incubate`) and hatches a wild m5 crab
+                // (`tick_egg_hatch`).
+                if self.ent[i].f136 + 500 < self.ent[i].f140 {
+                    let (x, y, z) = {
+                        let e = &self.ent[i];
+                        (e.x, e.y, e.z)
+                    };
+                    if let Some(egg) = self.spawn_creator(52, x, y, z) {
+                        let d = self.ent_rand(i);
+                        self.ent[egg].f26 = (10 * (d % 10) + 100) as i16;
+                        self.ent[i].f140 -= 500;
                     }
                 }
             }
@@ -1999,9 +2072,6 @@ impl Gen {
     /// 5·maxSpeed: absorb its mana, destroy it, GROW, back to wander.
     fn m5_eat(&mut self, i: usize, base: u8) {
         self.creature_move(i);
-        if self.ent[i].act_life < 0 {
-            return;
-        }
         let period = self.ent[i].f26.max(1);
         if (self.ent[i].f63 as i16) % period != 0 {
             return;
@@ -2123,9 +2193,6 @@ impl Gen {
         // above ground so the 3D range gate below can reach the target
         // instead of failing on the stale spawn height.
         self.creature_move(i);
-        if self.ent[i].act_life < 0 {
-            return;
-        }
         let e = &self.ent[i];
         if e.f63 & 3 == 0 {
             // The shared chase's re-bear writes the TARGET heading
@@ -2203,9 +2270,6 @@ impl Gen {
         // retail's sub_1B5D0 writes neither sprite nor filter, and the
         // trailer now runs on the chase-exit tick where it belongs.)
         self.creature_move(i);
-        if self.ent[i].act_life < 0 {
-            return; // walled in — dies via the prologue next tick
-        }
         let row = &BEHAVIOR[self.ent[i].row156 as usize];
         let (v26, r) = (row.v_26, row.v_28 as i32);
         if (self.ent[i].f63 as i16) % v26 != 0 {
@@ -2353,9 +2417,6 @@ impl Gen {
     /// +26 runs down one per think tick — at 0 → +26 = 1, SEEK (75).
     fn m12_wander(&mut self, i: usize) {
         self.creature_move(i);
-        if self.ent[i].act_life < 0 {
-            return;
-        }
         let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26;
         if (self.ent[i].f63 as i16) % v26 == 0 {
             let d1 = self.ent_rand(i);
@@ -2572,9 +2633,6 @@ impl Gen {
     /// verbatim — the cross-map migrant stream).
     pub(crate) fn feeder_wander(&mut self, i: usize, base: u8, distant: bool) {
         self.creature_move(i);
-        if self.ent[i].act_life < 0 {
-            return;
-        }
         // One think gate wraps BOTH arms (:25382) — a stale/invalid
         // anchor is also only dropped on a think tick.
         let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26;
@@ -2883,9 +2941,6 @@ impl Gen {
             return;
         }
         self.creature_move(i);
-        if self.ent[i].act_life < 0 {
-            return;
-        }
         let e = &self.ent[i];
         let row = &BEHAVIOR[e.row156 as usize];
         if (e.f63 as i16) % row.v_26 != 0 {
@@ -3141,17 +3196,22 @@ impl Gen {
             (e.x, e.y, e.z, e.id24)
         };
         let r2 = (row.v_28 as i32) * (row.v_28 as i32);
+        // THE VICTIM SCAN WALKS THE TICK-TOP PER-MODEL ROSTER
+        // (`+36382 + 4*model`, :23887-98) WITH NO PER-NODE GATES —
+        // nearest-within-v_28² is the whole test. The tick-top rebuild
+        // already applied `act_life >= 0 && +70 != 120`, and retail
+        // re-tests NEITHER: a militiaman another mound converted (and
+        // soft-killed) EARLIER THIS TICK is still a valid victim, and
+        // the second mound mints a second burrower on the same corpse
+        // (mc1l5 t=4576: mounds 733 and 790 both convert militia 792,
+        // burrowers 796 + 813 born at one axis; sub_41E80 re-kills the
+        // corpse idempotently). The port's pool scan with live
+        // life/0x400/state-120 re-tests lost the second mint — the
+        // chain-vs-pool bug in its per-node-gate-set costume.
         let mut best: Option<(usize, i32)> = None;
-        for j in 1..self.ent.len() {
+        for &member in self.mob_chains.visible(victim_model as usize) {
+            let j = member as usize;
             let c = &self.ent[j];
-            if c.class64 != 5
-                || c.model65 != victim_model
-                || c.tick70 == 120
-                || c.act_life < 0
-                || c.flags & 0x400 != 0
-            {
-                continue;
-            }
             let d2 = Self::dist2_sq(ex, ey, c.x, c.y);
             if d2 <= r2 && best.is_none_or(|(_, bd)| d2 < bd) {
                 best = Some((j, d2));
@@ -3258,9 +3318,6 @@ impl Gen {
             return;
         }
         self.creature_move(i);
-        if self.ent[i].act_life < 0 {
-            return;
-        }
         let row = &BEHAVIOR[self.ent[i].row156 as usize];
         if (self.ent[i].f63 as i16) % row.v_26 != 0 {
             return;
@@ -3755,6 +3812,12 @@ impl Gen {
         if (model, role) == (2, 2) {
             self.m2_chase_prework(i, ctx);
         }
+        if (model, role) == (7, 1) {
+            self.m7_wander_prework(i);
+        }
+        if (model, role) == (7, 2) {
+            self.m7_chase_prework(i);
+        }
         if (model, role) == (8, 2) {
             self.griffon_chase_prework(i);
         }
@@ -4130,6 +4193,12 @@ impl Gen {
             (2, 1) => {
                 self.mob_wander(i, base, ctx);
                 self.m2_lunge_arm(i, base, true);
+            }
+            // m1's wander wrapper sub_1B200 (:22260-88): the shared
+            // scan, then the vulture's GRAVE hunt as a trailer.
+            (1, 1) => {
+                self.mob_wander(i, base, ctx);
+                self.m1_grave_hunt(i, base);
             }
             (_, 1) => {
                 self.mob_wander(i, base, ctx);

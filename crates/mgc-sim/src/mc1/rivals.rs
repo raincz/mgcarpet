@@ -131,6 +131,25 @@ impl AiState {
             _ => AiState::Fresh,
         }
     }
+
+    /// Variant → canonical +415 byte, the inverse of
+    /// [`Self::from_retail`] up to the cut states (2/4/5/10 all read
+    /// back as Fresh's 0) — compare retail bytes through
+    /// `from_retail(a).to_retail()` so the collapse is symmetric.
+    pub(crate) fn to_retail(self) -> u8 {
+        match self {
+            AiState::Fresh => 0,
+            AiState::Upgrade => 1,
+            AiState::Build => 3,
+            AiState::Possess => 6,
+            AiState::RaidCastle => 7,
+            AiState::AttackWizard => 8,
+            AiState::RaidBalloon => 9,
+            AiState::Home => 0xB,
+            AiState::Cruise => 0xC,
+            AiState::HuntMana => 0xD,
+        }
+    }
 }
 
 /// One live rival: the Type_160 subset the AI machinery needs. The
@@ -147,6 +166,18 @@ pub(crate) struct Rival {
     pub ent: u16,
     /// Manifestation pool slots by spell id (var_676; 0 = not owned).
     pub owned: [u16; SPELL_COUNT],
+    /// The +532 ACQUISITION LIST — manifestation pool slots in PICKUP
+    /// order while alive. The death scatter iterates THIS, not the
+    /// spell-id book (mc1l4 t=6885: two jars' scatter draws land in
+    /// list order), rewriting each live entry to the token's MODEL
+    /// number and each empty one to −1 (:55519-49); the respawn
+    /// re-grant re-mints from the rewritten entries IN PLACE
+    /// (:54884-923 — a scattered fireball's model 0 collides with the
+    /// empty sentinel by design: the −1→0 reset skips, the 0 entry
+    /// re-mints model 0, and that collision is exactly how fireball
+    /// ownership survives death). Grants append at the first ZERO
+    /// entry (:19421-31).
+    pub(crate) acq: [i32; SPELL_COUNT],
     /// Spells known across deaths — respawn re-mints manifestations
     /// (:54884-923); the scattered jars decay independently.
     pub known: [bool; SPELL_COUNT],
@@ -248,6 +279,7 @@ impl Rival {
             slot,
             ent,
             owned: [0; SPELL_COUNT],
+            acq: [0; SPELL_COUNT],
             known: [false; SPELL_COUNT],
             allowed: cfg.allowed,
             learn: [0; SPELL_COUNT],
@@ -285,6 +317,55 @@ impl Rival {
     /// entity age byte (:18024/:18065).
     fn think_period(&self) -> u8 {
         (64 - (self.tempo / 4) as i32).max(1) as u8
+    }
+
+    /// The pickup append (:19421-31): the first ZERO entry of the
+    /// acquisition list takes the freshly minted token's pool slot; a
+    /// full list drops the append, exactly as retail's 24-bounded scan.
+    fn acq_push(&mut self, m: u16) {
+        if let Some(e) = self.acq.iter_mut().find(|e| **e == 0) {
+            *e = m as i32;
+        }
+    }
+
+    /// The rival's wizext/brain registers as RETAIL-convention lanes —
+    /// the per-rival half of `World::wiz_shadow_mc1` (this module owns
+    /// the private brain fields, so the projection lives here). Lane
+    /// names match `RetailWizardMc1`'s fields; `ai_state` is the
+    /// canonical [`AiState::to_retail`] byte, `poverty` is the latch as
+    /// 0/1 (retail keeps a mana threshold in the live latch, the port a
+    /// bool — nonzero-ness is the comparable fact), `war` likewise.
+    /// `v_14` and `target` are deliberately absent: v_14 is not in the
+    /// recording, and the target rides the carpet entity's graded f146.
+    pub(crate) fn wiz_shadow_lanes(
+        &self,
+    ) -> (Vec<(&'static str, i64)>, Vec<(&'static str, Vec<i64>)>) {
+        let scalars = vec![
+            ("cmd_speed", self.vdes as i64),
+            ("strafe", self.jink as i64),
+            ("knock_mag", self.knock_mag as i64),
+            ("knock_dir", self.knock_dir as i64),
+            ("grace", self.grace as i64),
+            ("regen_stall", self.regen_stall as i64),
+            ("life_rate", self.life_rate as i64),
+            ("ai_state", self.state.to_retail() as i64),
+            ("burst", self.burst as i64),
+            ("poverty", self.poverty as i64),
+            ("target_sig", self.target_sig as i64),
+            ("mana_delta", self.mana_delta as i64),
+        ];
+        let arrays = vec![
+            ("hate", self.hate.iter().map(|&v| v as i64).collect()),
+            ("war", self.war.iter().map(|&v| v as i64).collect()),
+            ("learn", self.learn.iter().map(|&v| v as i64).collect()),
+            (
+                "cooldown",
+                self.cooldown.iter().map(|&v| v as i64).collect(),
+            ),
+            ("owned", self.owned.iter().map(|&v| v as i64).collect()),
+            ("acq", self.acq.iter().map(|&v| v as i64).collect()),
+        ];
+        (scalars, arrays)
     }
 }
 
@@ -351,6 +432,7 @@ impl World {
                 r.known[s] = true;
                 if let Some(m) = self.mint_manifestation(s, i as u16) {
                     r.owned[s] = m as u16;
+                    r.acq_push(m as u16);
                 }
             }
         }
@@ -575,13 +657,20 @@ impl World {
         // own; the castle still takes AREA-blast collateral through
         // its normal ch0 mail, which is how a camping rival's
         // castle falls in retail.
+        // ⭐ The castle resolves through wizext+50, the BOUND register
+        // (:17971 `v14 = wizext+50`): an authored castle that never
+        // leveled grants neither the mail-discard grace nor the fast
+        // regen fork. And the probe is `sub_11950` = the FULL summed-
+        // extents AABB (signed +78 z leg) — the same law the human's
+        // `regen_boost` already wears (mc1l0 t=1827). mc1l5 t=11681:
+        // Vodor brushes his keep's summed box at |dx| 3362 vs
+        // 3328+125, and retail flips him to the at-castle +1000/tick
+        // where the port's bare `<= f80/f82` point test kept the
+        // away-rate +100.
         let castle = self.rival_castle(self.rivals[ri].ent);
-        let at_castle = castle.is_some_and(|c| {
-            let (ex, ey) = (self.g.ent[i].x, self.g.ent[i].y);
-            let e = &self.g.ent[c];
-            ((ex.wrapping_sub(e.x) as i16).unsigned_abs()) <= e.f80
-                && ((ey.wrapping_sub(e.y) as i16).unsigned_abs()) <= e.f82
-        });
+        let at_castle = castle
+            .filter(|&c| self.g.ent[c].flags & 2 != 0)
+            .is_some_and(|c| self.g.ent_overlap(i, c));
         if at_castle {
             // Retail SETS 2 (:17975 `+331 = 2`) — a spawn grace still
             // counting is OVERWRITTEN at the own castle, not floored.
@@ -848,20 +937,27 @@ impl World {
         r.hate[shooter as usize] = r.hate[shooter as usize].saturating_add(amount);
     }
 
-    /// The castle-arm war check (:19733-39): hate past
-    /// `50000 − shooter_wealth/10 × victim_agg/255` raises the war
-    /// flag. The wealth is the SHOOTER's max mana and the aggression
-    /// the VICTIM's — the MC2 twin spells it out unambiguously
-    /// (`v1x->maxMana_0x8C * v2x_owner->word_0x242` EF:7402-03); an
-    /// earlier port fold used the victim's wealth.
-    fn rival_war_check(&mut self, ri: usize, shooter: u8, shooter_wealth: u32) {
+    /// The castle-arm war check (:19733-39): hate past the threshold
+    /// raises the war flag. ⭐⭐ THE MC1 THRESHOLD IS FLAT 50000: the
+    /// listing scales it by an aggression word read through the victim
+    /// CASTLE entity's +160 (`*(v3+160)+522`) — but only CARPETS carry
+    /// the wizext pointer at +160; a castle's is the mint's zero, so
+    /// the read lands in low memory and the scaled term never
+    /// contributes (the unguarded-pointer constant class — the same
+    /// shape as the l42 `+146` null-probe ruling). Measured on mc1l5's
+    /// four hate windows: war latches at 50518/50659/51518, each the
+    /// FIRST crossing above 50000, never at 49518/49659, and window 4
+    /// peaks at 49531 and decays out unlatched — the rival's real agg
+    /// (115; the decay's 256−agg = 141, t=14600) would have latched
+    /// five ticks early at 44505. The MC2 twin (EF:7402-03) reads real
+    /// wizard structs (`v1x->maxMana_0x8C * v2x_owner->word_0x242`),
+    /// so its threshold IS wealth-scaled; this ruling is MC1's alone.
+    fn rival_war_check(&mut self, ri: usize, shooter: u8) {
         if shooter as usize >= 8 || self.rivals[ri].slot == shooter {
             return;
         }
         let r = &mut self.rivals[ri];
-        let scaled = shooter_wealth / 10 * r.agg as u32 / 255;
-        let threshold = 50_000u32.saturating_sub(scaled);
-        if r.hate[shooter as usize] as u32 > threshold {
+        if r.hate[shooter as usize] as u32 > 50_000 {
             r.war[shooter as usize] = true;
         }
     }
@@ -935,8 +1031,7 @@ impl World {
                         _ => 1000,
                     };
                     self.rival_add_hate(ri, shooter, bonus);
-                    let wealth = self.wizard_mana_max(shooter);
-                    self.rival_war_check(ri, shooter, wealth);
+                    self.rival_war_check(ri, shooter);
                 } else {
                     let bonus = match model {
                         3 | 4 | 11 | 16 => 3000,
@@ -969,19 +1064,6 @@ impl World {
                 self.rival_add_hate(ri, shooter, bump);
             }
         }
-    }
-
-    /// A wizard's max-mana by player slot (the sweep's war-threshold
-    /// wealth — retail reads the shooter CARPET's +136 mirror).
-    fn wizard_mana_max(&self, slot: u8) -> u32 {
-        if slot == 0 {
-            return self.player.mana_max;
-        }
-        self.rivals
-            .iter()
-            .find(|r| r.slot == slot)
-            .map(|r| r.mana_max)
-            .unwrap_or(0)
     }
 
     /// Credit stolen mana to a wizard by owner tag.
@@ -1080,6 +1162,7 @@ impl World {
                 self.rivals[ri].known[s] = true;
                 if let Some(m) = self.mint_manifestation(s, ent) {
                     self.rivals[ri].owned[s] = m as u16;
+                    self.rivals[ri].acq_push(m as u16);
                 }
                 continue;
             }
@@ -1199,6 +1282,112 @@ impl World {
         if self.g.ent[m].f26 > 0 {
             self.g.ent[m].f26 -= 1;
         }
+    }
+
+    /// THE CASTLE TOKEN'S OWN MACHINE — retail's `sub_57610_57B40`
+    /// (:65862-923, class-12 state 48), shared by human and rival
+    /// owners alike. Unlike the generic launcher it has NO per-tick
+    /// decrement: the commit arms `+48 = +50` (101), the FULL tick
+    /// alone fires — sub_55E80 debit, the (9,10) castle ball minted at
+    /// the OWNER's own axis — and `+48` then parks at `+50 − 1`, the
+    /// IN-TRANSIT CHARGE PIN the ball's delivery or failure releases
+    /// (`sub_46D20` → [`Gen::release_castle_charge_pin`]). A refused
+    /// `sub_55DD0` gate zeroes the counter outright (:65920); a failed
+    /// allocation leaves it FULL, so the mint retries next tick (the
+    /// child-allocation guard family). The ball rides the owner's
+    /// speed (+126 +=), banks the wizard's accumulated charge meter
+    /// (+26 = wizext+326, zeroed), and splits on the ESTABLISHED
+    /// castle: standing → homing upgrade ball (+146 = castle, explode
+    /// child (10,43)); none → the 4096-ahead build lob whose child is
+    /// the (3,2) castle itself. `sub_55EF0`'s hand-muzzle sidestep is
+    /// gated on the owner's 0x100/0x200 fire bits — the commit clears
+    /// 0x100 (:19110) and no rival path sets 0x200, so a rival's ball
+    /// launches from the hull (no-op here).
+    ///
+    /// mc1l5 t=5152: Vodor upgrades his castle — charge 200 → 0 into
+    /// ball 790's +26, cooldown[16] = 40, the ball arrives the same
+    /// tick and morphs into the (10,43) at slot 737. The port's old
+    /// ch5-mail shortcut (DEVIATIONS.md "rival_cast_castle (upgrade
+    /// token)", now retired) skipped the whole ride, which the corpus
+    /// proves is NOT cosmetic: two graded entity rows per upgrade.
+    pub(crate) fn rival_castle_token_tick(&mut self, m: usize, ri: usize) {
+        if self.g.ent[m].f26 <= 0 {
+            return;
+        }
+        let i = self.rivals[ri].ent as usize;
+        if i == 0 || i >= self.g.ent.len() {
+            return; // owner gone: the token stalls (:65873-74)
+        }
+        let count = self.spells()[16].count as i16;
+        let full = self.g.ent[m].f26 == count;
+        let price = self.rival_castle_price(ri);
+        // sub_55DD0 (:64915-24): owner-dead refuses every tick, the
+        // cost compare runs on the FULL tick only.
+        if self.g.ent[i].act_life < 0 || (full && self.rivals[ri].mana < price) {
+            self.g.ent[m].f26 = 0;
+            return;
+        }
+        if !full {
+            return; // in transit — the pin holds
+        }
+        let (ex, ey, ez, yaw, pitch, ospeed, lift, otag) = {
+            let e = &self.g.ent[i];
+            (e.x, e.y, e.z, e.f30, e.f32, e.f126, e.f84 as i16, e.id24)
+        };
+        let Some(b) = self.g.spawn_castle_ball(ex, ey, ez) else {
+            return; // allocation guard: stays FULL, re-fires next tick
+        };
+        // sub_55E80's full arm — the debit on the regen delta.
+        {
+            let r = &mut self.rivals[ri];
+            let c = price.min(i32::MAX as u32) as i32;
+            r.mana_delta = if r.mana_delta >= 0 {
+                -c
+            } else {
+                r.mana_delta - c
+            };
+        }
+        let (tok_f44, tok_f140) = {
+            let t = &self.g.ent[m];
+            (t.f44, t.f140)
+        };
+        {
+            let e = &mut self.g.ent[b];
+            e.f126 += ospeed; // *(v3+126) += *(v2+126)
+            e.f44 = tok_f44; // *(v3+44) = *(a1+44)
+            e.id24 = otag; // *(v3+24) = *(v2+24)
+            e.z = e.z.wrapping_add(lift); // *(v3+76) += *(v2+84)
+            e.f140 = tok_f140; // *(v3+140) = *(a1+140)
+            e.f30 = yaw;
+            e.f32 = pitch;
+        }
+        // The wizext+50 split (:65893-908): the ESTABLISHED castle
+        // stand-in, same filter the human's cast uses.
+        let castle = self
+            .rival_castle(self.rivals[ri].ent)
+            .filter(|&c| self.g.ent[c].f26 > 0);
+        if let Some(c) = castle {
+            let e = &mut self.g.ent[b];
+            e.f68 = 10;
+            e.f69 = 43;
+            e.f146 = c as u16;
+        } else {
+            let mut t = (ex, ey, 0i16);
+            Gen::polar_step(&mut t, yaw, 0, 4096);
+            let e = &mut self.g.ent[b];
+            e.f68 = 3;
+            e.f69 = 2;
+            e.dest_x = t.0;
+            e.dest_y = t.1;
+        }
+        // The charge move (:65910-11): the ball banks the owner's
+        // accumulated meter and zeroes it.
+        let ws = self.rivals[ri].slot as usize;
+        self.g.ent[b].f26 = self.wiz_charge[ws] as i16;
+        self.wiz_charge[ws] = 0;
+        self.g.snd(15, b); // :65918
+        self.g.ent[m].f26 = count - 1; // the in-transit pin
+        self.entities_dirty = true;
     }
 
     /// ⭐ THE RIVAL'S SPEED TOKEN, at its OWN pool slot — retail's
@@ -1419,6 +1608,14 @@ impl World {
     /// the nearest class-9 homing on me within 5120 → lateral jink 80 +
     /// a reactive cast (models {0,3,16} → 14 Rebound, {4,9} → 4
     /// Shield).
+    ///
+    /// ⭐ THE SCAN WALKS THE TICK-TOP CLASS-9 ROSTER
+    /// (`var_u32_36462[3]`, :19777), not the pool — membership was
+    /// sampled at the tick head with NO life or flags test, so a ball
+    /// born mid-tick is not yet a threat (mc1l4 t=5377: the pelting
+    /// stream's newborn must not trigger a dodge until next tick) and
+    /// a soft-killed one still is. Both range gates are STRICT
+    /// (`>= 0x1900000` rejects, the cast wants `< 0x100000`).
     fn rival_defense(&mut self, ri: usize, i: usize) {
         let me = self.rivals[ri].ent;
         let (px, py, pz) = {
@@ -1426,21 +1623,22 @@ impl World {
             (e.x, e.y, e.z)
         };
         let mut best: Option<(usize, i32)> = None;
-        for j in 1..self.g.ent.len() {
+        for k in 0..self.g.proj_chain.visible_len() {
+            let j = self.g.proj_chain.list[k] as usize;
             let e = &self.g.ent[j];
-            if e.class64 != 9 || e.flags & 0x400 != 0 || e.f146 != me {
+            if e.f146 != me {
                 continue;
             }
             let d2 = Gen::dist2_sq(px, py, e.x, e.y);
             let dz = e.z.wrapping_sub(pz) as i32;
             let d3 = d2.wrapping_add(dz.wrapping_mul(dz));
-            if d3 <= 5120 * 5120 && best.is_none_or(|(_, bd)| d3 < bd) {
+            if d3 < 5120 * 5120 && best.is_none_or(|(_, bd)| d3 < bd) {
                 best = Some((j, d3));
             }
         }
         let Some((threat, d3)) = best else { return };
         self.rivals[ri].jink = 80;
-        if d3 <= 1024 * 1024 {
+        if d3 < 1024 * 1024 {
             // Verbatim `sub_16890` (remc1 :19815-52 / remc1hw
             // :17947-84). Two corrections to the old port:
             //
@@ -1496,6 +1694,20 @@ impl World {
     }
 
     fn rival_selector(&mut self, ri: usize, i: usize, think: bool) {
+        let trace = std::env::var_os("MGC_RIVAL_TRACE").is_some();
+        if trace {
+            let t = crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed);
+            let castle = self.rival_castle(self.rivals[ri].ent);
+            eprintln!(
+                "[rsel t={t}] ri={ri} state={:?} think={think} castle={castle:?} known16={} mana_max={} mana={} target={} f63={}",
+                self.rivals[ri].state,
+                self.rivals[ri].known[16],
+                self.rivals[ri].mana_max,
+                self.rivals[ri].mana,
+                self.rivals[ri].target,
+                self.g.ent[i].f63,
+            );
+        }
         // 1. Need a castle (sub_13F00 :18345).
         let castle = self.rival_castle(self.rivals[ri].ent);
         if castle.is_none()
@@ -1545,24 +1757,30 @@ impl World {
             self.rivals[ri].state = AiState::AttackWizard;
             return;
         }
-        // 6. Intercept a fat enemy balloon (sub_147E0 :18596).
-        if self.rival_pick_balloon_target(ri, i) {
+        // 6. Intercept a fat enemy balloon (sub_147E0 :18596). The
+        // pick opens on the same offense gate as the castle/wizard
+        // arms (:18611 `sub_16920` alone — no castle-capable clause):
+        // a disarmed wizard can't raid, so a razed, token-scattered
+        // rival falls straight through to the ball claim (mc1l5
+        // t=19577: Vodor abandons the human's fat balloon for the
+        // wild ball the possess arm prices against his razed token).
+        if self.rival_has_offense(ri) && self.rival_pick_balloon_target(ri, i) {
             self.rivals[ri].state = AiState::RaidBalloon;
             return;
         }
         // 7. Claim mana balls (sub_14230 :18439-52): needs spell 3;
-        // with the castle spell known, only while the ceiling is at
-        // or under the castle spell's CURRENT cost — which
-        // sub_47DD0 rewrites to the capacity ladder at the standing
-        // castle's level, so claiming re-opens after every upgrade
-        // (the original's economy loop).
-        let castle_cost = castle
-            .map(|c| Gen::CASTLE_CAP[self.g.ent[c].f26.clamp(0, 7) as usize] as u32)
-            .unwrap_or(SPELLS[16].possess_mana);
-        if self.rivals[ri].known[3]
-            && (!self.rivals[ri].known[16] || self.rivals[ri].mana_max <= castle_cost)
-            && self.rival_pick_ball_target(ri, i)
-        {
+        // with the castle spell owned, only while the ceiling sits at
+        // or under the TOKEN's LIVE +136 price cache (:18452 reads
+        // `wiz +136 <= manifestation +136` — sub_47DD0's stamp:
+        // CAP[level] housed, 1000 ctor, 5000 after a raze), so
+        // claiming re-opens after every upgrade AND while razed.
+        // mc1l5 t=16081: castle-less Vodor at ceiling 1768 re-picks
+        // the wild 2000-mana ball (Possess, target 553) against his
+        // razed token's 5000 — the port's static-cost stand-in
+        // (1768 > 1000) kept him parked on a freed balloon slot.
+        let m16 = self.rivals[ri].owned[16] as usize;
+        let claim_open = m16 == 0 || self.rivals[ri].mana_max <= self.g.ent[m16].f136.max(0) as u32;
+        if self.rivals[ri].known[3] && claim_open && self.rival_pick_ball_target(ri, i) {
             self.rivals[ri].state = AiState::Possess;
             return;
         }
@@ -1601,6 +1819,7 @@ impl World {
         hate: &[u16; 8],
         war: &[u16; 8],
         owned_slots: &[u16; SPELL_COUNT],
+        spell_list: &[i32; SPELL_COUNT],
         life_rate: u16,
         regen_stall: u16,
         stored_sig: u16,
@@ -1647,6 +1866,11 @@ impl World {
                 r.known[s] = true;
             }
         }
+        // The +532 acquisition list rides the record verbatim — the
+        // death scatter and the respawn re-grant both iterate it in
+        // place, so its ORDER (pickup history, unrecoverable from the
+        // +676 book) is state.
+        r.acq = *spell_list;
         // The regen lanes (:17990-18018): the applied-then-selected
         // life-rate register and the (AI-unread, but mirrored) stall.
         r.life_rate = life_rate as i32;
@@ -1720,21 +1944,50 @@ impl World {
     fn rival_scout_site(&mut self, ri: usize, i: usize) -> bool {
         let me = self.rivals[ri].ent;
         let (sx, sy) = (self.g.ent[i].x, self.g.ent[i].y);
-        for dy in 0..4u16 {
-            let by = ((sy >> 14).wrapping_add(dy) & 3) << 14;
-            for dx in 0..4u16 {
-                let bx = ((sx >> 14).wrapping_add(dx) & 3) << 14;
+        // ⭐⭐ The home supercell derives from the wizard's x/y read
+        // as SIGNED i16, divided by 16384 TRUNCATING toward zero
+        // (:18362-67's CFSHL signed-division idiom) — the movsx
+        // class again. A wizard in the upper half of the wrap
+        // (x >= 0x8000 → negative i16) starts the walk at cell 0 or
+        // 3-from-truncation, NOT `u16 >> 14`: mc1l5 t=14694, Vodor
+        // rebuilds at x=65333 (i16 −203 → cell 0) and retail's
+        // FIRST candidate is (0,0) — accepted at once (the human's
+        // castle wraps to Chebyshev 31232) — where the port's
+        // `>> 14` began at cell 3 and planted a map-quadrant away.
+        let cx0 = (sx as i16 / 16384) as i32;
+        let cy0 = (sy as i16 / 16384) as i32;
+        for dy in 0..4i32 {
+            let by = ((((cy0 + dy) & 3) as u16) << 14) as u16;
+            for dx in 0..4i32 {
+                let bx = ((((cx0 + dx) & 3) as u16) << 14) as u16;
                 for (ox, oy) in [(0u16, 0u16), (0x1F00, 0x1F00)] {
                     let (tx, ty) = (bx.wrapping_add(ox), by.wrapping_add(oy));
+                    // Retail walks the candidates THROUGH THE SCRATCH
+                    // RECORD — v1 is pool slot 0 and each probe writes
+                    // its x/y (v1[36]/v1[37], :18374-75/:18385-86); the
+                    // scratch keeps the last probed candidate after the
+                    // scout ends (the parting-shot family reads it).
+                    // Raw field writes: slot 0 is parked, never linked.
+                    self.g.ent[0].x = tx;
+                    self.g.ent[0].y = ty;
                     // The foreign castle nearest this candidate by
-                    // toroidal squared-Euclidean (sub_15260, keyed on
-                    // model 2 and excluding our own).
+                    // toroidal squared-Euclidean — ⭐ sub_15260 WALKS
+                    // THE TICK-TOP WIZ CHAIN (bucket[0]), per-node
+                    // gates `+24 != mine && +65 == 2` and NOTHING
+                    // else: no 0x400 test, no life re-test (the
+                    // chain build is the life test). A husk
+                    // soft-killed MID-TICK still vetoes a candidate
+                    // (mc1l5 t=14694: rebuilding after the razed
+                    // keep, retail's scan rejects the first two
+                    // supercell candidates and plants at (0,0) where
+                    // the port's 0x400-skipping pool scan took the
+                    // first — Vodor flew off 292° instead of 179°).
                     let mut near_xy: Option<(u16, u16)> = None;
                     let mut near_d2 = i32::MAX;
-                    for j in 1..self.g.ent.len() {
+                    for c in 0..self.g.wiz_chain.visible_len() {
+                        let j = self.g.wiz_chain.list[c] as usize;
                         let e = &self.g.ent[j];
-                        if e.class64 == 3 && e.model65 == 2 && e.flags & 0x400 == 0 && e.id24 != me
-                        {
+                        if e.model65 == 2 && e.id24 != me {
                             let d2 = Gen::dist2_sq(tx, ty, e.x, e.y);
                             if d2 < near_d2 {
                                 near_d2 = d2;
@@ -1752,8 +2005,25 @@ impl World {
                             ddx.max(ddy) > 12288
                         }
                     };
+                    if std::env::var_os("MGC_RIVAL_TRACE").is_some() {
+                        eprintln!(
+                            "[scout t={}] cand=({tx},{ty}) near={near_xy:?} ok={ok}",
+                            crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                        );
+                    }
                     if ok {
                         self.rivals[ri].site = (tx, ty);
+                        // The accept stamps the wizard's own site
+                        // triple (:18381-83): +150/+152 = the winning
+                        // candidate, +154 = the SCRATCH record's z —
+                        // which the scout never writes, so the site
+                        // datum is whatever z slot 0 carries. The
+                        // Build hover (:18160-66) steers toward it.
+                        let sz = self.g.ent[0].z;
+                        let e = &mut self.g.ent[i];
+                        e.dest_x = tx;
+                        e.dest_y = ty;
+                        e.site_z = sz;
                         return true;
                     }
                 }
@@ -1823,124 +2093,200 @@ impl World {
         }
     }
 
-    /// Enemy-wizard pick (sub_145B0 :18541-91).
-    fn rival_pick_wizard_target(&mut self, ri: usize, i: usize) -> bool {
-        let (px, py) = (self.g.ent[i].x, self.g.ent[i].y);
-        let range = BEHAVIOR[self.g.ent[i].row156 as usize].v_28 as i32 + 10;
-        let my_mana = self.rivals[ri].mana;
-        let mut best: Option<(u16, i32)> = None;
-        let consider = |slot: u8,
-                        tgt: u16,
-                        x: u16,
-                        y: u16,
-                        invisible: bool,
-                        castle_less: bool,
-                        wealth: u32,
-                        mana: u32,
-                        best: &mut Option<(u16, i32)>| {
-            if invisible {
-                return; // spell-12 targets are skipped (:18558)
-            }
-            let war = self.rivals[ri].war[slot as usize];
-            let hated = self.hate_over(ri, slot, wealth);
-            // Bully the homeless rich (:18570-77).
-            let bully = castle_less
-                && mana.saturating_add(32 * (255 - self.rivals[ri].agg as u32)) < my_mana;
-            if !war && !hated && !bully {
-                return;
-            }
-            let d = Gen::dist2_sq(px, py, x, y);
-            if d <= range.saturating_mul(range) && best.is_none_or(|(_, bd)| d < bd) {
-                *best = Some((tgt, d));
-            }
-        };
-        // The human.
-        if self.player.state == LifeState::Alive {
-            let (hx, hy) = (self.human_pose.0, self.human_pose.1);
-            consider(
-                0,
-                PLAYER_TARGET,
-                hx,
-                hy,
-                self.player.invisible,
-                self.player_castle().is_none(),
-                self.player.mana_max,
-                self.player.mana,
-                &mut best,
-            );
-        }
-        // Other rivals.
-        for oj in 0..self.rivals.len() {
-            if oj == ri || self.rivals[oj].eliminated {
-                continue;
-            }
-            let o = &self.rivals[oj];
-            let e = &self.g.ent[o.ent as usize];
-            if e.tick70 != 1 {
-                continue; // dead/falling wizards aren't targets
-            }
-            consider(
-                o.slot,
-                o.ent,
-                e.x,
-                e.y,
-                o.invisible,
-                self.rival_castle(o.ent).is_none(),
-                o.mana_max,
-                o.mana,
-                &mut best,
-            );
-        }
-        if let Some((t, _)) = best {
-            self.set_rival_state(ri, AiState::AttackWizard, t);
-            true
-        } else {
-            false
-        }
+    /// wizext+50, the ESTABLISHED-castle register: written only by the
+    /// level-up commit (:56484), cleared at removal (:56534). The
+    /// port's stand-in is the standing castle's FIRST-COMMIT latch
+    /// (flags bit 1, :56057-62) — the same gate the token ladder stamp
+    /// uses. An authored castle that has never leveled is UNBOUND.
+    fn castle_bound(&self, castle: Option<usize>) -> bool {
+        castle.is_some_and(|c| self.g.ent[c].flags & 2 != 0)
     }
 
-    /// Enemy-balloon pick (sub_147E0 :18596-645): hated owner, cargo
-    /// over 10*(275-agg), away from its castle.
+    /// Enemy-wizard pick (sub_145B0 :18541-91), walking the tick-top
+    /// wiz chain (candidates: class-3 carpets, `+65 <= 1`, not self,
+    /// not spell-12-cloaked — and nothing else per node; liveness is
+    /// the chain build's).
+    ///
+    /// ⭐⭐ THE WAR ARM SHORT-CIRCUITS (:18563-68): the FIRST chain
+    /// candidate whose war flag is set is stamped as the target and
+    /// the pick returns — NO nearest election, NO range test. Only
+    /// hated/bully candidates enter the distance election, and the
+    /// range gate (`v_28 + 10`, strict `<`) applies to that election's
+    /// winner alone (:18585-87). mc1l5 t=11341: the human shells
+    /// Vodor's castle from ~14,200 units out (far past 8192+10); war
+    /// latches at t=11308 and retail still retargets him RANGELESSLY
+    /// at his next think tick, where an in-election range test keeps
+    /// him on a bee.
+    ///
+    /// ⭐ The hated threshold reads the CANDIDATE ENTITY's `+136`
+    /// ceiling lane, inclusive (`50000 − agg·(f136/10)/255 <= hate`,
+    /// :18570); the port reads the live ceiling mirrors those lanes
+    /// track. ⭐ The bully arm (:18571-77) wants an UNBOUND candidate
+    /// (`wizext+50 == 0`) that KNOWS the castle spell and is poorer by
+    /// `+140` — not merely castle-less. ⭐ The leading self-test
+    /// (:18549): a castle-capable rival whose own castle is UNBOUND
+    /// returns 0 — while it could be building, it does not hunt
+    /// wizards.
+    fn rival_pick_wizard_target(&mut self, ri: usize, i: usize) -> bool {
+        if self.rivals[ri].known[16] && !self.castle_bound(self.rival_castle(self.rivals[ri].ent)) {
+            return false;
+        }
+        let me = self.rivals[ri].ent;
+        let (px, py) = (self.g.ent[i].x, self.g.ent[i].y);
+        let my_agg = self.rivals[ri].agg as i64;
+        let my_mana = self.rivals[ri].mana as i64;
+        // Candidates in CHAIN order. The human's carpet is never a
+        // pool record in the port (imports anchor the human at the
+        // walk slot without materializing the entity), so the human
+        // is judged as a pre-pass — retail's chain order puts his
+        // carpet below the rivals' in every corpus take.
+        let mut war_pick: Option<u16> = None;
+        let mut best: Option<(u16, i32)> = None;
+        let judge = |tgt: u16,
+                     x: u16,
+                     y: u16,
+                     invisible: bool,
+                     ceiling: i64,
+                     mana: i64,
+                     unbound_knows16: bool,
+                     hate: i64,
+                     war: bool,
+                     best: &mut Option<(u16, i32)>|
+         -> bool {
+            if invisible {
+                return false; // spell-12 targets are skipped (:18558)
+            }
+            if war {
+                return true; // ⭐⭐ first-in-chain, rangeless (:18563-68)
+            }
+            let hated = 50_000 - my_agg * (ceiling.max(0) / 10) / 255 <= hate;
+            let bully = unbound_knows16 && mana + 32 * (255 - my_agg) < my_mana;
+            if hated || bully {
+                let d = Gen::dist2_sq(px, py, x, y);
+                if best.is_none_or(|(_, bd)| d < bd) {
+                    *best = Some((tgt, d));
+                }
+            }
+            false
+        };
+        if self.player.state == LifeState::Alive
+            && judge(
+                PLAYER_TARGET,
+                self.human_pose.0,
+                self.human_pose.1,
+                self.player.invisible,
+                self.player.mana_max as i64,
+                self.player.mana as i64,
+                !self.castle_bound(self.player_castle()) && self.player.owned[16] != 0,
+                self.rivals[ri].hate[0] as i64,
+                self.rivals[ri].war[0],
+                &mut best,
+            )
+        {
+            war_pick = Some(PLAYER_TARGET);
+        }
+        if war_pick.is_none() {
+            for c in 0..self.g.wiz_chain.visible_len() {
+                let j = self.g.wiz_chain.list[c] as usize;
+                let e = &self.g.ent[j];
+                if e.model65 != 1 || e.id24 == me {
+                    continue;
+                }
+                let Some(oj) = self.rivals.iter().position(|r| r.ent as usize == j) else {
+                    continue;
+                };
+                if self.rivals[oj].eliminated {
+                    continue;
+                }
+                let o = &self.rivals[oj];
+                let oslot = o.slot;
+                if judge(
+                    o.ent,
+                    e.x,
+                    e.y,
+                    o.invisible,
+                    o.mana_max as i64,
+                    o.mana as i64,
+                    !self.castle_bound(self.rival_castle(o.ent)) && o.known[16],
+                    self.rivals[ri].hate[oslot as usize] as i64,
+                    self.rivals[ri].war[oslot as usize],
+                    &mut best,
+                ) {
+                    war_pick = Some(j as u16);
+                    break;
+                }
+            }
+        }
+        if let Some(t) = war_pick {
+            self.set_rival_state(ri, AiState::AttackWizard, t);
+            return true;
+        }
+        // The range gate applies to the ELECTION winner only, strict
+        // (:18585-87: `d² >= (v_28+10)² → return 0`).
+        let Some((t, d)) = best else {
+            return false;
+        };
+        let range = BEHAVIOR[self.g.ent[i].row156 as usize].v_28 as i32 + 10;
+        if d >= range.saturating_mul(range) {
+            return false;
+        }
+        self.set_rival_state(ri, AiState::AttackWizard, t);
+        true
+    }
+
+    /// Enemy-balloon pick (sub_147E0 :18596-645): a walk of the
+    /// TICK-TOP class-3 chain (`var_u32_36462[0]` :18615 — no life or
+    /// 0x400 test, the bucket[0] family) for foreign model-3s whose
+    /// owner is hated (live wealth-scaled, the owner ENTITY's +136
+    /// through id24), cargo over 10*(275-agg), and NOT at home — where
+    /// "at home" is `sub_11950` = the FULL summed-extents AABB vs the
+    /// owner's BOUND castle (wizext+50 :18628; unbound reads slot 0,
+    /// the scratch). ⚠ NOT a distance disc: the human's level-6
+    /// castle carries 6784-unit extents, so its balloons are exempt
+    /// nearly 7000 out (mc1l5 t=19577 — balloon 900 at dx 5852 is
+    /// docked, Vodor falls through to the ball claim). The range gate
+    /// applies to the ELECTION WINNER only, strict (:18638-40
+    /// `d² >= v_28² → return 0` — no fallback to the runner-up).
     fn rival_pick_balloon_target(&mut self, ri: usize, i: usize) -> bool {
         let me = self.rivals[ri].ent;
         let (px, py) = (self.g.ent[i].x, self.g.ent[i].y);
-        let range = BEHAVIOR[self.g.ent[i].row156 as usize].v_28 as i32;
         let cargo_gate = 10 * (275 - self.rivals[ri].agg as u32);
-        let mut best: Option<(u16, i32)> = None;
-        for j in 1..self.g.ent.len() {
+        let mut best: Option<(usize, i32)> = None;
+        for c in 0..self.g.wiz_chain.visible_len() {
+            let j = self.g.wiz_chain.list[c] as usize;
             let e = &self.g.ent[j];
-            if e.class64 != 3 || e.model65 != 3 || e.flags & 0x400 != 0 || e.id24 == me {
+            if e.model65 != 3 || e.id24 == me {
                 continue;
             }
-            let Some(owner) = self.owner_slot(e.id24) else {
+            let owner_ent = e.id24;
+            let Some(owner) = self.owner_slot(owner_ent) else {
                 continue;
             };
             if !self.hate_over(ri, owner, self.wizard_wealth(owner)) {
                 continue;
             }
-            if (e.f140.max(0) as u32) <= cargo_gate {
+            if (self.g.ent[j].f140.max(0) as u32) <= cargo_gate {
                 continue;
             }
-            // Not sitting at its own castle (:18628-33).
-            let home = self
-                .rival_castle(e.id24)
-                .or_else(|| (owner == 0).then(|| self.player_castle()).flatten());
-            if home.is_some_and(|c| {
-                Gen::dist2_sq(e.x, e.y, self.g.ent[c].x, self.g.ent[c].y) < 2048 * 2048
-            }) {
+            let home = self.g.castle_reg[owner as usize & 7] as usize;
+            if self.g.ent_overlap(j, home) {
                 continue;
             }
-            let d = Gen::dist2_sq(px, py, e.x, e.y);
-            if d <= range.saturating_mul(range) && best.is_none_or(|(_, bd)| d < bd) {
-                best = Some((j as u16, d));
+            let d = Gen::dist2_sq(px, py, self.g.ent[j].x, self.g.ent[j].y);
+            if best.is_none_or(|(_, bd)| d < bd) {
+                best = Some((j, d));
             }
         }
-        if let Some((t, _)) = best {
-            self.set_rival_state(ri, AiState::RaidBalloon, t);
-            true
-        } else {
-            false
+        let Some((t, _)) = best else {
+            return false;
+        };
+        let range = BEHAVIOR[self.g.ent[i].row156 as usize].v_28 as i32;
+        let d = Gen::dist2_sq(px, py, self.g.ent[t].x, self.g.ent[t].y);
+        if d >= range.saturating_mul(range) {
+            return false;
         }
+        self.set_rival_state(ri, AiState::RaidBalloon, t as u16);
+        true
     }
 
     /// Mana-ball pick (sub_15080 :18862): wild balls by distance;
@@ -1966,33 +2312,106 @@ impl World {
         // move: the chain build has no life or flag filter and admits
         // models 39 AND 40, and `sub_15080` adds no model test of its
         // own — membership IS the filter.
+        // The at-war arm scores from the BOUND castle REGISTER's
+        // entity (:18879 — `v9 = pool + 164·wizext+50`), which for an
+        // UNBOUND rival is pool slot 0: the SCRATCH record, whose x/y
+        // are live state (the scout walks its candidates through it).
+        let reg = self.g.castle_reg[self.rivals[ri].slot as usize] as usize;
+        let (rx, ry, reg_id) = {
+            let e = &self.g.ent[reg];
+            (e.x, e.y, e.id24)
+        };
+        let trace = std::env::var_os("MGC_RIVAL_TRACE").is_some();
         for c in 0..self.g.ball_chain.visible_len() {
             let j = self.g.ball_chain.list[c] as usize;
-            let e = &self.g.ent[j];
-            if e.f144 == me {
-                continue; // already mine
+            let (bx, by, bid, tag) = {
+                let e = &self.g.ent[j];
+                (e.x, e.y, e.id24, e.f144)
+            };
+            if trace {
+                eprintln!(
+                    "[bpick t={}] ri={ri} ball={j} tag={tag} best={best:?}",
+                    crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                );
             }
-            let owner = self.owner_slot(e.f144);
-            match owner {
-                None => {} // wild: always eligible
-                Some(o) => {
-                    let at_war = self.rivals[ri].war[o as usize]
-                        || self.hate_over(ri, o, self.wizard_wealth(o));
-                    if !at_war {
-                        // Neutral-owned: only if unguarded — no owner
-                        // wizard within 5120 (:18905-16).
-                        let guarded = self.wizard_pos(o).is_some_and(|(wx, wy, _)| {
-                            Gen::dist2_sq(e.x, e.y, wx, wy) < 5120 * 5120
-                        });
-                        if guarded {
-                            continue;
-                        }
-                    }
+            // (:18884) the TAG'S ENTITY decides the arm: a tag whose
+            // record is not class 3 (the wild 0 included — slot 0 is
+            // the scratch) takes the ungated wild arm, scored from
+            // ME. PLAYER_TARGET is the port's human tag.
+            let owner_is_wiz = tag == PLAYER_TARGET
+                || self.g.ent.get(tag as usize).is_some_and(|o| o.class64 == 3);
+            if !owner_is_wiz {
+                let d = Gen::dist2_sq(px, py, bx, by);
+                if best.is_none_or(|(_, bd)| d < bd) {
+                    best = Some((j as u16, d));
+                }
+                continue;
+            }
+            if tag == me {
+                continue; // already mine (:18899)
+            }
+            // (:18886-90) ⭐ the war test here is the LIVE
+            // wealth-scaled hate formula off the owner's ceiling —
+            // the latched war[] flag is the castle sweep's lane and
+            // is NOT read (mc1l5 t=16081: Vodor's flag vs the human
+            // is still latched while the live hate has decayed out,
+            // so retail claims the wild 2000-ball where the
+            // flag-reading port chased a human-owned one). At-war
+            // balls score from the REGISTER's entity, not from me.
+            // (A class-3 non-wizard tag has no team; retail reads a
+            // team byte through the null wizext — fall through to
+            // the neutral arm until a corpus exemplar rules.)
+            let team = self.owner_slot(tag);
+            if let Some(o) = team
+                && self.hate_over(ri, o, self.wizard_wealth(o))
+            {
+                let d = Gen::dist2_sq(rx, ry, bx, by);
+                if best.is_none_or(|(_, bd)| d < bd) {
+                    best = Some((j as u16, d));
+                }
+                continue;
+            }
+            // Neutral-owned (:18905-16): the guard is the nearest
+            // FOREIGN CARPET to the BALL on the tick-top wiz chain
+            // (sub_15340 — model <= 1, excluding the ball's id24 and
+            // me; NO carpet at all → no take), 5120 gate; plus the
+            // castle-overlap veto (sub_153B0 bound / sub_15260
+            // unbound: the nearest castle to the ball, excluding the
+            // ball's id24 — and, bound, the register's own castle).
+            // ⚠ The HUMAN's carpet rides OUT-OF-POOL in the port, so
+            // the tick-top wiz chain never holds it — retail's chain
+            // always does, and its nearest-carpet guard is exactly
+            // what admits a human-claimed ball the human has wandered
+            // 5120+ away from (mc1l5 t=253: ball 362 at 5,900 units).
+            // Weigh the live human by pose before the chain walk.
+            let mut guard: Option<i32> = self
+                .wizard_pos(0)
+                .map(|(hx, hy, _)| Gen::dist2_sq(bx, by, hx, hy));
+            let mut castle: Option<(usize, i32)> = None;
+            for k in 0..self.g.wiz_chain.visible_len() {
+                let w = self.g.wiz_chain.list[k] as usize;
+                let we = &self.g.ent[w];
+                if we.id24 == bid {
+                    continue;
+                }
+                let d = Gen::dist2_sq(bx, by, we.x, we.y);
+                if we.model65 <= 1 && we.id24 != me && guard.is_none_or(|gd| d < gd) {
+                    guard = Some(d);
+                }
+                if we.model65 == 2
+                    && (reg == 0 || we.id24 != reg_id)
+                    && castle.as_ref().is_none_or(|&(_, cd)| d < cd)
+                {
+                    castle = Some((w, d));
                 }
             }
-            let d = Gen::dist2_sq(px, py, e.x, e.y);
-            if best.is_none_or(|(_, bd)| d < bd) {
-                best = Some((j as u16, d));
+            let unguarded = guard.is_some_and(|gd| gd > 5120 * 5120);
+            let housed = castle.is_some_and(|(cs, _)| self.g.ent_overlap(j, cs));
+            if unguarded && !housed {
+                let d = Gen::dist2_sq(px, py, bx, by);
+                if best.is_none_or(|(_, bd)| d < bd) {
+                    best = Some((j as u16, d));
+                }
             }
         }
         if let Some((t, _)) = best {
@@ -2097,7 +2516,20 @@ impl World {
     // ---- state handlers -----------------------------------------------
 
     fn rival_state_tick(&mut self, ri: usize, i: usize, think: bool) {
-        // Combat states drop stale targets back to Fresh.
+        // ⭐⭐ A STALE TARGET DOES NOT RESET THE STATE. Every combat
+        // handler opens on the sig-vs-stored test and returns 0 with
+        // NO writes when it fails (sub_13BA0 :18246, sub_13CA0
+        // :18281, sub_13DD0 :18323) — the state byte and the target
+        // KEEP, the handler simply no-ops until the think-tick
+        // cascade replaces the state. There is NO Fresh transition
+        // anywhere in the retail machine. The port's old
+        // drop-to-Fresh prologue re-entered the cascade off-cadence:
+        // mc1l5 t=12158 — Vodor's claimed ball 908 is collected and
+        // its slot re-minted, retail idles in Possess for 450 ticks
+        // (the cascade refusing every think round) while the port's
+        // Fresh re-pick went hunting, and 1,500 ticks later its
+        // Upgrade chain fired a castle ball retail never cast
+        // (t=13647, the extra (9,10)/(10,43) pair).
         let needs_target = matches!(
             self.rivals[ri].state,
             AiState::Possess
@@ -2107,8 +2539,6 @@ impl World {
                 | AiState::HuntMana
         );
         if needs_target && !self.target_alive(self.rivals[ri].target, self.rivals[ri].target_sig) {
-            self.rivals[ri].state = AiState::Fresh;
-            self.rivals[ri].target = 0;
             return;
         }
         match self.rivals[ri].state {
@@ -2125,18 +2555,36 @@ impl World {
                     (e.x, e.y, e.z)
                 };
                 if self.rival_approach(ri, i, cx, cy, Some(cz), 512, 2048) {
-                    self.rival_hover_toward(i, cz.saturating_add(512));
-                    self.rival_cast(ri, i, 16);
+                    // :18120-27 — a FIRED cast tick returns without
+                    // hovering (same shape as RaidCastle); the z-hover
+                    // toward castle+512 is the refused arm's alone.
+                    if !self.rival_cast(ri, i, 16) {
+                        self.rival_hover_toward(i, cz.saturating_add(512));
+                    }
                 }
             }
             // Fly to the scouted site; plant (sub_138F0 :18142-68).
+            // ⭐ NO state write — retail's handler aims, arrives and
+            // casts, nothing else; the state leaves only through the
+            // think-tick cascade. The old plant→Fresh invention cost
+            // the follow-up: retail's Build handler runs AGAIN the
+            // tick after the plant, still arrived, and its cast-16
+            // now takes the BOUND arm — arming the upgrade token on
+            // the day-old castle (mc1l5 t=14772: the (9,10) ball the
+            // port never fired).
             AiState::Build => {
                 let (sx, sy) = self.rivals[ri].site;
-                if self.rival_approach(ri, i, sx, sy, None, 2048, 3072) {
-                    self.rival_cast(ri, i, 16);
-                    if self.rival_castle(self.rivals[ri].ent).is_some() {
-                        self.rivals[ri].state = AiState::Fresh;
-                    }
+                if self.rival_approach(ri, i, sx, sy, None, 2048, 3072)
+                    && !self.rival_cast(ri, i, 16)
+                {
+                    // :18160-66 — the REFUSED cast's z-hover toward the
+                    // scouted site datum (+154) + 512. The datum is the
+                    // SCRATCH record's z at scout-accept time (see
+                    // rival_scout_site), so a parked Vodor rides the
+                    // settle floor and this nudge in alternation:
+                    // mc1l5 t=14772-800, retail 975 = floor 979 − 4.
+                    let sz = self.g.ent[i].site_z;
+                    self.rival_hover_toward(i, sz.saturating_add(512));
                 }
             }
             // Claim the ball (sub_13BA0 :18236-57): approach, cast 3,
@@ -2541,6 +2989,35 @@ impl World {
                 return false;
             }
         }
+        // ⭐⭐ Castle (case 0x10 :19304-42): the BOUND arm alone
+        // re-tests the upgrade SPACE (`sub_12D10` on the wizext+50
+        // castle) and the SAME accuracy cone as the aimed groups;
+        // the free-plant arm (:19343-47) is cooldown + mana only.
+        // mc1l5 t=13646: Vodor settles into Upgrade over his rebuilt
+        // keep with an aim error of 154 against a cone of ~130 —
+        // retail hovers and re-aims (charge climbing 125→126) where
+        // the port's coneless commit armed the token and fired the
+        // castle ball retail never cast (the t=13647 extra
+        // (9,10)/(10,43) pair).
+        if s == 16
+            && let Some(c) = self
+                .rival_castle(r.ent)
+                .filter(|&c| self.g.ent[c].flags & 2 != 0)
+        {
+            let space = self.g.castle_upgrade_space_ok(c);
+            let cone = ((255 - r.acc as u32) / 4 + 20) * 2048 / 360;
+            let e = &self.g.ent[r.ent as usize];
+            let aim = Gen::angdist(e.f30, e.f34 & 0x7FF) as u32;
+            if std::env::var_os("MGC_RIVAL_TRACE").is_some() {
+                eprintln!(
+                    "[cast16 t={}] castle={c} space={space} aim={aim} cone={cone}",
+                    crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                );
+            }
+            if !space || aim >= cone {
+                return false;
+            }
+        }
         true
     }
 
@@ -2658,63 +3135,65 @@ impl World {
 
     /// Rival castle cast (:19190-209).
     fn rival_cast_castle(&mut self, ri: usize, i: usize) -> bool {
-        self.rivals[ri].cooldown[16] = AI_RECAST[16];
-        if let Some(c) = self.rival_castle(self.rivals[ri].ent) {
-            // The upgrade: full next-stage cost through the shared
-            // ladder, token chain approximated by the direct level-up
-            // (the (9,10)→(10,43) ball ride is cosmetic here; the
-            // painter is the same).
-            let lvl = self.g.ent[c].f26.clamp(0, 7) as usize;
-            let cost = Gen::CASTLE_CAP[lvl] as u32;
-            if self.rivals[ri].mana < cost || !self.g.castle_upgrade_space_ok(c) {
-                return false;
-            }
-            {
-                let r = &mut self.rivals[ri];
-                let ci = cost.min(i32::MAX as u32) as i32;
-                r.mana_delta = if r.mana_delta >= 0 {
-                    -ci
-                } else {
-                    r.mana_delta - ci
-                };
-            }
-            // The token delivery (sub_293D0 :31033-34): ch5 mail
-            // {10, owner} — the castle tick's case-0 runs the whole
-            // level-up (preclear, ladder, painter). The (9,10) ball
-            // ride is skipped (cosmetic; APPROX).
-            self.g.ent[c].mail[5] = (10, self.rivals[ri].ent);
+        // The commit's ONE gate for both arms (:19191-93): the token
+        // exists, is NOT busy (`+48 != 0` — a cast in transit, the
+        // charge pin), and the wizard's CURRENT mana covers the live
+        // ladder price (wiz +140 vs the token's +136 stamp). Retail
+        // has NO space test at the commit — that's the selector's
+        // (:18408); and the recast cooldown is the UPGRADE arm's
+        // alone (:19197), the free plant leaves it untouched.
+        let Some(m) = self.rival_token(ri, 16) else {
+            return false;
+        };
+        if self.g.ent[m].f26 != 0 || self.rivals[ri].mana < self.rival_castle_price(ri) {
+            return false;
+        }
+        if self.rival_castle(self.rivals[ri].ent).is_some() {
+            // Established castle → THE UPGRADE CHAIN (:19196-97): arm
+            // the token (+48 = +50); the debit, the (9,10) castle
+            // ball and its (10,43) upgrade-token ride all run at the
+            // token's own slot ([`Self::rival_castle_token_tick`],
+            // retail's sub_57610 machine) — the corpus-refuted ch5
+            // shortcut is retired (mc1l5 t=5152).
+            self.g.ent[m].f26 = self.spells()[16].count as i16;
+            self.rivals[ri].cooldown[16] = AI_RECAST[16];
             return true;
         }
         // Castle-less: the FREE direct plant at the scouted site
-        // (:19200-08) — no debit, no projectile.
+        // (:19200-08) — no debit, no projectile. ⚠ NO (0,0) sentinel:
+        // the site is a supercell-corner value and (0,0) is a LEGAL
+        // one — mc1l5 t=14771, Vodor's post-raze rebuild scouts
+        // exactly (0,0) and retail plants castle 478 off it (the
+        // port's invented empty-site test refused the plant forever).
         let (sx, sy) = self.rivals[ri].site;
-        if sx == 0 && sy == 0 {
-            return false;
-        }
         let gz = self.g.ground_z(sx, sy) as i16;
         let Some(c) = self.g.spawn_class3(2, sx, sy, gz) else {
             return false;
         };
+        // The planted castle's recorded birth row (mc1l5 t=14771,
+        // slot 478): state 5 (TRANSFORM — it rises through the level
+        // machine, whose first commit re-binds +50 idempotently),
+        // sprite 177 FLAT (no per-slot offset; its art extents are
+        // the recorded 184), ceiling 0 (the establish tick prices
+        // it — the ctor stamps nothing).
         {
             let e = &mut self.g.ent[c];
             e.id24 = self.rivals[ri].ent;
             e.f26 = 0;
-            e.tick70 = 4;
+            e.tick70 = 5;
         }
-        self.g.set_sprite(c, 177 + self.rivals[ri].slot as u16);
-        let (cx, cy, cz) = {
-            let e = &self.g.ent[c];
-            (
-                ((e.x as u32 + 128) >> 8) as u8,
-                ((e.y as u32 + 128) >> 8) as u8,
-                (e.z >> 5) as i32,
-            )
-        };
-        self.g.stamp_castle_terrain(1, cx, cy, cz);
-        self.g.castle_extents(c, 0);
-        self.g.ent[c].f136 = Gen::CASTLE_CAP[0];
+        // The plant BINDS at spawn (:19206 writes wizext+50) — the
+        // one bind site that precedes any level-up commit.
+        self.g.castle_reg[self.rivals[ri].slot as usize] = c as u16;
+        self.g.set_sprite(c, 177);
+        // ⚠ NO terrain stamp: a level-0 castle is a BARE FLAG (BUILD
+        // row 0 is empty, w = h = 0 — the teardown law's own guard).
+        // The pad is painted by the LEVEL-UP commit's (10,42) painter
+        // over the following ticks; an immediate stamp here raised
+        // tile ground retail leaves flat (mc1l5 t=14772: the class-11
+        // trigger volume at (128,128) rides its every-8th-tick ground
+        // snap onto a mound retail never built).
         self.g.snd(30, c);
-        self.terrain_dirty = true;
         self.entities_dirty = true;
         let _ = i;
         true
@@ -2962,7 +3441,12 @@ impl World {
         let name = RIVAL_NAMES.get(slot as usize).copied().unwrap_or("?");
         self.set_notification(format!("{name} has died."), 100, [0xFF, 0, 0]);
         // JAR SCATTER (:55519-49): every owned manifestation detaches
-        // into a decaying ground jar around the corpse.
+        // into a decaying ground jar around the corpse — iterated over
+        // the +532 ACQUISITION LIST in PICKUP order, not the spell-id
+        // book (mc1l4 t=6885: two tokens picked up out of spell order
+        // swap their scatter draws under a book iteration). Each live
+        // entry is rewritten to the token's MODEL number, each empty
+        // one to −1, for the respawn re-grant's in-place refill.
         // The scatter anchors on the corpse's own +76 (:55537 copies
         // `*(WORD *)(a1 + 76)` into the position struct), i.e. the z
         // the fall just clamped onto the floor — not a fresh ground
@@ -2972,12 +3456,15 @@ impl World {
             let e = &self.g.ent[i];
             (e.x, e.y, e.z)
         };
-        for s in 0..SPELL_COUNT {
-            let m = self.rivals[ri].owned[s] as usize;
-            self.rivals[ri].owned[s] = 0;
-            if m == 0 {
+        self.rivals[ri].owned = [0; SPELL_COUNT];
+        for k in 0..SPELL_COUNT {
+            let entry = self.rivals[ri].acq[k];
+            if entry <= 0 || entry as usize >= self.g.ent.len() {
+                self.rivals[ri].acq[k] = -1;
                 continue;
             }
+            let m = entry as usize;
+            self.rivals[ri].acq[k] = self.g.ent[m].model65 as i32;
             // The scatter draws ride the DYING WIZARD's own LCG
             // (:55563-70 — `a1+4`, three draws per jar), not the
             // jar's.
@@ -3109,12 +3596,26 @@ impl World {
         self.g.move_relink(i, cx, cy, z);
         self.g.refill_life(i);
         let ent = self.rivals[ri].ent;
-        let known = self.rivals[ri].known;
-        for (s, &k) in known.iter().enumerate() {
-            if k && self.rivals[ri].owned[s] == 0 {
-                if let Some(m) = self.mint_manifestation(s, ent) {
-                    self.rivals[ri].owned[s] = m as u16;
-                }
+        // The re-grant is LIST-driven (:54884-923), not book-driven:
+        // each acquisition entry the death rewrote to a model number
+        // re-mints that model IN PLACE (−1 entries reset to 0 and
+        // skip), so the reborn book keeps the pickup order — and the
+        // mint order, which decides which free-stack slots the fresh
+        // tokens take. A scattered fireball's entry is 0 (model 0 ≡
+        // the empty sentinel) and still re-mints: retail's collision,
+        // kept deliberately.
+        for k in 0..SPELL_COUNT {
+            let entry = self.rivals[ri].acq[k];
+            if entry < 0 || entry as usize >= SPELL_COUNT {
+                self.rivals[ri].acq[k] = 0;
+                continue;
+            }
+            let s = entry as usize;
+            if let Some(m) = self.mint_manifestation(s, ent) {
+                self.rivals[ri].acq[k] = m as i32;
+                self.rivals[ri].owned[s] = m as u16;
+            } else {
+                self.rivals[ri].acq[k] = 0;
             }
         }
         {
@@ -3175,6 +3676,7 @@ impl Snap for Rival {
             known,
             allowed,
             learn,
+            acq,
             cooldown,
             mana,
             mana_max,
@@ -3206,6 +3708,7 @@ impl Snap for Rival {
         w.put(slot);
         w.put(ent);
         w.put(owned);
+        w.put(acq);
         w.put(known);
         w.put(allowed);
         w.put(learn);
@@ -3242,6 +3745,7 @@ impl Snap for Rival {
             slot: r.get()?,
             ent: r.get()?,
             owned: r.get()?,
+            acq: r.get()?,
             known: r.get()?,
             allowed: r.get()?,
             learn: r.get()?,
@@ -3445,6 +3949,50 @@ mod tests {
         w.g.ent[w.rivals[ri].ent as usize].flags & 0x8000 != 0
     }
 
+    /// ⭐ THE DEFENSE SCAN WALKS THE TICK-TOP CLASS-9 ROSTER
+    /// (`sub_16800` :19777 seeds from `var_u32_36462[3]`, the case-9
+    /// arm of the tick-head sweep at :52279 — every class-9 record, NO
+    /// life or flags test): a ball born MID-tick cannot arm the dodge
+    /// until the next rebuild, and a soft-killed member still can.
+    ///
+    /// This is the mc1l4 t=5377 law — the certification residue whose
+    /// pair diff was CLEAN (jink is a wizext lane; the wizext shadow
+    /// named it): the pool-scan port dodged the pelting stream's
+    /// newborn ball, retail's roster could not yet hold it, and the
+    /// rival's whole post-pelting flight parted one flight-tick over.
+    ///
+    /// NON-VACUITY: the old pool scan fails leg (a) — it sees the
+    /// newborn and jinks — and its `flags & 0x400` conjunct fails leg
+    /// (c).
+    #[test]
+    fn the_defense_scan_is_tick_top_and_keeps_soft_kills() {
+        let mut w = rebound_world();
+        let ri = 0;
+        let i = w.rivals[ri].ent as usize;
+        // (a) Mid-tick birth: the roster was sampled before the ball
+        // existed — the pool holds it, the scan must not.
+        w.g.rebuild_proj_chain();
+        let threat = plant_threat(&mut w, ri);
+        w.rival_defense(ri, i);
+        assert_eq!(w.rivals[ri].jink, 0, "a mid-tick newborn armed the dodge");
+        // (b) The next tick top holds it: jink 80 (sub_16870).
+        w.g.rebuild_proj_chain();
+        w.rival_defense(ri, i);
+        assert_eq!(
+            w.rivals[ri].jink, 80,
+            "a tick-top member did not arm the dodge"
+        );
+        // (c) A soft kill is not a free: 0x400 landing mid-tick does
+        // not hide a member (retail's per-node filter is chase alone).
+        w.rivals[ri].jink = 0;
+        w.g.ent[threat].flags |= 0x400;
+        w.rival_defense(ri, i);
+        assert_eq!(
+            w.rivals[ri].jink, 80,
+            "a soft-killed member stopped arming the dodge"
+        );
+    }
+
     /// The rival Rebound arm, end to end: an incoming fireball inside
     /// 1024 arms the token (`sub_16890` :19822 → `sub_155F0` case 0xE
     /// :19140-48), the token PUBLISHES the deflection bit on the
@@ -3452,6 +4000,65 @@ mod tests {
     /// :61996 — `owner->+17 |= 0x80`, our 0x8000), the bit clears when
     /// the 101-tick burst lapses, and a fresh threat re-ups it.
     ///
+    /// THE BALLOON RAID NEEDS AN OFFENSE TOKEN: sub_147E0 opens on
+    /// sub_16920 (:18611) — owned-token slots for {0, 15, 8, 17, 20,
+    /// 7}, the same gate the castle/wizard arms wear at :18506/:18553
+    /// — so a disarmed (razed, token-scattered) wizard never raids a
+    /// balloon and falls through toward the ball claim. Corpus-silent
+    /// at mc1l5 t=19577 (Vodor still owned fireball there; the docked
+    /// AABB was that tick's discriminator, fixture-pinned), so the
+    /// gate is pinned here against the listing.
+    ///
+    /// NON-VACUITY: without the gate the second selector call keeps
+    /// RaidBalloon — the balloon is still fat, hated and in range.
+    #[test]
+    fn the_balloon_raid_needs_an_offense_token() {
+        let mut w = rebound_world();
+        let ri = 0;
+        let i = w.rivals[ri].ent as usize;
+        // A fat HUMAN balloon 1500 east of the rival: hated owner
+        // (hate over the wealth-scaled bar, war flag CLEAR so the
+        // wizard pick's rangeless war arm stays cold and its hated
+        // election loses to the range gate — the human pose sits at
+        // the world origin, ~43k out), cargo over 10*(275-agg),
+        // far from castle_reg[0] (unbound → the scratch slot 0).
+        let (bx, by, bz) = {
+            let e = &w.g.ent[i];
+            (e.x.wrapping_add(1500), e.y, e.z)
+        };
+        let b = w.g.new_event().expect("balloon slot");
+        {
+            let e = &mut w.g.ent[b];
+            e.class64 = 3;
+            e.model65 = 3;
+            e.tick70 = 9;
+            e.id24 = PLAYER_TARGET;
+            e.max_life = 10000;
+            e.act_life = 9000;
+            e.f140 = 5000;
+            e.x = bx;
+            e.y = by;
+            e.z = bz;
+        }
+        w.rivals[ri].hate[0] = 65535;
+        w.g.rebuild_wiz_chain();
+        w.rival_selector(ri, i, true);
+        assert_eq!(
+            w.rivals[ri].state,
+            AiState::RaidBalloon,
+            "armed, the raid fires (the pick's own gates all pass)"
+        );
+        for s in [0usize, 15, 8, 17, 20, 7] {
+            w.rivals[ri].owned[s] = 0;
+        }
+        w.rival_selector(ri, i, true);
+        assert_ne!(
+            w.rivals[ri].state,
+            AiState::RaidBalloon,
+            "disarmed, sub_16920 refuses the raid outright"
+        );
+    }
+
     /// NON-VACUITY: before the fix the port never wrote 0x8000 for a
     /// rival at all (the mirror was cloak-only), so `rebound_bit`
     /// was false at every one of these assertions and nothing could
@@ -3770,5 +4377,307 @@ mod tests {
         };
         assert_eq!(claim_at(28), 0, "28 is OUTSIDE the cone — retail refuses");
         assert_ne!(claim_at(27), 0, "27 is inside the cone — the claim lands");
+    }
+
+    /// A castle-less rival with Create Castle (16) in its book — the
+    /// plant/rebuild laws' scaffolding (ledger 2026-08-20b).
+    fn castle_world() -> World {
+        let planes = Planes {
+            height: vec![100; 0x10000],
+            tile_type: vec![5; 0x10000],
+            shading: vec![32; 0x10000],
+            angle: vec![5; 0x10000],
+            ceiling: Vec::new(),
+        };
+        let things = vec![Thing {
+            slot: 0,
+            kind: ThingKind::Entity,
+            class: 3,
+            model: 5,
+            x: 120,
+            y: 120,
+            dis_id: 0,
+            swi_sz: 0,
+            swi_id: 0,
+            parent: 0,
+            child: 0,
+            par3: None,
+        }];
+        let mut w = World::new(planes, &things, 1, assets());
+        let mut book = [false; SPELL_COUNT];
+        book[16] = true;
+        let mut cfgs: [Option<RivalConfig>; 8] = Default::default();
+        cfgs[1] = Some(RivalConfig {
+            aggression: 200,
+            accuracy: 255,
+            tempo: 255,
+            castle_level: 0,
+            book,
+            allowed: book,
+        });
+        w.set_wizards(&cfgs, 2);
+        w
+    }
+
+    /// ⭐⭐ THE MC1 CASTLE-ARM WAR THRESHOLD IS FLAT 50000 (:19733-39):
+    /// the listing's aggression multiplier reads through the victim
+    /// CASTLE's +160 — a wizext pointer only carpets carry, mint-zero
+    /// on a castle — so the scaled term never contributes. Corpus: war
+    /// latches at 50518/50659/51518 (first crossing ABOVE 50000),
+    /// never at 49518/49659; window 4 peaks 49531 and decays out
+    /// unlatched. The fixture cannot pin this (the war lane is
+    /// pair-imported), so the constant is pinned here — with the
+    /// rival's aggression at 200, where the scaled threshold would
+    /// have been far lower.
+    #[test]
+    fn the_war_threshold_is_flat_50000() {
+        let mut w = possess_world();
+        let ri = 0;
+        w.rivals[ri].hate[0] = 49_999;
+        w.rival_war_check(ri, 0);
+        assert!(!w.rivals[ri].war[0], "49,999 is under the threshold");
+        w.rivals[ri].hate[0] = 50_000;
+        w.rival_war_check(ri, 0);
+        assert!(
+            !w.rivals[ri].war[0],
+            "the compare is strict: exactly 50,000 does not latch"
+        );
+        w.rivals[ri].hate[0] = 50_001;
+        w.rival_war_check(ri, 0);
+        assert!(
+            w.rivals[ri].war[0],
+            "the first crossing above 50,000 latches"
+        );
+    }
+
+    /// ⭐⭐ THE SCOUT'S HOME SUPERCELL IS SIGNED x/16384, TRUNCATING
+    /// TOWARD ZERO (:18362-67's CFSHL idiom), and the walk runs
+    /// THROUGH THE SCRATCH RECORD: each candidate writes slot 0's x/y
+    /// (:18374-86) and the accept stamps the wizard's +150/+152/+154
+    /// with the candidate and the scratch's NEVER-WRITTEN z
+    /// (:18381-83). mc1l5 t=14694: Vodor rebuilds at x=65333 (i16
+    /// −203 → cell 0) and retail's first candidate is literally
+    /// (0,0); a `u16 >> 14` start planted a map-quadrant away.
+    #[test]
+    fn the_scout_cell_is_signed_and_walks_the_scratch() {
+        let mut w = possess_world();
+        let ri = 0;
+        let i = w.rivals[ri].ent as usize;
+        let z = w.g.ent[i].z;
+        w.g.move_relink(i, 65333, 65333, z);
+        w.g.rebuild_wiz_chain();
+        w.g.ent[0].z = 352; // the scratch's standing z (imported state)
+        assert!(
+            w.rival_scout_site(ri, i),
+            "no foreign castles: first candidate wins"
+        );
+        assert_eq!(
+            w.rivals[ri].site,
+            (0, 0),
+            "i16 −203 / 16384 truncates to cell 0 — the home corner IS (0,0)"
+        );
+        let e = &w.g.ent[i];
+        assert_eq!((e.dest_x, e.dest_y), (0, 0), "the accept stamps +150/+152");
+        assert_eq!(e.site_z, 352, "+154 = the scratch record's unwritten z");
+        assert_eq!(
+            (w.g.ent[0].x, w.g.ent[0].y),
+            (0, 0),
+            "the scratch keeps the last probed candidate"
+        );
+    }
+
+    /// ⭐⭐ A STALE TARGET KEEPS THE STATE: every combat handler opens
+    /// on the sig-vs-stored test and returns with NO writes on
+    /// mismatch (sub_13BA0 :18246, sub_13CA0 :18281, sub_13DD0
+    /// :18323) — there is NO Fresh transition in the retail machine;
+    /// the think cascade is the only mover. mc1l5 t=12158: the
+    /// claimed ball dies and retail idles in Possess for 450 ticks.
+    #[test]
+    fn a_stale_target_keeps_the_state() {
+        let mut w = possess_world();
+        let ri = 0;
+        let i = w.rivals[ri].ent as usize;
+        let b = w.g.new_event().expect("ball slot");
+        {
+            let e = &mut w.g.ent[b];
+            e.class64 = 10;
+            e.model65 = 39;
+            e.tick70 = 41;
+            e.act_life = 300;
+        }
+        w.rivals[ri].state = AiState::Possess;
+        w.rivals[ri].target = b as u16;
+        w.rivals[ri].target_sig = w.target_sig(b as u16);
+        // The slot is reaped and re-minted as something else — the
+        // signature moves (team + model + class<<7).
+        w.g.ent[b].class64 = 9;
+        for _ in 0..8 {
+            w.rival_state_tick(ri, i, false);
+        }
+        assert_eq!(
+            w.rivals[ri].state,
+            AiState::Possess,
+            "no drop-to-Fresh exists"
+        );
+        assert_eq!(w.rivals[ri].target, b as u16, "the stale target keeps too");
+    }
+
+    /// ⭐⭐ THE FREE PLANT IS A BARE FLAG AND BUILD WRITES NO STATE
+    /// (:19200-08 / sub_138F0 :18142-68): the planted castle is born
+    /// state 5 TRANSFORM, level 0, sprite 177, binds wizext+50 at
+    /// spawn (:19206) and stamps NO terrain (BUILD row 0 is empty —
+    /// the pad is the level-up commit's painter). The handler leaves
+    /// the AI state alone, so the STILL-Build handler re-casts 16 the
+    /// very next tick through the NOW-bound arm and arms the upgrade
+    /// token (mc1l5 t=14772's (9,10)). Teardown-to-0 clears the
+    /// binding blind (:56534).
+    #[test]
+    fn the_plant_is_a_bare_flag_and_build_recasts_bound() {
+        let mut w = castle_world();
+        let ri = 0;
+        let i = w.rivals[ri].ent as usize;
+        let ws = w.rivals[ri].slot as usize;
+        w.rivals[ri].state = AiState::Build;
+        w.rivals[ri].site = (w.g.ent[i].x, w.g.ent[i].y);
+        w.rivals[ri].mana = 200_000;
+        w.rivals[ri].cooldown[16] = 0;
+        let pristine = w.g.t.height.clone();
+
+        // Tick 1: arrived at the site, the free plant fires.
+        w.rival_state_tick(ri, i, false);
+        let c = w.rival_castle(w.rivals[ri].ent).expect("the plant landed");
+        assert_eq!(w.rivals[ri].state, AiState::Build, "Build writes NO state");
+        assert_eq!(w.g.castle_reg[ws], c as u16, "the plant binds wizext+50");
+        {
+            let e = &w.g.ent[c];
+            assert_eq!(e.tick70, 5, "born TRANSFORM");
+            assert_eq!(e.f26, 0, "level 0");
+            assert_eq!(e.type86, 177, "sprite 177 flat");
+        }
+        assert_eq!(w.g.t.height, pristine, "a level-0 plant stamps NO terrain");
+
+        // Tick 2: the still-Build handler re-casts through the BOUND
+        // arm — the upgrade token arms on the day-old castle.
+        w.rival_state_tick(ri, i, false);
+        assert_eq!(w.rivals[ri].state, AiState::Build, "still no state write");
+        assert!(
+            token_of(&w, ri, 16) > 0,
+            "the re-cast armed the upgrade token through the bound arm"
+        );
+
+        // Teardown to level 0 clears the binding blind.
+        w.g.ent[c].tick70 = 6;
+        w.g.ent[c].f26 = 0;
+        w.g.castle_tick(c, crate::patches::WorldPatches::default());
+        assert_eq!(w.g.castle_reg[ws], 0, "teardown-to-0 clears wizext+50");
+        assert!(w.g.ent[c].flags & 0x400 != 0, "the flag soft-kills");
+    }
+
+    /// ⭐⭐ THE CLAIM GATE READS THE TOKEN'S LIVE +136 PRICE CACHE
+    /// (sub_14230 :18452: `wiz +136 <= manifestation +136`, no gate
+    /// when 16 is unowned) — CAP[level] housed, 1000 ctor, 5000
+    /// after a raze — so ball-claiming re-opens after every upgrade
+    /// AND while razed. mc1l5 t=16081: razed Vodor at ceiling 1768
+    /// vs his token's 5000 claims the wild 2000-ball; the port's
+    /// static-cost stand-in (1768 > 1000) fell through to HuntMana.
+    /// (The exemplar pair carries the at-castle mana-register
+    /// residue, so the law is pinned here instead of a fixture.)
+    #[test]
+    fn the_claim_gate_reads_the_live_token_price() {
+        let claim = |price: i32| -> AiState {
+            let mut w = castle_world();
+            let ri = 0;
+            let i = w.rivals[ri].ent as usize;
+            w.rivals[ri].known[3] = true;
+            w.rivals[ri].allowed[3] = true;
+            let m16 = w.rivals[ri].owned[16] as usize;
+            w.g.ent[m16].f136 = price;
+            w.rivals[ri].mana_max = 1768;
+            // A wild settled ball in range, and no castle (razed).
+            let (rx, ry, rz) = {
+                let e = &w.g.ent[i];
+                (e.x, e.y, e.z)
+            };
+            let b = w.g.new_event().expect("ball");
+            {
+                let e = &mut w.g.ent[b];
+                e.class64 = 10;
+                e.model65 = 39;
+                e.tick70 = 41;
+                e.f140 = 2000;
+                e.act_life = 300;
+            }
+            w.g.move_relink(b, rx, ry.wrapping_add(600), rz);
+            w.g.rebuild_ball_chain();
+            w.rival_selector(ri, i, true);
+            w.rivals[ri].state
+        };
+        assert_eq!(
+            claim(5000),
+            AiState::Possess,
+            "ceiling 1768 <= the razed token's 5000: the claim is open"
+        );
+        assert_ne!(
+            claim(1000),
+            AiState::Possess,
+            "ceiling 1768 > a 1000 cache: the claim gate is closed"
+        );
+    }
+
+    /// ⭐⭐ THE WAKE PASS READS THE CARPET SETTLED LAST TICK
+    /// (sub_54F00's :64352-53 pool read, a PRE-pass): native play
+    /// feeds this tick's live pose as the `player` arg, so the
+    /// settled-last-tick value is the `human_pose_prev` echo; the
+    /// replay drivers already pass settled(N−1) AS the arg
+    /// (`strict_retail`). Exposed only by a teleport-scale jump —
+    /// mc1l5 t=14420, the human teleports back into bee 338's wake
+    /// radius and retail's t=14421 pass arms the bee that very tick.
+    #[test]
+    fn the_wake_pass_reads_the_pose_settled_last_tick() {
+        let cmd = PlayerCommand::default();
+        let far = PlayerPose::level(200 << 8, 200 << 8, 6000, 0);
+        let near = PlayerPose::level(15 << 8, 15 << 8, 6000, 0);
+        let sleeper = |w: &mut World| {
+            let g = w.g.ground_z(10 << 8, 10 << 8) as i16;
+            let c =
+                w.g.spawn_creature(4, 10 << 8, 10 << 8, g)
+                    .expect("creature");
+            w.g.ent[c].f58 = 0;
+            w.g.ent[c].f59 = 0;
+            c
+        };
+
+        // NATIVE: the near pose is the ARG of tick 2, but the gate
+        // reads the pose settled during tick 1 (far) — the creature
+        // sleeps one more tick and wakes on tick 3.
+        let mut w = possess_world();
+        let c = sleeper(&mut w);
+        w.tick(far, cmd);
+        assert_eq!(w.g.ent[c].f58 & 0xFF, 0, "far pose: asleep");
+        w.tick(near, cmd);
+        assert_eq!(
+            w.g.ent[c].f58 & 0xFF,
+            0,
+            "native: the gate reads the carpet settled LAST tick"
+        );
+        w.tick(near, cmd);
+        assert_eq!(
+            w.g.ent[c].f58 & 0xFF,
+            16,
+            "the echo caught up: re-armed to 16"
+        );
+
+        // REPLAY DRIVERS (`strict_retail`): the arg IS settled(N−1),
+        // so the same jump wakes the creature a tick earlier.
+        let mut w = possess_world();
+        let c = sleeper(&mut w);
+        w.strict_retail = true;
+        w.tick(far, cmd);
+        w.tick(near, cmd);
+        assert_eq!(
+            w.g.ent[c].f58 & 0xFF,
+            16,
+            "strict_retail: the player arg is the gate pose"
+        );
     }
 }

@@ -37,6 +37,24 @@
    "file": "repeat-fireballs-23-is-a-launcher-its-command-ar.mgcr",
    "source": "mc1l4",
    "note": "REPEAT FIREBALLS (23) IS A LAUNCHER: its command arm is the bare LABEL_20->LABEL_32 flow (sub_46B00 :55893 - silent mana gate, +48 = +50 reload, hand restamp, NOTHING else) and its fire machine sub_58240 (:66296) is byte-identical to fireball's sub_56090 - fire at FULL from the TOKEN's tick, full-cost sub_55E80 delta debit, decrement; the stream is the +60==0 held re-issue re-arming +48 every tick. The port fired at the COMMAND site (and at cost/count per shot), running the whole stream one tick early. mc1l4 t=5376: retail's press@5375 arms in pair 5375->5376 and the first ball is born 5376->5377 into slot 267 (the id24-358 ball with charge cargo 12); the port minted it a tick early into 399 and the rival's legitimate ball slid to 267 - one extra (9,0), five graded lanes, segmented deviations 1,358 -> 4 on this law alone - ledger 2026-08-19c."
+  },
+  {
+   "t": 6864,
+   "file": "the-projectile-acquire-locks-a-corpse-that-died.mgcr",
+   "source": "mc1l4",
+   "note": "THE PROJECTILE ACQUIRE LOCKS A CORPSE THAT DIED EARLIER THE SAME TICK: sub_54520's class-3 walk (:64016-37) is the tick-top bucket[0] chain (var_u32_36462[0], membership actLife >= 0 sampled ONCE at :52253) and its per-node gates re-read only the owner tag and the cloak bit (+16 & 0x20) - NO life re-test - so a wizard whose fatal mail lands mid-tick stays a lock candidate for the rest of that tick. mc1l4 t=6865: rival 365 dies at its own dispatch (actLife 560 -> -240, f70 1 -> 2), the reap+remint recycles ball slot 380 into the pelting stream's next ball at the SAME LCG moment (rand 1060120164 both sides), and retail's newborn still acquires the corpse - chase 365, diving to z 1755 - where the port's live-pool scan lost it to its own act_life < 0 conjunct and flew straight (chase 0, target_yaw = heading 1998). The port's 0x400 fold in the same gate is gone with it - retail tests 0x20 alone - ledger 2026-08-19e."
+  },
+  {
+   "t": 6884,
+   "file": "the-jar-scatter-walks-the-532-acquisition-list-i.mgcr",
+   "source": "mc1l4",
+   "note": "THE JAR SCATTER WALKS THE +532 ACQUISITION LIST IN PICKUP ORDER: the death impact's scatter loop (:55519-49) iterates the wizext's 24-entry +532 list - manifestation slots in the order the wizard ACQUIRED them, an order unrecoverable from the +676 book - drawing three LCG values per live entry off the dying wizard's own +4, rewriting each entry to the token's model byte (empties to -1) for the respawn re-grant's in-place refill (:54884-923, where a scattered fireball's model 0 collides with the empty sentinel by design and still re-mints). mc1l4 t=6885: rival 365's Possess and its neighbor scattered in pickup order in retail; the port's spell-id iteration handed tokens 367/368 each other's draws - life 253/246 and both landing positions swapped pairwise - ledger 2026-08-19e."
+  },
+  {
+   "t": 6887,
+   "file": "the-vulture-s-wander-trailer-hunts-graves-on-the.mgcr",
+   "source": "mc1l4",
+   "note": "THE VULTURE'S WANDER TRAILER HUNTS GRAVES ON THE TICK-TOP BALL CHAIN: m1's wander wrapper sub_1B200 (:22260-88) runs the shared two-scan and then, on the SAME f63 % v_26 cadence, walks var_u32_36462[1] (the models-39|40 chain the tick head rebuilt at :52287-96) keeping model 40 only - nearest by 2-D distance within v_28 squared, NO facing cone, NO awake or cloak test - and a find OVERRIDES whatever the shared scan just picked: +146 = the grave, state = base+0, the vulture's moving idle (the glide-in; the only idle wrapper with a mover). mc1l4 t=6888: vulture 84's Scan A locks the human (the corpse fell out of bucket[0] at the rebuild), then the trailer re-points it at rival 365's three-tick-old grave in slot 20 - chase 20, f70 back to 6 - where the port, missing the trailer, chased the human in state 8 (f70 is the UNGRADED lane, so the brief sig showed chase alone) - ledger 2026-08-19e."
   }
  ]
 }
