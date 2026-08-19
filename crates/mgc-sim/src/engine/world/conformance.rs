@@ -1021,6 +1021,172 @@ impl World {
         &self.g.free
     }
 
+    /// Arm the mid-walk pool probe (the port-side `dump-state
+    /// --at-slot` instrument): the NEXT tick's entity walk snapshots
+    /// the whole pool as it reaches `slot`, before that slot
+    /// dispatches. Read back with [`Self::port_ent_lanes_mc1`]
+    /// (`from_probe = true`); [`Self::walk_probe_hit`] says whether
+    /// the walk actually crossed the slot.
+    pub fn arm_walk_probe(&mut self, slot: u16) {
+        self.walk_probe_arm = Some(slot);
+        self.walk_probe = None;
+    }
+
+    pub fn walk_probe_hit(&self) -> bool {
+        self.walk_probe.is_some()
+    }
+
+    /// The port's record at `slot` as RETAIL-convention lanes — the
+    /// port-side half of the `dump-state --port` side-by-side. Same
+    /// lane names and order as [`retail_ent_lanes_mc1`]; `None` = the
+    /// port does not model that lane (`f61`/`f62`, the wizard mana
+    /// delta `f132`, the AI signature `f148`, plain `f48`).
+    /// Translation back into retail space mirrors the importer:
+    /// `PLAYER_TARGET` → the human's recorded slot on every owner/
+    /// target lane, `f58` as the unsigned byte, the class-12 owner
+    /// re-homed to `f42`, the class-12 burst and the (10,41) leveler
+    /// rung re-homed to `f48`, the castle's transform sub-state
+    /// (port `f59`) shown on the `f48` lane (retail's pure-wait 4
+    /// imports as 1 — a `retail 4 port 1` row on a transforming
+    /// castle is the known representation merge, not a divergence).
+    ///
+    /// `from_probe = true` reads the mid-walk snapshot armed by
+    /// [`Self::arm_walk_probe`] instead of the live pool.
+    pub fn port_ent_lanes_mc1(
+        &self,
+        slot: u16,
+        human_slot: u16,
+        from_probe: bool,
+    ) -> Option<Vec<(&'static str, Option<i64>)>> {
+        let e = if from_probe {
+            self.walk_probe.as_ref()?.get(slot as usize)?
+        } else {
+            self.g.ent.get(slot as usize)?
+        };
+        let untr = |v: u16| -> i64 {
+            if v == PLAYER_TARGET {
+                human_slot as i64
+            } else {
+                v as i64
+            }
+        };
+        let castle = e.class64 == 3 && e.model65 == 2;
+        let some = |v: i64| Some(v);
+        Some(vec![
+            ("rand", some(e.rand as i64)),
+            ("max_life", some(e.max_life as i64)),
+            ("act_life", some(e.act_life as i64)),
+            ("flags", some(e.flags as i64)),
+            ("next20", some(e.next20 as i64)),
+            ("prev22", some(e.prev22 as i64)),
+            (
+                "id24",
+                some(if e.class64 == 11 {
+                    e.id24 as i64
+                } else {
+                    untr(e.id24)
+                }),
+            ),
+            (
+                "f26",
+                if e.class64 == 12 {
+                    None // retail +26 = spell level there, unmodeled
+                } else {
+                    some(e.f26 as i64)
+                },
+            ),
+            (
+                "f28",
+                if e.class64 == 10 && e.model65 == 41 {
+                    None // the leveler rung lives on the f48 lane
+                } else {
+                    some(e.f28 as i64)
+                },
+            ),
+            ("f30", some(e.f30 as i64)),
+            ("f32", some(e.f32 as i64)),
+            ("f34", some(e.f34 as i64)),
+            ("f36", some(e.f36 as i64)),
+            ("f38", some(untr(e.f38))),
+            ("f40", some(untr(e.f40))),
+            (
+                "f42",
+                if e.class64 == 12 {
+                    some(untr(e.f144))
+                } else {
+                    None
+                },
+            ),
+            ("f44", some(e.f44 as i64)),
+            ("f46", some(e.f46 as i64)),
+            (
+                "f48",
+                if e.class64 == 12 {
+                    some(e.f26 as i64)
+                } else if e.class64 == 10 && e.model65 == 41 {
+                    some(e.f28 as i64)
+                } else if castle && e.tick70 == 5 {
+                    some(e.f59 as i64)
+                } else if castle {
+                    some(0)
+                } else {
+                    None
+                },
+            ),
+            ("f50", some(e.f50 as i64)),
+            ("f52", some(untr(e.f52))),
+            ("f54", some(untr(e.f54))),
+            ("f56", some(e.f56 as i64)),
+            ("f58", some(e.f58 as i64 & 0xFF)),
+            ("f59", if castle { None } else { some(e.f59 as i64) }),
+            ("f61", None),
+            ("f62", None),
+            ("f63", some(e.f63 as i64)),
+            ("class64", some(e.class64 as i64)),
+            ("model65", some(e.model65 as i64)),
+            ("f66", some(e.f66 as i64)),
+            ("f67", some(e.f67 as i64)),
+            ("f68", some(e.f68 as i64)),
+            ("f69", some(e.f69 as i64)),
+            ("f70", some(e.tick70 as i64)),
+            ("f71", some(e.f71 as i64)),
+            ("x", some(e.x as i64)),
+            ("y", some(e.y as i64)),
+            ("z", some(e.z as i64)),
+            ("f78", some(e.f78 as i64)),
+            ("f80", some(e.f80 as i64)),
+            ("f82", some(e.f82 as i64)),
+            ("f84", some(e.f84 as i64)),
+            ("type86", some(e.type86 as i64)),
+            ("frame88", some(e.frame88 as i64)),
+            ("frames89", some(e.frames89 as i64)),
+            ("mail0.amt", some(e.mail[0].0 as i64)),
+            ("mail0.src", some(untr(e.mail[0].1))),
+            ("mail1.amt", some(e.mail[1].0 as i64)),
+            ("mail1.src", some(untr(e.mail[1].1))),
+            ("mail2.amt", some(e.mail[2].0 as i64)),
+            ("mail2.src", some(untr(e.mail[2].1))),
+            ("mail3.amt", some(e.mail[3].0 as i64)),
+            ("mail3.src", some(untr(e.mail[3].1))),
+            ("mail4.amt", some(e.mail[4].0 as i64)),
+            ("mail4.src", some(untr(e.mail[4].1))),
+            ("mail5.amt", some(e.mail[5].0 as i64)),
+            ("mail5.src", some(untr(e.mail[5].1))),
+            ("f126", some(e.f126 as i64)),
+            ("f128", some(e.f128 as i64)),
+            ("f130", some(e.f130 as i64)),
+            ("f132", None),
+            ("f136", some(e.f136 as i64)),
+            ("f140", some(e.f140 as i64)),
+            ("f144", some(if e.class64 == 12 { 0 } else { untr(e.f144) })),
+            ("f146", some(untr(e.f146))),
+            ("f148", None),
+            ("dest_x", some(e.dest_x as i64)),
+            ("dest_y", some(e.dest_y as i64)),
+            ("site_z", some(e.site_z as i64)),
+        ])
+    }
+
     pub fn obs_project_mc1(&self, pin: &PinnedMc1) -> ObsMc1 {
         let untr = |v: u16| if v == PLAYER_TARGET { pin.slot } else { v };
         let mut entities: Vec<EntObsMc1> = Vec::new();
@@ -2505,6 +2671,89 @@ fn zero_control(player: u16) -> ControlMc1 {
 /// translation applied to every entity-reference field. The link bit
 /// (flags & 4) is cleared — the caller relinks through `Gen::link` so
 /// the tile lists stay consistent.
+/// EVERY field of a recorded MC1 pool record as named lanes, in the
+/// retail struct's own order — the recording-side half of the
+/// `dump-state --port` side-by-side and the whole vocabulary of the
+/// `explain` changelog. Lane names and order are the contract shared
+/// with [`World::port_ent_lanes_mc1`] (the port half joins by NAME,
+/// so a missing lane is loud, never silently misaligned). `f58`
+/// prints as the unsigned byte — the canonical representation
+/// (`import_ent`'s `as u8` law). Guest pointers are omitted.
+pub fn retail_ent_lanes_mc1(r: &RetailEntMc1) -> Vec<(&'static str, i64)> {
+    vec![
+        ("rand", r.rand as i64),
+        ("max_life", r.max_life as i64),
+        ("act_life", r.act_life as i64),
+        ("flags", r.flags as i64),
+        ("next20", r.next20 as i64),
+        ("prev22", r.prev22 as i64),
+        ("id24", r.id24 as i64),
+        ("f26", r.f26 as i64),
+        ("f28", r.f28 as i64),
+        ("f30", r.f30 as i64),
+        ("f32", r.f32 as i64),
+        ("f34", r.f34 as i64),
+        ("f36", r.f36 as i64),
+        ("f38", r.f38 as i64),
+        ("f40", r.f40 as i64),
+        ("f42", r.f42 as i64),
+        ("f44", r.f44 as i64),
+        ("f46", r.f46 as i64),
+        ("f48", r.f48 as i64),
+        ("f50", r.f50 as i64),
+        ("f52", r.f52 as i64),
+        ("f54", r.f54 as i64),
+        ("f56", r.f56 as i64),
+        ("f58", r.f58 as u8 as i64),
+        ("f59", r.f59 as i64),
+        ("f61", r.f61 as i64),
+        ("f62", r.f62 as i64),
+        ("f63", r.f63 as i64),
+        ("class64", r.class64 as i64),
+        ("model65", r.model65 as i64),
+        ("f66", r.f66 as i64),
+        ("f67", r.f67 as i64),
+        ("f68", r.f68 as i64),
+        ("f69", r.f69 as i64),
+        ("f70", r.f70 as i64),
+        ("f71", r.f71 as i64),
+        ("x", r.x as i64),
+        ("y", r.y as i64),
+        ("z", r.z as i64),
+        ("f78", r.f78 as i64),
+        ("f80", r.f80 as i64),
+        ("f82", r.f82 as i64),
+        ("f84", r.f84 as i64),
+        ("type86", r.type86 as i64),
+        ("frame88", r.frame88 as i64),
+        ("frames89", r.frames89 as i64),
+        ("mail0.amt", r.mail[0].0 as i64),
+        ("mail0.src", r.mail[0].1 as i64),
+        ("mail1.amt", r.mail[1].0 as i64),
+        ("mail1.src", r.mail[1].1 as i64),
+        ("mail2.amt", r.mail[2].0 as i64),
+        ("mail2.src", r.mail[2].1 as i64),
+        ("mail3.amt", r.mail[3].0 as i64),
+        ("mail3.src", r.mail[3].1 as i64),
+        ("mail4.amt", r.mail[4].0 as i64),
+        ("mail4.src", r.mail[4].1 as i64),
+        ("mail5.amt", r.mail[5].0 as i64),
+        ("mail5.src", r.mail[5].1 as i64),
+        ("f126", r.f126 as i64),
+        ("f128", r.f128 as i64),
+        ("f130", r.f130 as i64),
+        ("f132", r.f132 as i64),
+        ("f136", r.f136 as i64),
+        ("f140", r.f140 as i64),
+        ("f144", r.f144 as i64),
+        ("f146", r.f146 as i64),
+        ("f148", r.f148 as i64),
+        ("dest_x", r.dest_x as i64),
+        ("dest_y", r.dest_y as i64),
+        ("site_z", r.site_z as i64),
+    ]
+}
+
 fn import_ent(r: &RetailEntMc1, row156: u8, tr: &dyn Fn(u16) -> u16) -> Ent {
     // The castle (3,2) keeps its MACRO state in retail's job byte +70
     // (4 = settled, 5 = transforming, 6 = leveler — the three dispatch

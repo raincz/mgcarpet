@@ -303,6 +303,9 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         pose_src
                     });
                     world.arm_midtick_ground_snapshot();
+                    // Stamp the pair tick for the sim-side probes
+                    // (MGC_WRITE_TRACE prints it as its `t=`).
+                    mgc_sim::DEBUG_TICK.store(pt, std::sync::atomic::Ordering::Relaxed);
                     if pose_pair() {
                         let pre = carpet_pose(&pst.ents[report.human_slot as usize]);
                         world.tick_pose_pair(pre, pose, pcmd);

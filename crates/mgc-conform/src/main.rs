@@ -12,6 +12,7 @@
 //!   once, diff the port's obs projection against the recorded obs at
 //!   N+1 (adjacent pairs only; gaps break pairing, never the run).
 
+mod explain;
 mod fixtures;
 mod jsondiff;
 mod pose_lane;
@@ -41,6 +42,24 @@ fn usage() -> ! {
                                           gaps re-anchor a fresh segment\n\
            dump-state <file.mgcr> <t> <slot>…   print raw retail fields of\n\
                                           the given slots at tick t\n\
+             --port          MC1: free-run the PORT to t (anchor at the\n\
+                             take's seed, or --start <t0>; --start t-1 =\n\
+                             the pair-import view) and print every lane\n\
+                             side by side with retail's, ≠-marked — the\n\
+                             instrument that says what the PORT holds\n\
+             --at-slot <n>   sample MID-WALK: snapshot the pool as the\n\
+                             tick INTO t reaches slot n, before n\n\
+                             dispatches (\"what did slot A hold when\n\
+                             slot B ran\")\n\
+           explain <file.mgcr> <t> [<slot>…]   retail's OWN t-1 → t\n\
+                                          changelog — what CHANGED, not\n\
+                                          what differs: records born/\n\
+                                          freed or whose class/life-sign/\n\
+                                          f70/owner moved, in full; named\n\
+                                          slots always print, plus every\n\
+                                          record they point at (f146/f52/\n\
+                                          f54/f144/f42/f38/f40, mail\n\
+                                          sources); wizard + global deltas\n\
            extract <file.mgcr> --out <manifest.json>   lift a fixture-suite\n\
                                           manifest (docs/CONFORMANCE.md)\n\
            fixtures <manifest.json>…      run a fixture suite, enforcing\n\
@@ -108,6 +127,16 @@ fn usage() -> ! {
                              resets in EXCESS of the gap-forced ones,\n\
                              and every reset tick names itself as a\n\
                              fixture candidate\n\
+           --classify        (--segmented, MC1) run the PAIR at every\n\
+                             reset-cluster head and tag it: pair DIRTY\n\
+                             at t-1 ⇒ LOCAL (fixture candidate), pair\n\
+                             CLEAN ⇒ INHERITED (the one-tick law is\n\
+                             right — the break rides earlier state:\n\
+                             unit test / upstream dig)\n\
+           --brief           one machine-readable line per take\n\
+                             (horizon / segments / first divergence /\n\
+                             signature) — the corpus regression sweep,\n\
+                             diffable against a saved baseline\n\
            --start <t>       anchor the replay at tick t instead of the\n\
                              first record"
     );
@@ -160,6 +189,17 @@ pub struct Args {
     /// Certification is ONE segment end to end; the number that matters
     /// is resets in EXCESS of the gap-forced ones.
     pub segmented: bool,
+    /// replay --segmented (MC1): run the PAIR at every reset-cluster
+    /// head and tag it LOCAL (pair dirty ⇒ fixture candidate) or
+    /// INHERITED (pair clean ⇒ the break rides earlier state — unit
+    /// test / upstream dig). The segmented-residue doctrine, automated.
+    pub classify: bool,
+    /// replay: one machine-readable summary line per take instead of
+    /// the segment report — the whole-corpus regression sweep.
+    pub brief: bool,
+    /// dump-state --port: sample MID-WALK — snapshot the pool as the
+    /// tick into `t` reaches this slot, before it dispatches.
+    pub at_slot: Option<u16>,
 }
 
 fn parse_args() -> Args {
@@ -184,6 +224,9 @@ fn parse_args() -> Args {
         no_pose_lane: false,
         pose_only: false,
         segmented: false,
+        classify: false,
+        brief: false,
+        at_slot: None,
         input_delay: 0,
         start: None,
     };
@@ -215,6 +258,16 @@ fn parse_args() -> Args {
             "--no-pose-lane" => a.no_pose_lane = true,
             "--pose-only" => a.pose_only = true,
             "--segmented" => a.segmented = true,
+            "--classify" => a.classify = true,
+            "--brief" => a.brief = true,
+            "--port" => a.dump_port = true,
+            "--at-slot" => {
+                a.at_slot = Some(
+                    it.next()
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or_else(|| usage()),
+                )
+            }
             "--out" => a.out = Some(it.next().map(PathBuf::from).unwrap_or_else(|| usage())),
             "--baseline" => {
                 a.baseline = Some(it.next().map(PathBuf::from).unwrap_or_else(|| usage()))
@@ -291,6 +344,7 @@ fn main() {
             .max()
             .unwrap_or(0),
         "dump-state" => dump_state(&args),
+        "explain" => explain::explain(&args),
         "ground-audit" => ground_audit(&args),
         "trace" => trace(&args),
         "terrain-diff" => args
@@ -326,6 +380,19 @@ fn dump_state(args: &Args) -> i32 {
     let slots: Vec<u64> = it.collect();
     if slots.is_empty() && !all && !wiz {
         usage();
+    }
+    // `--port`: the PORT-side dump — free-run the world to t (see
+    // replay::port_dump_mc1) and print every lane of the requested
+    // slots side by side with retail's, ≠-marked. The whole point is
+    // that every other instrument COMPARES projections or reads the
+    // recording; this one says what the port itself holds.
+    if args.dump_port {
+        if slots.is_empty() {
+            eprintln!("dump-state --port wants explicit slot numbers");
+            return 2;
+        }
+        let slots: Vec<u16> = slots.iter().map(|&s| s as u16).collect();
+        return replay::port_dump_mc1(path, t, &slots, args);
     }
     let mut rec = match Recording::open(path) {
         Ok(r) => r,

@@ -29,7 +29,10 @@
 //! model.
 
 use crate::Args;
-use crate::verify::{PairDiff, append_hand_diffs, capture_clean, compare, measured_planes};
+use crate::verify::{
+    PairDiff, PairPose, append_hand_diffs, capture_clean, compare, exec_pair, fire_bits_mc1,
+    measured_planes,
+};
 use crate::verify_mc2::{capture_clean_mc2, compare_mc2_gated, torn_slots};
 use mgc_formats::mgcr::{
     ObsMc1, ObsMc2, Recording, RetailMc1, RetailMc2, decode_retail_mc1, decode_retail_mc2,
@@ -54,7 +57,7 @@ pub(crate) fn replay(path: &std::path::Path, args: &Args) -> i32 {
         }
     };
     let res = match family {
-        mgc_formats::mgcr::Family::Mc1 => run_mc1(path, args),
+        mgc_formats::mgcr::Family::Mc1 => run_mc1(path, args, None),
         mgc_formats::mgcr::Family::Mc2 => run_mc2(path, args),
     };
     match res {
@@ -388,6 +391,9 @@ struct Segment {
     clean: u64,
     horizon: Option<u64>,
     first_render: String,
+    /// Compact first-divergence signature for `--brief`
+    /// (`(9,0)slot399:id,x,y` / `pose:vx` / `rng` / `missing(5,9)`).
+    sig: String,
     firsts: BTreeMap<&'static str, u64>,
     pose_rows: u64,
     rng_bad: u64,
@@ -421,6 +427,11 @@ struct RStats {
     respawns: u64,
     equips: u64,
     rebind_dropped: u64,
+    /// `--classify` verdict per classified reset-cluster head:
+    /// true = LOCAL (the pair at t-1 is itself dirty ⇒ fixture
+    /// candidate), false = INHERITED (the pair is clean ⇒ the break
+    /// rides earlier state — unit test / upstream dig).
+    class_tags: BTreeMap<u64, bool>,
 }
 
 impl RStats {
@@ -537,10 +548,20 @@ impl RStats {
                     .iter()
                     .take(24)
                     .map(|(a, b)| {
+                        // `--classify` tags the cluster HEAD: LOCAL =
+                        // the pair at t-1 is itself dirty (fixture
+                        // candidate); INHERITED = the pair is clean,
+                        // so the break rides earlier state (unit
+                        // test / upstream dig).
+                        let tag = match self.class_tags.get(a) {
+                            Some(true) => "[LOCAL]",
+                            Some(false) => "[INHERITED]",
+                            None => "",
+                        };
                         if a == b {
-                            a.to_string()
+                            format!("{a}{tag}")
                         } else {
-                            format!("{a}-{b}({})", b - a + 1)
+                            format!("{a}-{b}({}){tag}", b - a + 1)
                         }
                     })
                     .collect();
@@ -556,6 +577,16 @@ impl RStats {
                         String::new()
                     }
                 );
+                if !self.class_tags.is_empty() {
+                    let local = self.class_tags.values().filter(|&&v| v).count();
+                    let _ = writeln!(
+                        out,
+                        "   classified heads: {} LOCAL (pair dirty ⇒ fixture), {} INHERITED \
+                         (pair clean ⇒ unit test / upstream)",
+                        local,
+                        self.class_tags.len() - local
+                    );
+                }
             }
         }
         for (i, seg) in self.segs.iter().enumerate() {
@@ -593,7 +624,8 @@ impl RStats {
                     let _ = write!(out, "{}", seg.first_render);
                     let _ = writeln!(
                         out,
-                        "     traffic after: pose {} rows, rng {}/{} boundaries, sets {}/{} \
+                        "     post-divergence traffic (NOT a defect count): pose {} rows, \
+                         rng {}/{} boundaries, sets {}/{} \
                          missing/extra, fields {} rows",
                         seg.pose_rows,
                         seg.rng_bad,
@@ -640,6 +672,47 @@ impl RStats {
         self.segs.iter().all(|s| s.horizon.is_none())
     }
 
+    /// `--brief` — ONE machine-readable line per take: the corpus
+    /// regression sweep that used to be hand-rolled shell loops.
+    /// `horizon` = the last bit-exact boundary before the take's
+    /// first divergence (`END` when nothing diverged), `first` = the
+    /// divergence tick itself, `sig` its compact signature. A whole
+    /// corpus's `--brief` output diffs against a saved baseline.
+    fn render_brief(&self, take: &str, mode: &str, terrain: &str) -> String {
+        let gaps = self
+            .segs
+            .iter()
+            .filter(|s| s.opened_by == SegOpen::Gap)
+            .count();
+        let devs = self
+            .segs
+            .iter()
+            .filter(|s| s.opened_by == SegOpen::Deviation)
+            .count();
+        let graded: u64 = self.segs.iter().map(|s| s.graded).sum();
+        let clean: u64 = self.segs.iter().map(|s| s.clean).sum();
+        let first = self.segs.iter().filter_map(|s| s.horizon).min();
+        let sig = first
+            .and_then(|t| self.segs.iter().find(|s| s.horizon == Some(t)))
+            .map(|s| s.sig.clone())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "-".into());
+        let end = self.segs.last().map_or(0, |s| s.end);
+        let tags = if self.class_tags.is_empty() {
+            String::new()
+        } else {
+            let local = self.class_tags.values().filter(|&&v| v).count();
+            format!(" local={local} inherited={}", self.class_tags.len() - local)
+        };
+        format!(
+            "BRIEF {take} mode={mode} terrain={terrain} end={end} segments={} gaps={gaps} \
+             devs={devs} graded={graded} clean={clean} horizon={} first={} sig={sig}{tags}\n",
+            self.segs.len(),
+            first.map_or_else(|| "END".to_string(), |t| t.saturating_sub(1).to_string()),
+            first.map_or_else(|| "-".to_string(), |t| t.to_string()),
+        )
+    }
+
     /// Fold one stepped pose-only boundary (tier-2 has no world diff)
     /// and emit its CSV rows.
     fn fold_pose_only(
@@ -664,6 +737,8 @@ impl RStats {
                 let _ = writeln!(s, "    {name}: retail {want} port {got}");
             }
             seg.first_render = s;
+            let names: Vec<&str> = pose.iter().map(|(n, ..)| *n).take(4).collect();
+            seg.sig = format!("pose:{}", names.join(","));
         }
         emit_replay_csv(csv, t.saturating_sub(1), pose, &PairDiff::default())
     }
@@ -675,15 +750,21 @@ impl RStats {
 
 // --------------------------------------------------------------- MC1 run
 
-fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
+fn run_mc1(
+    path: &std::path::Path,
+    args: &Args,
+    port_dump: Option<&PortDump>,
+) -> Result<bool, String> {
     let mut rec = Recording::open(path)?;
     let game = rec.header.game.clone();
     let level = rec.header.level.ok_or("recording has no level number")?;
-    println!(
-        "== replay {} (game {game}, level {level}{})",
-        path.display(),
-        if args.pose_only { ", pose-only" } else { "" }
-    );
+    if !args.brief {
+        println!(
+            "== replay {} (game {game}, level {level}{})",
+            path.display(),
+            if args.pose_only { ", pose-only" } else { "" }
+        );
+    }
     let (mut world, pristine) = crate::verify::build_world(&args.baked, &game, level)?;
     let mut csv = open_csv(args)?;
     let mut shadow = crate::shadow::Shadow::from_env()?;
@@ -808,11 +889,37 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     // runs after the tick body so the break's own diagnostics (traces,
     // CSV) still see the DIVERGED state that produced them.
     let mut reset_at: Option<u64> = None;
+    // ---- `--classify` state (the segmented-residue doctrine run
+    // inline): a SCRATCH world for the pair check (never the free-run
+    // world — the pair import would wipe the state under
+    // measurement), the measured planes AS OF t-1 (the image below
+    // tracks t), and the verify-style pair commands (fire = dw_0@N,
+    // prev pair's command feeds the fire edge).
+    let mut classify_world: Option<World> = None;
+    #[allow(clippy::type_complexity)]
+    let mut prev_measured: Option<(Vec<u8>, Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>)> = None;
+    let mut pair_cmd_prev = PlayerCommand::default();
+    let mut last_dev: Option<u64> = None;
     while let Some(r) = rec.next_tick() {
         let tick = r?;
         // The terrain image tracks the take continuously (self-healing
         // deltas) — installed into the world only at anchors
         // (world mode) or per pair (pose-only, terrain@N+1).
+        // `--classify` keeps the PRE-apply planes: the pair check at
+        // boundary t must run on terrain@t-1, and after this apply
+        // the image holds t.
+        if args.classify
+            && args.segmented
+            && tick.terrain.is_some()
+            && let Some((h, ty, ceil, an)) = measured_planes(&timg)
+        {
+            prev_measured = Some((
+                h.to_vec(),
+                ty.to_vec(),
+                ceil.map(|c| c.to_vec()),
+                an.map(|a| a.to_vec()),
+            ));
+        }
         if let (Some(img), Some(block)) = (timg.as_mut(), &tick.terrain) {
             img.apply(block)
                 .map_err(|e| format!("t={}: terrain: {e}", tick.t))?;
@@ -847,10 +954,12 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             if !printed_import {
                 printed_import = true;
                 let measured = measured_planes(&timg).is_some();
-                println!(
-                    "   import: {active} active entities, human slot {human_slot}, terrain {}",
-                    if measured { "MEASURED" } else { "pristine" }
-                );
+                if !args.brief {
+                    println!(
+                        "   import: {active} active entities, human slot {human_slot}, terrain {}",
+                        if measured { "MEASURED" } else { "pristine" }
+                    );
+                }
                 // ⚠ A re-anchor restores the ENTITY state from the
                 // recording but the TERRAIN from the measured channel —
                 // and a format-1 take has none, so the reset drops the
@@ -859,7 +968,7 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 // Excess resets are then a property of the CAPTURE, and
                 // the count means nothing. Such a take wants a v2
                 // re-record, not a dig.
-                if args.segmented && !measured {
+                if args.segmented && !measured && !args.brief {
                     println!(
                         "   ⚠ --segmented WITHOUT a measured terrain channel: every reset \
                          restores PRISTINE planes, so the reset count is a capture artifact, \
@@ -868,6 +977,21 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 }
             }
             dump_state(&world, tick.t)?;
+            // A `--port` dump landing ON an anchor: the port state IS
+            // the retail import — still printed (identity modulo
+            // representation is itself a useful calibration), with
+            // the caveat named.
+            if let Some(spec) = port_dump
+                && tick.t >= spec.t
+            {
+                render_port_dump(&world, &st, human_slot, spec, tick.t, true);
+                return Ok(true);
+            }
+            // The verify-command law at an anchor: the previous
+            // pair's consumed fire is unknowable, so seed it from the
+            // anchor's own consumed byte — the same approximation
+            // `anchor_mc1`'s `set_prev_fire` already applies.
+            pair_cmd_prev = fire_bits_mc1(&st);
             st_prev = Some((tick.t, st));
             continue;
         }
@@ -922,7 +1046,21 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             });
             let pre = world.debug_player_knock();
             mgc_sim::DEBUG_TICK.store(tick.t, std::sync::atomic::Ordering::Relaxed);
+            // `--port --at-slot <n>`: arm the mid-walk pool snapshot
+            // for the tick INTO the dump boundary.
+            if let Some(spec) = port_dump
+                && tick.t == spec.t
+                && let Some(n) = spec.at_slot
+            {
+                world.arm_walk_probe(n);
+            }
             step_mc1(&mut world, ch, inp, cmd);
+            if let Some(spec) = port_dump
+                && tick.t >= spec.t
+            {
+                render_port_dump(&world, &st, slot, spec, tick.t, false);
+                return Ok(true);
+            }
             if let Some((t0, t1)) = ktrace
                 && pt >= t0
                 && pt <= t1
@@ -1245,6 +1383,18 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         && !(pose.is_empty() && pd.clean()));
                 emit_replay_csv(&mut csv, pt, &pose, &pd)?;
                 let boundary_clean = stats.grade(tick.t, &pose, &pd, args, dump);
+                // `--brief`'s first-divergence signature, captured the
+                // moment a segment's horizon lands.
+                if stats.seg().horizon == Some(tick.t) && stats.seg().sig.is_empty() {
+                    let cm = |s: u16| {
+                        obs.entities
+                            .iter()
+                            .find(|e| e.slot == s)
+                            .map(|e| (e.class, e.model))
+                    };
+                    let sig = brief_sig(&pose, &pd, &cm);
+                    stats.seg().sig = sig;
+                }
                 // ---- THE SEGMENTED DOCTRINE ----
                 // A true incremental deviation closes the segment and
                 // re-anchors, exactly the way a capture gap does. The
@@ -1253,6 +1403,60 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 // fixture candidate.
                 if args.segmented && !boundary_clean {
                     reset_at = Some(tick.t);
+                    // `--classify`: run the PAIR at the cluster HEAD
+                    // (adjacent resets are one story). Pair DIRTY at
+                    // t-1 ⇒ the one-tick law itself is wrong here —
+                    // LOCAL, a fixture candidate. Pair CLEAN ⇒ the
+                    // law is right and the break rides earlier state
+                    // — INHERITED, a unit test / upstream dig. The
+                    // doctrine of [segmented-residue], automated.
+                    if args.classify && last_dev != Some(tick.t - 1) {
+                        let cw = match classify_world.as_mut() {
+                            Some(w) => w,
+                            None => {
+                                let (w, _) = crate::verify::build_world(&args.baked, &game, level)?;
+                                classify_world = Some(w);
+                                classify_world.as_mut().expect("just built")
+                            }
+                        };
+                        // Terrain@t-1: the pre-apply snapshot when
+                        // this tick carried a block, else the image
+                        // as it stands (unchanged since t-1).
+                        let cur;
+                        let measured = if tick.terrain.is_some() && prev_measured.is_some() {
+                            prev_measured.as_ref().map(|(h, ty, c, a)| {
+                                (h.as_slice(), ty.as_slice(), c.as_deref(), a.as_deref())
+                            })
+                        } else {
+                            cur = measured_planes(&timg);
+                            cur
+                        };
+                        let pair_cmd = {
+                            let mut c = fire_bits_mc1(&pst);
+                            c.equip_left = rec.equip_left.map(SpellId);
+                            c.equip_right = rec.equip_right.map(SpellId);
+                            c.demolish = rec.demolish;
+                            c.respawn = rec.respawn;
+                            c
+                        };
+                        match exec_pair(
+                            cw,
+                            &pristine,
+                            measured,
+                            &pst,
+                            &st,
+                            &obs,
+                            pair_cmd,
+                            pair_cmd_prev,
+                            PairPose::Pair,
+                        ) {
+                            Ok((pdp, _, _)) => {
+                                stats.class_tags.insert(tick.t, !pdp.clean());
+                            }
+                            Err(e) => eprintln!("  classify t={}: {e}", tick.t),
+                        }
+                    }
+                    last_dev = Some(tick.t);
                 }
             } else {
                 stats.seg().ungraded += 1;
@@ -1265,6 +1469,10 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             chain = Some((ch, human_slot));
             stats.open(t, SegOpen::Deviation);
         }
+        // This pair's verify-law command becomes the next pair's
+        // predecessor (only the fire bits matter downstream — the
+        // classify pair's `set_prev_fire`).
+        pair_cmd_prev = fire_bits_mc1(&pst);
         st_prev = Some((tick.t, st));
         if let Some(limit) = args.limit {
             if stats.segs.iter().map(|s| s.stepped).sum::<u64>() >= limit {
@@ -1272,10 +1480,27 @@ fn run_mc1(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             }
         }
     }
-    print!(
-        "{}",
-        stats.render(if args.pose_only { "pose-only" } else { "world" })
-    );
+    if let Some(spec) = port_dump {
+        return Err(format!(
+            "dump-state --port: t={} never reached (last boundary {})",
+            spec.t,
+            stats.segs.last().map_or(0, |s| s.end)
+        ));
+    }
+    let mode = if args.pose_only { "pose-only" } else { "world" };
+    if args.brief {
+        let terrain = if measured_planes(&timg).is_some() {
+            "measured"
+        } else {
+            "pristine"
+        };
+        print!(
+            "{}",
+            stats.render_brief(&crate::verify::take_stem(path), mode, terrain)
+        );
+    } else {
+        print!("{}", stats.render(mode));
+    }
     if let Some(sh) = shadow.as_ref() {
         // The free run's question is "what broke FIRST", so the lanes
         // are ordered by the tick they part, not by family.
@@ -1370,11 +1595,13 @@ fn pose_only_pair_mc1(
 fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     let mut rec = Recording::open(path)?;
     let level = rec.header.level.ok_or("recording has no level number")?;
-    println!(
-        "== replay {} (game mc2, level {level}{})",
-        path.display(),
-        if args.pose_only { ", pose-only" } else { "" }
-    );
+    if !args.brief {
+        println!(
+            "== replay {} (game mc2, level {level}{})",
+            path.display(),
+            if args.pose_only { ", pose-only" } else { "" }
+        );
+    }
     let (mut world, pristine, things) = crate::verify_mc2::build_world_mc2(&args.baked, level)?;
     let mut csv = open_csv(args)?;
     let mut timg = (!args.no_terrain)
@@ -1447,15 +1674,17 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             );
             if !printed_import {
                 printed_import = true;
-                println!(
-                    "   import: human slot {}, terrain {}",
-                    report.human_slot,
-                    if measured_planes(&timg).is_some() {
-                        "MEASURED"
-                    } else {
-                        "pristine"
-                    }
-                );
+                if !args.brief {
+                    println!(
+                        "   import: human slot {}, terrain {}",
+                        report.human_slot,
+                        if measured_planes(&timg).is_some() {
+                            "MEASURED"
+                        } else {
+                            "pristine"
+                        }
+                    );
+                }
             }
             st_prev = Some((tick.t, st));
             continue;
@@ -1521,6 +1750,16 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         && !(pose.is_empty() && pd.clean()));
                 emit_replay_csv(&mut csv, pt, &pose, &pd)?;
                 stats.grade(tick.t, &pose, &pd, args, dump);
+                if stats.seg().horizon == Some(tick.t) && stats.seg().sig.is_empty() {
+                    let cm = |s: u16| {
+                        obs.entities
+                            .iter()
+                            .find(|e| e.slot == s)
+                            .map(|e| (e.class, e.model))
+                    };
+                    let sig = brief_sig(&pose, &pd, &cm);
+                    stats.seg().sig = sig;
+                }
             } else {
                 stats.seg().ungraded += 1;
             }
@@ -1533,10 +1772,20 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             }
         }
     }
-    print!(
-        "{}",
-        stats.render(if args.pose_only { "pose-only" } else { "world" })
-    );
+    let mode = if args.pose_only { "pose-only" } else { "world" };
+    if args.brief {
+        let terrain = if measured_planes(&timg).is_some() {
+            "measured"
+        } else {
+            "pristine"
+        };
+        print!(
+            "{}",
+            stats.render_brief(&crate::verify::take_stem(path), mode, terrain)
+        );
+    } else {
+        print!("{}", stats.render(mode));
+    }
     Ok(stats.clean())
 }
 
@@ -1625,7 +1874,198 @@ fn pose_only_pair_mc2(
     stats.fold_pose_only(pt + 1, &pose, csv)
 }
 
+// ---------------------------------------------------- the port-side dump
+
+/// `dump-state --port` — the instrument the whole wishlist ranked
+/// first: every other tool either READS THE RECORDING or COMPARES
+/// projections; nothing printed what the PORT holds at tick T. This
+/// free-runs (or, with `--start t-1`, pair-imports) to T and prints
+/// the port's record lane-for-lane beside retail's.
+pub(crate) struct PortDump {
+    pub(crate) t: u64,
+    pub(crate) slots: Vec<u16>,
+    /// Sample MID-WALK: snapshot the pool as the tick into `t`
+    /// reaches this slot, before it dispatches.
+    pub(crate) at_slot: Option<u16>,
+}
+
+/// Entry from `mgc-conform dump-state <file> <t> <slot>… --port`.
+pub(crate) fn port_dump_mc1(path: &std::path::Path, t: u64, slots: &[u16], args: &Args) -> i32 {
+    match Recording::open(path).and_then(|r| r.header.family()) {
+        Ok(mgc_formats::mgcr::Family::Mc1) => {}
+        Ok(mgc_formats::mgcr::Family::Mc2) => {
+            eprintln!("dump-state --port is MC1/HW-only for now");
+            return 2;
+        }
+        Err(e) => {
+            eprintln!("{}: {e}", path.display());
+            return 2;
+        }
+    }
+    if args.pose_only {
+        eprintln!("dump-state --port drives the full world (drop --pose-only)");
+        return 2;
+    }
+    let spec = PortDump {
+        t,
+        slots: slots.to_vec(),
+        at_slot: args.at_slot,
+    };
+    match run_mc1(path, args, Some(&spec)) {
+        Ok(_) => 0,
+        Err(e) => {
+            eprintln!("{}: {e}", path.display());
+            2
+        }
+    }
+}
+
+/// The side-by-side: retail's record at the boundary vs the port's
+/// live pool (or the mid-walk probe), joined BY LANE NAME, ≠-marked,
+/// `—` where the port does not model the lane. ALL fields print —
+/// the graded ones exactly because "graded and ungraded alike" is
+/// what makes this a state dump rather than another diff.
+fn render_port_dump(
+    world: &World,
+    st: &RetailMc1,
+    human_slot: u16,
+    spec: &PortDump,
+    t: u64,
+    at_anchor: bool,
+) {
+    use mgc_sim::engine::world::conformance::retail_ent_lanes_mc1;
+    println!(
+        "== dump-state --port t={t}{}",
+        if t != spec.t {
+            format!(
+                " (requested t={} has no graded boundary — nearest after)",
+                spec.t
+            )
+        } else {
+            String::new()
+        }
+    );
+    if at_anchor {
+        println!(
+            "   ⚠ t is an ANCHOR (seed/gap/--start): the port state IS the retail \
+             import — expect identity modulo representation"
+        );
+    }
+    let mut from_probe = false;
+    if let Some(n) = spec.at_slot {
+        if at_anchor {
+            println!("   ⚠ --at-slot {n} ignored: no tick ran into an anchor");
+        } else if world.walk_probe_hit() {
+            from_probe = true;
+            println!(
+                "   pool sampled MID-WALK as slot {n} was reached (the retail column \
+                 stays the BOUNDARY state at t={t} — retail has no mid-walk sample)"
+            );
+        } else {
+            println!(
+                "   ⚠ the walk never reached slot {n} this tick — showing the \
+                 POST-TICK pool instead"
+            );
+        }
+    }
+    for &slot in &spec.slots {
+        let Some(re) = st.ents.get(slot as usize) else {
+            println!("  slot {slot}: out of range");
+            continue;
+        };
+        if slot == human_slot {
+            println!(
+                "  ⚠ slot {slot} is the HUMAN CARPET: the port carries it out-of-pool, \
+                 so the port column below is the reserved hole, not the player"
+            );
+        }
+        let retail = retail_ent_lanes_mc1(re);
+        let port: BTreeMap<&'static str, Option<i64>> = world
+            .port_ent_lanes_mc1(slot, human_slot, from_probe)
+            .map(|v| v.into_iter().collect())
+            .unwrap_or_default();
+        println!(
+            "  slot {slot}: retail ({},{}) f70={} life={}  {:24} {:>12} {:>12}",
+            re.class64, re.model65, re.f70, re.act_life, "lane", "retail", "port"
+        );
+        for (name, rv) in retail {
+            match port.get(name) {
+                Some(Some(pv)) => {
+                    println!(
+                        "    {:24} {:>12} {:>12}{}",
+                        name,
+                        rv,
+                        pv,
+                        if *pv != rv { "  ≠" } else { "" }
+                    );
+                }
+                Some(None) => println!("    {:24} {:>12} {:>12}", name, rv, "—"),
+                None => println!("    {:24} {:>12} {:>12}", name, rv, "?"),
+            }
+        }
+    }
+    // The allocator context — the same tails the recording-side
+    // dump-state prints (next pop LAST).
+    let want: Vec<u16> = st
+        .free_stack
+        .iter()
+        .copied()
+        .filter(|&s| (s as usize) < st.ents.len() && s != human_slot)
+        .collect();
+    let got = world.free_stack_mc1();
+    println!(
+        "  free stack: retail len {} tail {:?}  port len {} tail {:?}",
+        want.len(),
+        &want[want.len().saturating_sub(8)..],
+        got.len(),
+        &got[got.len().saturating_sub(8)..],
+    );
+}
+
 // -------------------------------------------------------------- plumbing
+
+/// Compact first-divergence signature for `--brief`:
+/// `(9,0)slot399:id,x,y` / `pose:vx` / `missing(5,9)slot123x4` /
+/// `rng`. `cm` resolves a slot to its recorded (class, model).
+fn brief_sig(
+    pose: &[(&'static str, i64, i64)],
+    pd: &PairDiff,
+    cm: &dyn Fn(u16) -> Option<(u8, u8)>,
+) -> String {
+    if !pose.is_empty() {
+        let names: Vec<&str> = pose.iter().map(|(n, ..)| *n).take(4).collect();
+        return format!("pose:{}", names.join(","));
+    }
+    if let Some((slot, c, m)) = pd.missing.first() {
+        return format!("missing({c},{m})slot{slot}x{}", pd.missing.len());
+    }
+    if let Some((slot, c, m)) = pd.extra.first() {
+        return format!("extra({c},{m})slot{slot}x{}", pd.extra.len());
+    }
+    if let Some(d) = pd.fields.first() {
+        return match d.slot {
+            Some(slot) => {
+                let mut fields: Vec<&str> = pd
+                    .fields
+                    .iter()
+                    .filter(|f| f.slot == Some(slot))
+                    .map(|f| f.field)
+                    .take(6)
+                    .collect();
+                fields.dedup();
+                match cm(slot) {
+                    Some((c, m)) => format!("({c},{m})slot{slot}:{}", fields.join(",")),
+                    None => format!("slot{slot}:{}", fields.join(",")),
+                }
+            }
+            None => d.field.to_string(),
+        };
+    }
+    if pd.rng_want != pd.rng_got {
+        return "rng".into();
+    }
+    "-".into()
+}
 
 fn open_csv(args: &Args) -> Result<Option<std::io::BufWriter<std::fs::File>>, String> {
     match &args.csv {

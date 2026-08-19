@@ -38,11 +38,15 @@ const MAIL_LANES: [(&str, &str); 6] = [
     ("mail5.amt", "mail5.src"),
 ];
 
-/// One lane's running verdict: how many rows, and the FIRST one.
+/// One lane's running verdict: how many rows, the FIRST one, the
+/// tick span and the DISTINCT slot census ("45 rows across 1 slot"
+/// and "45 rows across 40 slots" are completely different leads).
 #[derive(Default, Clone)]
 pub(crate) struct Lane {
     pub(crate) rows: u64,
     pub(crate) first_t: u64,
+    pub(crate) last_t: u64,
+    pub(crate) slots: std::collections::BTreeSet<u16>,
     pub(crate) example: String,
 }
 
@@ -57,6 +61,11 @@ pub(crate) struct Shadow {
     pub(crate) free: (u64, u64, String),
     /// Optional per-row TSV (`MGC_RAW_SHADOW_ROWS=<path>`).
     rows: Option<std::io::BufWriter<std::fs::File>>,
+    /// `MGC_RAW_SHADOW_LANE=<class>,<model>,<field>` — the lane
+    /// magnifier: every row of exactly that lane prints to stdout as
+    /// it lands, so the census line's one `e.g.` widens to the whole
+    /// story without a TSV round-trip.
+    watch: Option<(u8, u8, String)>,
 }
 
 impl Shadow {
@@ -78,8 +87,33 @@ impl Shadow {
             }
             None => None,
         };
+        let watch = match std::env::var("MGC_RAW_SHADOW_LANE") {
+            Ok(v) => {
+                let mut it = v.splitn(3, ',');
+                match (it.next(), it.next(), it.next()) {
+                    (Some(c), Some(m), Some(f)) => {
+                        let c = c
+                            .trim()
+                            .parse()
+                            .map_err(|_| format!("MGC_RAW_SHADOW_LANE: bad class in {v:?}"))?;
+                        let m = m
+                            .trim()
+                            .parse()
+                            .map_err(|_| format!("MGC_RAW_SHADOW_LANE: bad model in {v:?}"))?;
+                        Some((c, m, f.trim().to_string()))
+                    }
+                    _ => {
+                        return Err(format!(
+                            "MGC_RAW_SHADOW_LANE={v:?}: want <class>,<model>,<field>"
+                        ));
+                    }
+                }
+            }
+            Err(_) => None,
+        };
         Ok(Some(Shadow {
             rows,
+            watch,
             ..Default::default()
         }))
     }
@@ -91,8 +125,20 @@ impl Shadow {
             lane.first_t = t;
             lane.example = format!("t={t} slot {slot}: retail {a} port {b}");
         }
+        lane.last_t = t;
+        lane.slots.insert(slot);
         if let Some(w) = self.rows.as_mut() {
             let _ = writeln!(w, "{t}\t{slot}\t{}\t{}\t{}\t{a}\t{b}", key.0, key.1, key.2);
+        }
+        if let Some((wc, wm, wf)) = self.watch.as_ref()
+            && *wc == key.0
+            && *wm == key.1
+            && wf == key.2
+        {
+            println!(
+                "  LANE ({},{}) {} t={t} slot {slot}: retail {a} port {b}",
+                key.0, key.1, key.2
+            );
         }
     }
 
@@ -263,8 +309,15 @@ impl Shadow {
         for (k, lane) in keys {
             let _ = writeln!(
                 s,
-                "    ({:>3},{:>3}) {}: {}  e.g. {}",
-                k.0, k.1, k.2, lane.rows, lane.example
+                "    ({:>3},{:>3}) {}: {} rows t={}..{} across {} slot(s)  e.g. {}",
+                k.0,
+                k.1,
+                k.2,
+                lane.rows,
+                lane.first_t,
+                lane.last_t,
+                lane.slots.len(),
+                lane.example
             );
         }
         let _ = writeln!(

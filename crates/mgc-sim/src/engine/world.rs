@@ -875,6 +875,14 @@ pub struct World {
     /// not snapshotted.
     midtick_ground_armed: bool,
     midtick_ground: Option<Vec<u8>>,
+    /// Conformance instrument (the port-side `dump-state --at-slot`):
+    /// when armed with a slot, the next tick's entity walk snapshots
+    /// the WHOLE pool as it reaches that slot — before the slot
+    /// dispatches — so "what did slot A hold when slot B ran" is
+    /// answerable without a hand-written probe. Not hashed, not
+    /// snapshotted.
+    walk_probe_arm: Option<u16>,
+    walk_probe: Option<Vec<crate::engine::features::Ent>>,
     /// The Accelerate brake veto for this tick, fed by
     /// [`World::thrust_cancel`]: .0 blocks type 2 (backward thrust
     /// held), .1 blocks type 21 (forward thrust held).
@@ -1289,6 +1297,130 @@ pub(crate) fn mc1_jar_ctor_off() -> bool {
     *V.get_or_init(|| std::env::var_os("MGC_NO_MC1_JAR_CTOR").is_some())
 }
 
+/// ⭐ HANDLER ATTRIBUTION (`MGC_WRITE_TRACE=<slot>[:<field>]`) — the
+/// 80% write barrier: [`World::tick_inner`] snapshots the watched
+/// `Ent` around every pre/post pass and every dispatch, diffs after,
+/// and attributes each changed field to THAT pass or handler. The
+/// full newtype-barrier version is invasive; this names the writer,
+/// which is what a "who wrote this field" dig actually needs. Rows
+/// print to stderr as `WRITE t=<t> slot <s> <field> <a> -> <b>  by
+/// <writer>`; `t` is [`crate::DEBUG_TICK`], stamped by the conform
+/// drivers. Without `:<field>` every lane but the phase clock `f63`
+/// traces (its own dispatch steps it every tick); naming `f63`
+/// explicitly traces exactly it.
+fn write_trace_spec() -> Option<&'static (usize, Option<String>)> {
+    static V: std::sync::OnceLock<Option<(usize, Option<String>)>> = std::sync::OnceLock::new();
+    V.get_or_init(|| {
+        let v = std::env::var("MGC_WRITE_TRACE").ok()?;
+        let (s, f) = match v.split_once(':') {
+            Some((s, f)) => (s, Some(f.to_string())),
+            None => (v.as_str(), None),
+        };
+        Some((s.parse().ok()?, f))
+    })
+    .as_ref()
+}
+
+/// Every `Ent` lane diffed by name for the write trace (port-native
+/// field names — the same `f<offset>` vocabulary the whole campaign
+/// speaks). `filter = Some(name)` keeps exactly that lane; `None`
+/// keeps everything except the always-stepping phase clock `f63`.
+fn ent_write_diff(
+    prev: &crate::engine::features::Ent,
+    cur: &crate::engine::features::Ent,
+    filter: Option<&str>,
+) -> Vec<(&'static str, i64, i64)> {
+    let mut rows: Vec<(&'static str, i64, i64)> = Vec::new();
+    macro_rules! lane {
+        ($name:literal, $f:ident) => {
+            if prev.$f != cur.$f {
+                rows.push(($name, prev.$f as i64, cur.$f as i64));
+            }
+        };
+    }
+    lane!("rand", rand);
+    lane!("max_life", max_life);
+    lane!("act_life", act_life);
+    lane!("flags", flags);
+    lane!("next20", next20);
+    lane!("prev22", prev22);
+    lane!("id24", id24);
+    lane!("f26", f26);
+    lane!("f28", f28);
+    lane!("f30", f30);
+    lane!("f32", f32);
+    lane!("f34", f34);
+    lane!("f36", f36);
+    lane!("f38", f38);
+    lane!("f40", f40);
+    lane!("f44", f44);
+    lane!("f46", f46);
+    lane!("f50", f50);
+    lane!("f52", f52);
+    lane!("f54", f54);
+    lane!("f56", f56);
+    lane!("f58", f58);
+    lane!("f59", f59);
+    lane!("f63", f63);
+    lane!("class64", class64);
+    lane!("model65", model65);
+    lane!("f66", f66);
+    lane!("f67", f67);
+    lane!("f68", f68);
+    lane!("f69", f69);
+    lane!("f70", tick70);
+    lane!("f71", f71);
+    lane!("x", x);
+    lane!("y", y);
+    lane!("z", z);
+    lane!("f78", f78);
+    lane!("f80", f80);
+    lane!("f82", f82);
+    lane!("f84", f84);
+    lane!("type86", type86);
+    lane!("frame88", frame88);
+    lane!("frames89", frames89);
+    lane!("f126", f126);
+    lane!("f128", f128);
+    lane!("f130", f130);
+    lane!("f136", f136);
+    lane!("f140", f140);
+    lane!("f144", f144);
+    lane!("f146", f146);
+    lane!("dest_x", dest_x);
+    lane!("dest_y", dest_y);
+    lane!("site_z", site_z);
+    const MAIL_AMT: [&str; 6] = [
+        "mail0.amt",
+        "mail1.amt",
+        "mail2.amt",
+        "mail3.amt",
+        "mail4.amt",
+        "mail5.amt",
+    ];
+    const MAIL_SRC: [&str; 6] = [
+        "mail0.src",
+        "mail1.src",
+        "mail2.src",
+        "mail3.src",
+        "mail4.src",
+        "mail5.src",
+    ];
+    for k in 0..6 {
+        if prev.mail[k].0 != cur.mail[k].0 {
+            rows.push((MAIL_AMT[k], prev.mail[k].0 as i64, cur.mail[k].0 as i64));
+        }
+        if prev.mail[k].1 != cur.mail[k].1 {
+            rows.push((MAIL_SRC[k], prev.mail[k].1 as i64, cur.mail[k].1 as i64));
+        }
+    }
+    rows.retain(|(n, ..)| match filter {
+        Some(f) => *n == f,
+        None => *n != "f63",
+    });
+    rows
+}
+
 /// Records the app can draw (mc1_entities has a sprite mapping).
 /// Class 9 = projectiles; class 10 is logic/terrain except the portal
 /// vortex and the combat effects (fire, flame, splash, flashes, mana
@@ -1500,6 +1632,8 @@ impl World {
             prev_fire: (false, false),
             midtick_ground_armed: false,
             midtick_ground: None,
+            walk_probe_arm: None,
+            walk_probe: None,
             accel_veto: (false, false),
             pending_respawn: None,
             pending_restart: false,
@@ -2771,6 +2905,29 @@ impl World {
         post: Option<PlayerPose>,
     ) {
         let mut player = player;
+        // ⭐ HANDLER ATTRIBUTION — see [`write_trace_spec`]. `wt_check!`
+        // is the checkpoint: diff the watched slot against the last
+        // checkpoint's snapshot and attribute every changed lane to
+        // the label. Zero cost when the env var is unset.
+        let wt = write_trace_spec();
+        let mut wt_prev: Option<crate::engine::features::Ent> =
+            wt.and_then(|(s, _)| self.g.ent.get(*s).copied());
+        macro_rules! wt_check {
+            ($label:expr) => {
+                if let (Some((ws, wf)), Some(prev)) = (wt, wt_prev.as_mut()) {
+                    let cur = self.g.ent[*ws];
+                    let diffs = ent_write_diff(prev, &cur, wf.as_deref());
+                    if !diffs.is_empty() {
+                        let t = crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed);
+                        let label = $label;
+                        for (name, a, b) in diffs {
+                            eprintln!("WRITE t={t} slot {ws} {name} {a} -> {b}  by {label}");
+                        }
+                    }
+                    *prev = cur;
+                }
+            };
+        }
         // The MC2 respawn key (retail PlayerAction 0xF → `sub_5C950`,
         // EF:37650-72), FIRST — retail's `PlayerEvents` input pass
         // runs ahead of the frame function, and mc2l3 t=15315 dates it
@@ -2834,6 +2991,7 @@ impl World {
                 }
             }
         }
+        wt_check!("tick-top reap");
 
         // Broad-phase bucket counts for the kill triggers: class-5
         // events by model, excluding state 120 (multipart body
@@ -3076,6 +3234,7 @@ impl World {
         // conformance import seeds it to the carpet's recorded
         // pose@N; the carpet-slot record itself is out-of-pool
         // there, so it can't be read directly).
+        wt_check!("tick-head passes (chains/duel/hate/mana/objective/casts/stagevar)");
         let wake_ctx = {
             let (wx, wy) = if self.human_pose_prev == (0, 0, 0) {
                 // Unseeded echo (first tick of a fresh World): the
@@ -3094,6 +3253,7 @@ impl World {
             AwakeVerb::Mc1 => self.g.mob_awake_pass(&wake_ctx),
             AwakeVerb::Mc2 => self.g.mc2_awake_pass(&wake_ctx),
         }
+        wt_check!("awake_pass");
 
         // The (10,86) cave-drip ambient spawner (`sub_58630`
         // EF:40468, run cave-only each frame from UpdateEntities
@@ -3153,6 +3313,14 @@ impl World {
         // gate here was the t=0 special case (those landed BELOW
         // their spawners) overfit to the opening columns.
         for i in 1..self.g.ent.len() {
+            // The `--at-slot` probe: snapshot the whole pool as the
+            // walk REACHES the armed slot, before it dispatches —
+            // "what did slot A hold when slot B ran" is this
+            // snapshot at A, no hand-written probe needed.
+            if self.walk_probe_arm.is_some_and(|n| n as usize == i) {
+                self.walk_probe_arm = None;
+                self.walk_probe = Some(self.g.ent.clone());
+            }
             // The human carpet is out-of-pool (its imported slot is
             // zeroed): the cave ambient tail fires exactly when the
             // walk crosses that recorded slot — retail's sub_5D530
@@ -3167,6 +3335,7 @@ impl World {
                 self.mc2_player_cast_pass(alive, edge, cmd, player, &ctx);
                 let turn = self.mc2_turn;
                 self.mc2_cave_carpet_tail(turn);
+                wt_check!(format!("carpet_dispatch (mc2, slot {i})"));
             }
             // The MC1 twin (sub_45C90, the class-3 carpet dispatch):
             // the wizard pass anchors at the recorded carpet slot —
@@ -3228,6 +3397,9 @@ impl World {
                 if let Some(d) = drive.as_deref_mut() {
                     self.adopt_carpet_rand(d.s);
                 }
+                wt_check!(format!(
+                    "carpet_dispatch (mc1 mail/flight/wizard/regen, slot {i})"
+                ));
             }
             if self.g.ent[i].class64 == 0 {
                 continue;
@@ -3248,6 +3420,13 @@ impl World {
             {
                 continue;
             }
+            // Handler identity for the write trace, read at DISPATCH
+            // ENTRY — the (class, model, f70) triple is what names
+            // the handler the walk hands this slot to.
+            let wt_hdr = wt.map(|_| {
+                let e = &self.g.ent[i];
+                (e.class64, e.model65, e.tick70)
+            });
             match self.g.ent[i].class64 {
                 // The creature brain/movement family — the
                 // MovementVerb seam (the whole class-5 handler
@@ -3815,6 +3994,9 @@ impl World {
             {
                 self.free_slot(i);
             }
+            if let Some((c, m, s)) = wt_hdr {
+                wt_check!(format!("slot {i} ({c},{m}) f70={s}"));
+            }
         }
         // Native MC2 has no pooled human carpet (mc2_carpet_slot 0):
         // its cave ambient tail runs post-pass. Conformance imports
@@ -3847,6 +4029,7 @@ impl World {
             self.mc1_wizard_pass(alive, edge, cmd, player, &ctx, (at_castle, at_dolmen));
             self.player_regen_block(at_castle, at_dolmen);
         }
+        wt_check!("post-walk carpet (native anchor)");
         if any_creature || any_transient {
             // Creatures/projectiles/effects move: poses refresh.
             self.entities_dirty = true;
@@ -3875,6 +4058,7 @@ impl World {
                 self.mc2_spell_steal(wraith, hand);
             }
         }
+        wt_check!("post-walk mail drains (xp/steal)");
 
         // ---- player damage intake (the wizard tick's mailbox block,
         // sub_45C90 :55344-74 + sub_46540 :55641-737). MC1 ran it at
@@ -4013,6 +4197,7 @@ impl World {
         };
         self.player.accel_held = false;
         self.accel_veto = (false, false);
+        wt_check!("tick tail (player mail/mortality/timers/ending)");
     }
 
     // ---- tick() per-class dispatch arm bodies (S1a code motion) ----
@@ -5254,6 +5439,8 @@ impl World {
             // reader — hash-quiet like the cast-arm hand bits.
             midtick_ground_armed: _,
             midtick_ground: _,
+            walk_probe_arm: _,
+            walk_probe: _,
             accel_veto: _,
             pending_respawn: _,
             pending_restart: _,
@@ -12056,6 +12243,8 @@ impl World {
             // in a playable world.
             midtick_ground_armed: _,
             midtick_ground: _,
+            walk_probe_arm: _,
+            walk_probe: _,
             prev_fire,
             accel_veto,
             pending_respawn,

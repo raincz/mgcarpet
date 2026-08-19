@@ -604,6 +604,15 @@ break tick `t`, the pair diff `D1(t)` DIRTY means the error is LOCAL to
 through a field the obs schema does not grade — the first detector this
 project has for the `+70`/`+52` obs blind spots.
 
+`--classify` (MC1) automates exactly that doctrine: at every
+reset-CLUSTER HEAD it runs the pair `t-1 → t` on a scratch world
+(`exec_pair`, the fixture semantics — pose pair, measured terrain@t-1,
+the verify command law) and tags the cluster `[LOCAL]` or
+`[INHERITED]` in the reset list, plus a summary count. It says which
+branch every break is on BEFORE any code is written, and the LOCAL
+heads feed the fixture cutter directly. Cost: one extra world build
+plus one pair per cluster head.
+
 ⚠ **A reset restores entity state from the recording but TERRAIN from
 the measured channel**, so a format-1 take (no terrain channel) resets
 to PRISTINE planes and re-breaks immediately; the mode prints a warning
@@ -635,7 +644,14 @@ Run it in both modes, because they answer different questions:
 `MGC_RAW_SHADOW_ROWS=<path>` dumps every row as a TSV
 (`t, slot, class, model, field, retail, port`) — the summary keeps one
 example per `(class, model, field)`, which is the wrong resolution when
-the question is WHICH TICK a lane first parts. Two lanes are handled
+the question is WHICH TICK a lane first parts.
+`MGC_RAW_SHADOW_LANE=<class>,<model>,<field>` is the in-place
+magnifier: every row of exactly that lane prints to stdout as it
+lands, no TSV round-trip. The census line itself carries the tick
+span and the DISTINCT SLOT COUNT
+(`45 rows t=1312..4200 across 1 slot(s)`) because "45 rows on one
+slot" and "45 rows across 40 slots" are completely different leads
+and used to print identically. Two lanes are handled
 specially and both are load-bearing: slot-valued fields
 (`+38`/`+40`/`+144`/mail sources) get the obs projection's own
 `PLAYER_TARGET` untranslation, without which the sentinel alone is
@@ -685,6 +701,83 @@ tick 6618, and the state dump then showed `Gen::exhausted` jumping
 0 → 74 in that single tick — i.e. the ENTITY POOL IS FULL and both
 engines are dropping spawns. Neither of the other instruments could
 have said that.
+
+### What the PORT holds, what RETAIL changed, who WROTE it
+
+The mc1l4 bucket[0] session spent its budget on two facts no
+instrument could print: "what does the PORT's record hold at tick T"
+(everything above either reads the recording or compares projections)
+and "what changed in RETAIL across the break" (a divergence report
+shows what DIFFERS, never what CHANGED — the cause of a break is
+routinely state both sides share, which structurally cannot appear in
+the diff). Three instruments close that gap; all three are MC1/HW for
+now.
+
+**`dump-state <take> <t> <slot>… --port` — the port-side state dump.**
+Free-runs the world to `t` (the replay driver underneath; `--start
+<t0>` anchors late, so `--start t-1` is the PAIR-IMPORT view) and
+prints every lane of the requested slots side by side with retail's
+record, `≠`-marked, joined BY LANE NAME through the shared table
+(`conformance::retail_ent_lanes_mc1` / `World::port_ent_lanes_mc1`).
+ALL fields print, graded and ungraded alike; `—` = a lane the port
+does not model (`f61`/`f62`, wizard `f132`, `f148`, bare `f48`).
+Representation merges are translated back into retail conventions
+(the `PLAYER_TARGET` untranslation, `f58` as the unsigned byte, the
+class-12 owner re-homed to `f42`, the castle transform sub-state on
+the `f48` lane — where retail's pure-wait `4` legitimately reads as
+port `1`). The free-stack tails print alongside.
+`--at-slot <n>` samples MID-WALK: the pool is snapshotted as the tick
+INTO `t` reaches slot `n`, before `n` dispatches — "what did slot 71
+hold when slot 388 ran", the question that was twice a hand-written
+`eprintln!` + rebuild. The retail column stays the boundary state
+(retail has no mid-walk sample); the header says so.
+
+**`explain <take> <t> [<slot>…]` — retail's OWN t-1 → t changelog.**
+Not a comparison: both endpoints are the recording's. Prints the
+global deltas (LCG with the DRAW COUNT between endpoints, free/recycle
+stack, spawn ordinals), then the pool filtered to TRANSITIONS —
+records born / freed / died (life SIGN) / `+70` state / owner /
+class — each with its full changed-lane list, then per-wizard deltas
+(scalars + changed array elements). A level has few transitions per
+tick, so the list is short by construction; castle 71's
+`act_life 800 -> -1` at mc1l4 t=1017 is its first line, which is
+exactly the fact three probes and a rebuild cycle were once spent
+recovering. Named slots always print in full, plus every record they
+point at (`+146`, `+52`/`+54`, `+144`, `+42`, `+38`/`+40`, the six
+mail sources) — the pointer chase, automated. Needs adjacent state
+records (a gap refuses honestly).
+
+**`MGC_WRITE_TRACE=<slot>[:<field>]` — handler attribution, the 80 %
+write barrier** (`World::tick_inner`). Snapshots the watched `Ent`
+around every pre/post pass and every dispatch, diffs after, and
+attributes each changed field to THAT pass or handler:
+
+    WRITE t=1016 slot 71 act_life 800 -> -1  by carpet_dispatch (mc1 mail/flight/wizard/regen, slot 358)
+    WRITE t=1224 slot 217 z 2157 -> 2201  by slot 217 (10,6) f70=6
+
+Works under BOTH runners (`verify-deltas` stamps the pair tick into
+`DEBUG_TICK`; `replay` always did). Without `:<field>` every lane but
+the phase clock `f63` traces (its own dispatch steps it every tick);
+naming `f63` explicitly traces exactly it. Rows go to stderr. The
+writer label is the dispatched record's `(class, model, f70)` triple
+plus the named pre/post passes (`tick-top reap`, `awake_pass`,
+`carpet_dispatch`, `post-walk mail drains`, `tick tail`) — three of
+five digs in the bucket[0] session reduced to precisely this line.
+Zero cost when the variable is unset.
+
+**`replay --brief` — the corpus regression sweep as one command.**
+One machine-readable line per take:
+
+    BRIEF mc1l4 mode=world terrain=measured end=14755 segments=1359 gaps=0 devs=1358 graded=14755 clean=13397 horizon=5375 first=5376 sig=extra(9,0)slot267x1
+
+`horizon` = the last bit-exact boundary before the take's first
+divergence (`END` when nothing diverged), `first` the divergence tick,
+`sig` its compact signature (`(c,m)slot:fields` / `pose:lanes` /
+`missing(c,m)` / `rng`), and under `--classify` a `local=/inherited=`
+tail. A whole-corpus sweep is a loop over takes whose output DIFFS
+against a saved baseline — the discipline the campaign already asks
+for after every landed law, previously hand-rolled with shell loops
+per take.
 
 `--pose-only` is the tier-2 chain: the FLIGHT state chains while the
 world context re-imports per pair — it isolates the mover +

@@ -22,6 +22,7 @@
 /mgcarpet.json
 
 # Flight recordings
+/conformance/brief-baseline.txt
 /recordings/*.mgcr
 
 # Python caches
