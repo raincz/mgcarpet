@@ -354,7 +354,7 @@ read whenever a bootstrap pair is rejected.
 The tear gate is a *reconstruction* — it infers, after the fact,
 whether a frozen snapshot happened to land between ticks. The exe
 tick-patch (`tools/mc_exe_tickpatch.py`) removes the inference by
-making the game cooperate. It installs a ~167-byte wrapper stub around
+making the game cooperate. It installs a 249-byte wrapper stub around
 the per-sub-step tick function (remc1 `sub_41780_41AC0`) of a COPY of the
 binary — `CARPET_REC.EXE` / `HIDDEN_REC.EXE`, never the pristine
 gamedata — by redirecting the tick fn's callers (rewriting each
@@ -366,11 +366,14 @@ the dynamic recompiler picked the region up misaligned). Every sub-step
 the stub does two things:
 
 1. **Paces to a wall-clock deadline.** It spins on the game's own PIT
-   counter (measured live at ~480 Hz) until one period (default 5 counts)
-   has elapsed since the last release. The default game speed runs the
-   tick fn 4× per rendered frame, so `fps = 480 / (4 × period)` ≈ **24 fps**
+   counter (measured live at ~120 Hz) until one period (default 5 counts)
+   has elapsed since the last release, so `fps = 120 / period` ≈ **24 fps**
    at period 5 — the authentic Magic Carpet rate — regardless of how high
-   DOSBox `cycles` is set; the excess cycles are burned in the spin. (Both
+   DOSBox `cycles` is set; the excess cycles are burned in the spin. Exactly
+   **one sub-step per rendered frame** is paced (the first, detected via the
+   gameSpeed fan-out's live loop index in `EBX`), so the F3 game-speed feature
+   still speeds the *sim* up 4×/16× while the frame rate holds; at the default
+   speed of one sub-step per frame every sub-step is the first. (Both
    obj1's cave and obj3's mailbox must be page-aligned via their `vsize`
    fields, or the tail is outside the segment limit — the code cave won't
    execute and the mailbox writes won't persist.) This is the frame cap
@@ -381,6 +384,23 @@ the stub does two things:
    *when* sub-steps run, never *what* they compute — the recorded tick
    sequence is byte-identical to an unpaced run.
 
+   **Floors the window** (`--floor N`, default 2 counts, `0` disables).
+   A deadline is only as good as the compute fitting inside it: a sub-step
+   heavy enough to overrun its period — deaths, several meteors at once —
+   arrives with the deadline already passed, the spin falls straight
+   through, and `in_window` is raised and cleared within a handful of
+   instructions. That zero-width window is unlandable, so the recorder
+   drops the frame and the delta across it tears; and because the release
+   path tolerates up to 30 counts of backlog with no wait at all, one
+   heavy sub-step is followed by a burst of free-running ones. The floor
+   clamps `deadline = max(deadline, now + N)` before the spin, making the
+   window's width independent of load and deleting the catch-up burst with
+   it. It is a **no-op while the game keeps up** (steady-state waits are
+   unchanged) and is charged only to the sub-steps that already overran —
+   unlike lowering `--period`, which taxes every frame. The PIT counter is
+   integral, so `N=1` guarantees nothing and `N=2` is the smallest value
+   guaranteeing a full count (≥8.3 ms); the tool rejects `1`.
+
 2. **Publishes a mailbox** in obj3's committed tail (guest-linear
    `0x132c40`, same address in both builds; the stub derives obj3's real
    runtime base from the game's own relocated struct pointer so its writes
@@ -390,7 +410,10 @@ the stub does two things:
    the quiescent window — the world struct is fully settled from the
    previous sub-step and the current one's LCG draw has not begun — and
    it is proportional to the spare cycle budget, so on a fast host it is
-   ~7 ms wide on *every* sub-step, bursts included.
+   ~7 ms wide on a typical sub-step. On a sub-step with *no* spare budget
+   the width is whatever `--floor` guarantees (≥8.3 ms at the default 2)
+   rather than zero, which is what makes "every sub-step, bursts included"
+   true rather than aspirational.
 
 A recorder that finds the magic switches to **windowed capture**: take
 the struct only while `in_window==1`, require the counter and struct to
@@ -420,7 +443,20 @@ that clears `in_window` (the frame is about to mutate), calls the original
 frame driver, then bumps a monotonic **per-frame** counter and raises
 `in_window`. The flag is thus up from just after the draw, across MC2's
 native limiter spin, until the next frame's `Turn++` — a settled window,
-so the `Turn++`-park tear is unobservable by construction. The mailbox
+so the `Turn++`-park tear is unobservable by construction.
+
+MC2's native budget is **absolute** (`turn_sampled_before_the_frame + 5`
+ticks of the 100 Hz PIT), so a frame heavy enough to overrun it leaves no
+spin at all and the window collapses to nothing — the same failure the MC1
+pacer has, arriving by the same route. The MC2 stub therefore carries the
+same **`--floor N`** (default 2 counts, `0` disables): after the counter
+bump and the `in_window` raise, it spins on `GameTimerTurn` until N counts
+have passed, so the total window is `floor + max(0, native spin)`. Placing
+it in the tail — *after* the counter bump — means the window the recorder
+sees announced as fresh is the same one being held open. `--pace N` (which
+widens the absolute budget) remains available but is now the second-line
+knob: it taxes every frame and still cannot guarantee a window on a frame
+that blows the wider budget too. The mailbox
 (magic `MGCTTIK2`, counter `+8`, `in_window` `+0xC`; **no period field**)
 sits in obj3's committed BSS tail (guest `0x1842c0`); the stub derives
 obj3's real base by reading the game's own fixed-up `GameTimerTurn` disp,

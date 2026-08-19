@@ -140,7 +140,9 @@ cleanly. Two arms, auto-selected from the binary:
   adds no pacer; it just wraps the sole `call DrawAndEventsInGame_47560` in
   the loop and raises an `in_window` flag for exactly the interval when the
   frame is fully settled (post-draw) and the next frame's `Turn++` has not
-  begun — i.e. across MC2's own native limiter spin. The recorder captures
+  begun — i.e. across MC2's own native limiter spin, plus a `--floor` of the
+  stub's own (below) so that window has a guaranteed width even when a heavy
+  frame leaves the native spin with nothing left. The recorder captures
   only while `in_window==1`, so the `Turn++`-park tear is unobservable by
   construction. The mailbox (magic `MGCTTIK2` + a monotonic **per-frame**
   counter + `in_window`) lives in obj3's committed BSS tail (guest
@@ -152,6 +154,9 @@ cleanly. Two arms, auto-selected from the binary:
 
   ```sh
   python3 tools/mc_exe_tickpatch.py NETHERW.EXE     # -> NETHERW_REC.EXE
+  #   --floor N      minimum capture window in 100 Hz counts (default 2;
+  #                  0 = off). See "Missed frames" below — this is the fix
+  #                  for heavy levels, ahead of --pace.
   #   --verify-only NETHERW_REC.EXE   re-disassemble the stub and check
   #   --inert / --no-extend           the same isolation diagnostics
   # then record — the recorder detects MGCTTIK2 and window-gates MC2:
@@ -165,23 +170,45 @@ cleanly. Two arms, auto-selected from the binary:
   `in_window==1` **and** the per-frame counter has advanced past the last
   captured frame, so an already-recorded window is never re-scanned.
 
-  **Missed frames on graphics-heavy levels.** MC2's capture window *is* its
-  native limiter spin, whose real-time width is `budget − compute` where the
-  budget is 5 ticks of the 100 Hz PIT (≈50 ms, real-time-locked, independent
-  of DOSBox `cycles`). A frame whose compute approaches the budget leaves an
-  almost-zero window that no poll rate can catch — the cause of sporadic 1–2
-  frame gaps. Fixes, in order of leverage: (1) **`--pace N`** re-patches the
-  frame-period byte (`add esi,5`→`add esi,N`, N>5) so a wide window exists on
-  *every* frame regardless of load — sim-neutral (one `Turn`+entity pass per
-  frame either way; the recorded frame sequence is byte-identical, just paced
-  slower); try `--pace 12` (~8.3 fps) for heavy levels. (2) Reduce in-game
-  detail (smaller viewport via `[`/`]`, flat shading, lower res) to shrink
-  compute. (3) Raise DOSBox `cycles` if the host has headroom (more cycles →
-  compute finishes sooner → wider window; note this is the *opposite* of the
-  tear-gate path's "lower cycles" advice). `--poll-hz` helps only at the
-  margin — the windowed loop already polls at a 0.1 ms floor by default.
+  **Missed frames on graphics-heavy levels.** MC2's native limiter budget is
+  **absolute** — `turn_sampled_before_the_frame + 5` ticks of the 100 Hz PIT
+  (≈50 ms, real-time-locked, independent of DOSBox `cycles`) — so the window
+  it leaves is `budget − compute`. A frame heavy enough to overrun that budget
+  (deaths, meteor swarms) reaches the spin with the deadline already passed,
+  leaves an almost-zero window that no poll rate can catch, and the recorder
+  drops the frame — the cause of sporadic 1–2 frame gaps and the torn deltas
+  around them. Fixes, in order of leverage:
 
-The MC1 arm installs a ~211-byte
+  1. **`--floor N`** (default 2, `0` disables) — the stub holds `in_window`
+     open for at least N timer counts *after* the frame settles, so the width
+     no longer depends on compute at all. This is the only fix that is
+     load-**independent**: it is measured from where the frame lands, not from
+     an absolute deadline, and it is charged **only** to the frames that
+     already overran. The counter is integral (100 Hz), so `N=1` guarantees
+     nothing and `N=2` is the smallest value that guarantees a full count
+     (≥10 ms, ≤20 ms). Raise to 3–4 only if heavy scenes still drop frames.
+  2. **`--pace N`** re-patches the frame-period byte (`add esi,5`→`add esi,N`,
+     N>5), widening the absolute budget so compute is less likely to exhaust
+     it — sim-neutral (one `Turn`+entity pass per frame either way; the
+     recorded frame sequence is byte-identical, just paced slower), but it
+     taxes *every* frame including the cheap ones and still cannot guarantee a
+     window on a frame heavy enough to blow the wider budget too.
+     **MEASURED 2026-08-19: with `--floor 2` this knob was not needed at all.**
+     mc2l24 — the final level, worst content in the game — recorded gap-free
+     at the *untouched* native period 5, where the pre-floor guidance was
+     `--pace 12` (~8.3 fps). Treat `--pace` as a diagnostic for a level that
+     defeats the floor, not as standard practice: it costs ~2.4x the recording
+     wall-clock and the floor covers the same failure for ~10 ms a spike.
+  3. Reduce in-game detail (smaller viewport via `[`/`]`, flat shading, lower
+     res) to shrink compute.
+  4. Raise DOSBox `cycles` if the host has headroom (more cycles → compute
+     finishes sooner → wider window; note this is the *opposite* of the
+     tear-gate path's "lower cycles" advice).
+
+  `--poll-hz` helps only at the margin — the windowed loop already polls at a
+  0.1 ms floor by default.
+
+The MC1 arm installs a 249-byte
 wrapper stub around the per-sub-step tick function (remc1
 `sub_41780_41AC0`) by redirecting the tick fn's callers (the 3
 gameSpeed-fanout `call`s — rewriting only their 4-byte rel32) so they
@@ -197,7 +224,25 @@ live loop index in `EBX`), so the F3 game-speed feature (1× / 4× / 16×
 sub-steps per frame) still speeds the *sim* up 4×/16× while the frame rate
 holds; at the default speed of one sub-step/frame every sub-step is the
 first, so pacing is bit-identical in effect to the earlier every-sub-step
-pacer. And
+pacer.
+(1b) **Floors the window** (`--floor N`, default 2 counts, `0` disables).
+Pacing to an absolute deadline is only as good as the compute fitting inside
+it: a sub-step heavy enough to overrun its period arrives with the deadline
+already passed, the spin falls straight through, and `in_window` is raised and
+cleared within a handful of instructions — a zero-width window the recorder
+cannot land in, so the frame is dropped and its delta tears. Worse, the
+release path tolerates up to 30 counts of backlog with *no* wait at all, so
+one heavy sub-step is followed by a burst of free-running ones. The floor
+clamps `deadline = max(deadline, now + N)` before the spin, which makes the
+window's width independent of load and deletes the catch-up burst with it
+(the deadline is rebuilt from `now` on every overrun, so backlog cannot
+accumulate). It is a **no-op while the game is keeping up** — steady-state
+waits are identical with and without it — and costs time only on the
+sub-steps that already blew their budget, unlike raising `--period`, which
+taxes every frame. The PIT counter is integral (~120 Hz), so `N=1` guarantees
+nothing (enter a hair before it ticks and the spin releases immediately) and
+`N=2` is the smallest value that guarantees a full count (≥8.3 ms, ≤16.7 ms);
+the tool rejects `1` outright. And
 (2) keeps a mailbox (magic + monotonic sub-step counter + `in_window` flag,
 raised only around a paced spin + the raw F3 `gameSpeed` 0/1/2) in obj3's
 committed tail, addressed via a runtime-derived obj3 base
@@ -234,6 +279,10 @@ wires a bare `call tickfn;ret` (proved execution was the issue);
 python3 tools/mc_exe_tickpatch.py CARPET.EXE          # -> CARPET_REC.EXE
 python3 tools/mc_exe_tickpatch.py HIDDEN.EXE          # -> HIDDEN_REC.EXE
 #   --period 4     ~30 fps ;  --period 6  ~20 fps  (fps = 120/period)
+#   --floor N      minimum capture window in ~120 Hz counts (default 2;
+#                  0 = off). Guarantees a window on sub-steps that overrun
+#                  their period — deaths, meteor swarms — where the pacer
+#                  alone leaves none. Raise to 3–4 if gaps persist.
 #   --verify-only PATCHED.EXE   re-disassemble the hook + stub and check
 
 # record against the patched exe — recorder detects the mailbox itself
@@ -256,7 +305,14 @@ Live-run checklist (what a real recording session should confirm):
    paced. **MC2** keeps its own native rate (no pacing was added).
 4. `done: … window-gated, no tears possible` with 0 gaps across a full
    playthrough, including level-start fades and big explosions (the
-   structural gaps the tear-gate recorder could not close).
+   structural gaps the tear-gate recorder could not close). Deliberately
+   *provoke* the heavy cases — deaths, several meteors at once — since
+   those are exactly the frames that overrun the pacing deadline and are
+   the floor's whole reason to exist. `--verify-only` prints the floor it
+   read back out of the patched image, so confirm it is non-zero before
+   blaming a gap on anything else. If gaps survive at `--floor 2`, step to
+   3 or 4 before reaching for `--period` / `--pace`; if they survive that,
+   the window is not the problem.
 5. Sim parity: a windowed recording of a fixed level should decode the
    same tick sequence as the tear-gated recorder for the ticks both
    captured (the signal/pacing must not perturb sim state).

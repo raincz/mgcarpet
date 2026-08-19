@@ -20,6 +20,20 @@ corpus).** Landed shape:
   covers the emitter incl. the gap self-heal). Validation gates: MC1
   shading ∈ [28,47] (also the level-generated gate), MC2 height ≤200
   soft bound; failed pin = format-1 recording, never garbage.
+  **The planes are not equal witnesses.** MC1 shading admits no
+  tolerance — one cell of 65536 outside [28,47] fails — so it settles
+  alignment AND generator-readiness on its own; the height bound is a
+  soft 99% heuristic that exists for MC2, where nothing else checks
+  alignment. `pin_terrain` therefore validates every plane and *then*
+  decides: once shading has vouched for an MC1 frame, a height reading
+  past the clamp is data, not misalignment, and the channel is kept with
+  a warning. Height stays fatal for MC2. ⚠ The height bound is **not** a
+  ceiling on how high a level may sit: building stamps are added
+  unclamped, and seven low-lying MC1 levels measure exactly 0 cells over
+  200 (max 169–192) while **mc1l32 — a maze in the sky, its base at the
+  volcano-plateau cap with walls built on top — measures 1695 (2.6 %)**.
+  That mis-calibration silently cost mc1l32 four takes, each degraded to
+  format 1 and unrepairable after the fact (terrain re-anchors pristine).
 - Format: format 2 (strict superset; v1 takes parse untouched),
   `channels.terrain` declaration, per-record `base_b64`/`delta_b64`,
   `mgc_formats::mgcr::{TerrainDecl, TerrainBlock, TerrainImage,

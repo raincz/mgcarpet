@@ -26,6 +26,14 @@ original tick fn and ``ret``s to the caller. It:
      stays put; at the default speed (1 sub-step/frame) every sub-step is the
      first, so pacing is bit-identical in effect to the old every-sub-step
      pacer.
+  1b. holds that quiescent window open for a FLOOR of timer counts (``--floor``,
+     default 2) even when the frame overran its deadline. Pacing to an absolute
+     deadline is only as good as the compute fitting inside it: a heavy frame
+     arrives with the deadline already passed, the spin falls through, and the
+     window collapses to nothing -- a dropped frame and a torn delta. The floor
+     is measured from where the frame settles, so its width does not depend on
+     load, and it is charged only to the frames that already overran (raising
+     ``--period`` instead would tax every frame). It applies to the MC2 arm too.
   2. maintains a mailbox in obj3's committed tail: a magic, a monotonic
      sub-step counter, an ``in_window`` flag raised only around a paced spin
      (never on a free-running sub-step, so the recorder never parks in a
@@ -108,6 +116,36 @@ MAGIC1 = 0x314B4954  # "TIK1"
 
 GUARD_ITERS = 0x04000000  # spin bail-out (~1 s emulated); never hit if ISR live
 RESYNC_COUNTS = 30  # >250 ms behind schedule -> resync instead of catch-up burst
+
+# --------------------------------------------------------------------------
+# The capture-window FLOOR (both arms).
+#
+# Both arms pace to an ABSOLUTE deadline -- MC1's `deadline += period`, MC2's
+# `esi = timer_before_frame + 5`. That is fine while compute fits the budget
+# and useless when it does not: a frame heavy enough to overrun its period
+# (deaths, meteor swarms) arrives with the deadline already passed, the spin
+# falls straight through, and `in_window` is raised and cleared within a
+# handful of instructions -- a zero-width window the recorder cannot land in,
+# so the take loses that frame and the delta tears. MC1 makes it worse by
+# design: up to RESYNC_COUNTS of backlog is burned off with NO wait at all, so
+# one heavy frame is followed by a burst of free-running ones.
+#
+# The floor is a RELATIVE wait, measured from the moment the frame settles, so
+# its width does not depend on load: whatever the deadline says, the stub holds
+# the quiescent window open for at least `floor` counts. It costs time only on
+# the frames that already blew their budget -- unlike raising --period/--pace,
+# which taxes every frame including the cheap ones.
+#
+# GRANULARITY LAW. The only clock either stub can read is an INTEGER tick
+# counter (MC1 ~120 Hz = 8.33 ms/count, MC2 100 Hz = 10 ms/count), so
+# `target = now + 1` guarantees nothing: enter a hair before the counter ticks
+# and it releases immediately. FLOOR_MIN_GUARANTEED = 2 is the smallest value
+# that guarantees a FULL count of real wait (and costs at most two). Sub-count
+# precision would mean latching the PIT on port 0x40 -- far more code, and
+# 8-10 ms is already an order of magnitude past what the recorder needs (three
+# stable 224 KB reads).
+FLOOR_DEFAULT = 2
+FLOOR_MAX = 60  # ~0.5 s; kept well inside GUARD_ITERS so the guard never wins
 
 # --------------------------------------------------------------------------
 # MC2 / NETHERW.EXE arm. MC2 already frame-limits itself (InGameLoop_47320's
@@ -363,6 +401,9 @@ class Asm:
     def sub_eax_imm(self, imm):  # sub eax, imm32
         self.raw(b"\x2d" + struct.pack("<I", imm & 0xFFFFFFFF))
 
+    def add_eax_imm(self, imm):  # add eax, imm32
+        self.raw(b"\x05" + struct.pack("<I", imm & 0xFFFFFFFF))
+
     def mov_edx_eax(self):  # mov edx, eax
         self.raw(b"\x89\xc2")
 
@@ -393,11 +434,20 @@ class Asm:
     def sub_eax_m(self, a):  # sub eax,[edx+a]
         self.raw(b"\x2b\x82" + struct.pack("<I", a))
 
+    def cmp_eax_m(self, a):  # cmp eax,[edx+a]
+        self.raw(b"\x3b\x82" + struct.pack("<I", a))
+
     def cmp_eax_imm(self, imm):
         self.raw(b"\x3d" + struct.pack("<I", imm & 0xFFFFFFFF))
 
     def mov_ecx_imm(self, imm):
         self.raw(b"\xb9" + struct.pack("<I", imm & 0xFFFFFFFF))
+
+    def push_ecx(self):
+        self.raw(b"\x51")
+
+    def pop_ecx(self):
+        self.raw(b"\x59")
 
     def dec_ecx(self):
         self.raw(b"\x49")
@@ -444,7 +494,7 @@ def build_passthrough(b: Build) -> bytes:
     return b"\xe8" + struct.pack("<i", rel) + b"\xc3"
 
 
-def build_stub(b: Build, period: int) -> bytes:
+def build_stub(b: Build, period: int, floor: int = FLOOR_DEFAULT) -> bytes:
     a = Asm(b.cave_va)
     wc_off = b.structptr_off - WALLCLOCK_FROM_STRUCTPTR  # wallclock obj3-offset
     gs_ptr_off = b.structptr_off + GAMESPEED_PTR_FROM_STRUCTPTR  # obj3ptr global
@@ -501,6 +551,26 @@ def build_stub(b: Build, period: int) -> bytes:
     a.label("pace")
     a.mov_m_imm(MB_INWIN, 1)  # window raised ONLY around a real spin
 
+    # --- floor: deadline = max(deadline, now + floor) -------------------------
+    # The clamp, not the spin, is where the floor lives: push the deadline far
+    # enough ahead of NOW that the spin below cannot fall straight through, then
+    # let the existing wait/guard/resync machinery do the waiting unchanged.
+    #   * keeping up (deadline - now > floor)  -> no-op, healthy takes unaffected
+    #   * overrunning (now >= deadline)        -> wait exactly `floor`, every
+    #     frame, and the catch-up burst is gone with it (the deadline is rebuilt
+    #     from NOW each overrun, so backlog cannot accumulate).
+    # Signed throughout: `now` and `deadline` are both PIT counts and the
+    # difference is small in either direction, so `jle` reads correctly whether
+    # the deadline is ahead of or behind the clock.
+    if floor:
+        a.mov_eax_m(wc_off)  # eax = now
+        a.add_eax_imm(floor)  # eax = now + floor
+        a.sub_eax_m(MB_DEADLINE)  # eax = (now + floor) - deadline
+        a.br8(0x7E, "no_floor")  # jle no_floor  (deadline already far enough out)
+        a.add_eax_m(MB_DEADLINE)  # eax = now + floor
+        a.mov_m_eax(MB_DEADLINE)
+        a.label("no_floor")
+
     # --- spin until now >= deadline (or bail on a frozen counter) ---
     # diff = now - deadline as a SIGNED i32: negative => still waiting,
     # non-negative => the deadline passed. Signed handles both the normal
@@ -518,7 +588,11 @@ def build_stub(b: Build, period: int) -> bytes:
     # period + the catch-up slack AHEAD of the clock cannot be schedule, only a
     # backwards clock step, so drop it and resync. Checked inside the loop so
     # it self-heals whenever the step lands, not just at stub entry.
-    back_limit = period + RESYNC_COUNTS
+    # `floor` too, not just `period`: the clamp above can legitimately leave the
+    # deadline `floor` counts ahead of the clock, and a floor larger than
+    # `period` would otherwise read as a backwards clock step and resync away
+    # the very wait we just installed.
+    back_limit = max(period, floor) + RESYNC_COUNTS
     a.mov_ecx_imm(GUARD_ITERS)
     a.label("spin")
     a.mov_eax_m(wc_off)  # eax = now
@@ -561,9 +635,9 @@ def build_stub(b: Build, period: int) -> bytes:
 # Patch / verify
 # --------------------------------------------------------------------------
 def patch(le: LE, b: Build, period: int, wire: bool = True, passthrough: bool = False,
-          extend: bool = True) -> bytes:
+          extend: bool = True, floor: int = FLOOR_DEFAULT) -> bytes:
     o1 = le.objs[0]
-    stub = build_passthrough(b) if passthrough else build_stub(b, period)
+    stub = build_passthrough(b) if passthrough else build_stub(b, period, floor)
     cave_off = va_to_file(le, b.cave_va)
     if cave_off + len(stub) > obj_file_off(le, o1) + o1.npages * 0x1000:
         raise ValueError("stub overflows the cave")
@@ -648,15 +722,29 @@ def verify(path: str, period: int, inert: bool = False, passthrough: bool = Fals
     stub_len = end_j + 6
     aligned = "page-aligned" if o1.vsize % 0x1000 == 0 else f"NOT page-aligned ({o1.vsize:#x})"
 
+    # Read the floor back OUT of the patched image rather than trusting the
+    # argument: `add eax,imm32 ; sub eax,[edx+MB_DEADLINE]` is the clamp's
+    # signature and occurs nowhere else (the spin's own `sub eax,[deadline]` is
+    # preceded by a disp32 tail byte, never by an `05` opcode).
+    fm = _re.search(
+        rb"\x05(....)\x2b\x82" + _re.escape(struct.pack("<I", MB_DEADLINE)),
+        code[rel : rel + stub_len],
+        _re.S,
+    )
+    floor_val = struct.unpack("<I", fm.group(1))[0] if fm else 0
+    fl = (f"floor {floor_val} counts (>={(floor_val - 1) * 1000 / 120:.1f} ms window)"
+          if floor_val else "floor OFF")
+
     if inert:
         print(f"VERIFY {path}: OK (INERT)")
         print(f"  stub present @ {cave_va:#x} ({stub_len} bytes) but NO call site "
-              f"targets it -- never executed; obj1.vsize {aligned}")
+              f"targets it -- never executed; obj1.vsize {aligned}; {fl}")
         return
 
     print(f"VERIFY {path}: OK")
     print(f"  {redirected} call site(s) -> stub @ {cave_va:#x}; stub -> original "
-          f"tick fn @ {hook_va:#x}; {stub_len} bytes; obj1.vsize {aligned}; entry untouched")
+          f"tick fn @ {hook_va:#x}; {stub_len} bytes; obj1.vsize {aligned}; "
+          f"entry untouched; {fl}")
     if shutil.which("ndisasm"):
         import subprocess
         import tempfile
@@ -754,18 +842,25 @@ def find_build_mc2(le: LE) -> BuildMC2:
                     obj3ref_off, period_va, period_now)
 
 
-def build_stub_mc2(b: BuildMC2) -> bytes:
+def build_stub_mc2(b: BuildMC2, floor: int = FLOOR_DEFAULT) -> bytes:
     """Signal-only wrapper. On each frame:
       1. derive obj3's real runtime base (read the game's own fixed-up
          GameTimerTurn disp, minus its obj3 offset -- delta-safe like MC1);
       2. clear in_window (the frame driver is about to mutate the world);
       3. call the ORIGINAL frame driver (Turn++, entity pass, draw);
-      4. bump a monotonic per-frame counter and raise in_window.
+      4. bump a monotonic per-frame counter and raise in_window;
+      5. hold that window open for at least `floor` timer counts.
     in_window is therefore up from just after the draw, across MC2's native
     limiter spin, until the next frame's mutation -- a settled window keyed by
-    the counter. Touches only eax/edx (caller-clobber; esi=turn and ebx=loop
-    counter, which InGameLoop reads after the call, are preserved); the frame
-    driver saves/restores its own callee-saved regs."""
+    the counter. Step 5 is what makes the width load-independent: the native
+    limiter's budget is absolute (`turn_before_frame + N`), so a frame whose
+    compute eats it leaves no spin at all, and the floor is then the entire
+    window. It sits in the TAIL, after the counter bump, so a window the
+    recorder sees announced as fresh is the same one being held open.
+    Touches only eax/edx (caller-clobber; esi=turn and ebx=loop counter, which
+    InGameLoop reads after the call, are preserved) plus ecx, which the floor
+    spin's guard borrows under a push/pop so it survives too; the frame driver
+    saves/restores its own callee-saved regs."""
     a = Asm(b.cave_va)
     # --- derive obj3 base into edx ---
     a.call_next()  # push EIP of pop
@@ -799,16 +894,34 @@ def build_stub_mc2(b: BuildMC2) -> bytes:
     mid = b"\x52" + b"\xe8" + struct.pack("<i", rel) + b"\x5a"  # push edx;call;pop edx
 
     # --- open the window: frame settled; native limiter spin follows ---
-    tail = (
-        b"\xff\x82" + struct.pack("<I", MB2_TICK)  # inc dword [edx+MB2_TICK]
-        + b"\xc7\x82" + struct.pack("<I", MB2_INWIN) + struct.pack("<I", 1)  # mov [inwin],1
-        + b"\xc3"  # ret
-    )
-    return head + mid + tail
+    t = Asm(b.cave_va + len(head) + len(mid))
+    t.inc_m(MB2_TICK)
+    t.mov_m_imm(MB2_INWIN, 1)
+
+    # --- floor: hold the window open at least `floor` timer counts -----------
+    # Same counter the native limiter spins on, so this composes with it rather
+    # than replacing it: the total window is floor + max(0, native spin). ECX is
+    # borrowed for the frozen-timer guard and restored, because InGameLoop's
+    # live registers across the call are not fully known -- the stub's standing
+    # rule is to hand back everything but eax/edx.
+    if floor:
+        t.mov_eax_m(b.obj3ref_off)  # eax = GameTimerTurn (now)
+        t.add_eax_imm(floor)  # eax = release target
+        t.push_ecx()
+        t.mov_ecx_imm(GUARD_ITERS)
+        t.label("fspin")
+        t.cmp_eax_m(b.obj3ref_off)  # target vs now
+        t.br8(0x7E, "fdone")  # jle fdone  (target reached -> release)
+        t.dec_ecx()
+        t.br8(0x75, "fspin")  # jnz fspin  (keep waiting)
+        t.label("fdone")  # guard expired (ISR masked) falls through here too
+        t.pop_ecx()
+    t.raw(b"\xc3")  # ret
+    return head + mid + t.assemble()
 
 
 def patch_mc2(le: LE, b: BuildMC2, wire: bool = True, extend: bool = True,
-              pace: Optional[int] = None) -> bytes:
+              pace: Optional[int] = None, floor: int = FLOOR_DEFAULT) -> bytes:
     o1 = le.objs[0]
 
     # Optional: widen the native frame period so a heavy frame's compute can't
@@ -826,7 +939,7 @@ def patch_mc2(le: LE, b: BuildMC2, wire: bool = True, extend: bool = True,
             raise ValueError(f"period byte @ {b.period_va:#x} is not an `add esi,imm8`")
         le.data[poff] = pace
 
-    stub = build_stub_mc2(b)
+    stub = build_stub_mc2(b, floor)
     cave_off = va_to_file(le, b.cave_va)
     if cave_off + len(stub) > obj_file_off(le, o1) + o1.npages * 0x1000:
         raise ValueError("stub overflows the cave")
@@ -886,7 +999,27 @@ def verify_mc2(path: str, inert: bool = False) -> None:
     if j is None:
         raise SystemExit("VERIFY FAIL: no `push edx ; call frame_fn ; pop edx`")
     frame_fn = cave_va + j + 6 + struct.unpack_from("<i", code, rel + j + 2)[0]
-    stub_len = j + 7 + 6 + 10 + 1  # push+call+pop(7), inc(6), mov dword(10), ret(1)
+
+    # Tail after `pop edx`: inc(6) + mov dword(10), then either `ret` outright
+    # (floor OFF) or the 30-byte floor block ending in `ret`. Decode it rather
+    # than assuming a length -- and fail loudly on a shape we did not emit, so
+    # the reported stub_len can never silently under-run the real stub.
+    p = rel + j + 7 + 6 + 10
+    floor_val = 0
+    if code[p] != 0xC3:
+        fm = _re.match(
+            rb"\x8b\x82(....)\x05(....)\x51\xb9....\x3b\x82(....)\x7e.\x49\x75.\x59\xc3",
+            code[p:], _re.S,
+        )
+        if fm is None:
+            raise SystemExit("VERIFY FAIL: unrecognised MC2 stub tail (floor block)")
+        if fm.group(1) != fm.group(3):
+            raise SystemExit("VERIFY FAIL: floor spin samples two different timers")
+        floor_val = struct.unpack("<I", fm.group(2))[0]
+        p += fm.end() - 1  # land on the `ret`
+    stub_len = p + 1 - rel
+    fl = (f"floor {floor_val} counts (>={(floor_val - 1) * 10:.0f} ms window)"
+          if floor_val else "floor OFF")
     aligned = "page-aligned" if o1.vsize % 0x1000 == 0 else f"NOT page-aligned ({o1.vsize:#x})"
 
     redirected = 0
@@ -903,7 +1036,8 @@ def verify_mc2(path: str, inert: bool = False) -> None:
 
     if inert:
         print(f"VERIFY {path}: OK (INERT)")
-        print(f"  MC2 stub @ {cave_va:#x} but NO call site targets it; obj1.vsize {aligned}")
+        print(f"  MC2 stub @ {cave_va:#x} ({stub_len} bytes) but NO call site targets "
+              f"it; obj1.vsize {aligned}; {fl}")
         return
     # The native frame period is the `add esi,N` imm8 right after the call.
     period = code[call_site + 7] if code[call_site + 5 : call_site + 7] == b"\x83\xc6" else None
@@ -911,7 +1045,8 @@ def verify_mc2(path: str, inert: bool = False) -> None:
            if period else "")
     print(f"VERIFY {path}: OK")
     print(f"  1 call site -> stub @ {cave_va:#x}; stub -> frame driver @ {frame_fn:#x}; "
-          f"mailbox guest {MB2_GUEST:#x} (MGCTTIK2); obj1.vsize {aligned}; entry untouched{per}")
+          f"{stub_len} bytes; mailbox guest {MB2_GUEST:#x} (MGCTTIK2); obj1.vsize "
+          f"{aligned}; entry untouched; {fl}{per}")
     if shutil.which("ndisasm"):
         import subprocess
         import tempfile
@@ -960,6 +1095,22 @@ def main(argv=None):
              "sporadic missed frames). Sim-neutral: the recorded frame sequence "
              "is byte-identical, just paced slower. Try 10-15 for heavy levels.",
     )
+    ap.add_argument(
+        "--floor",
+        type=int,
+        default=FLOOR_DEFAULT,
+        metavar="N",
+        help=f"BOTH arms: minimum capture window, in timer counts, held open on "
+             f"every paced frame even when the frame overran its budget (default "
+             f"{FLOOR_DEFAULT}; 0 disables). Both stubs pace to an ABSOLUTE "
+             f"deadline, so a frame heavy enough to overrun it (deaths, meteor "
+             f"swarms) leaves a zero-width window and the recorder drops the "
+             f"frame -- the floor makes the width load-independent. The counter "
+             f"is integral (MC1 ~120 Hz, MC2 100 Hz), so N=1 guarantees nothing "
+             f"and N=2 is the smallest value that guarantees a full count "
+             f"(8.3 / 10 ms). Costs time ONLY on frames that already blew their "
+             f"budget, unlike --period / --pace. Max {FLOOR_MAX}.",
+    )
     ap.add_argument("--verify-only", metavar="PATCHED", help="just re-verify an already-patched exe")
     ap.add_argument(
         "--inert",
@@ -983,6 +1134,16 @@ def main(argv=None):
              "reproduces the crash -- use it to A/B against the default fix.",
     )
     args = ap.parse_args(argv)
+
+    if not (0 <= args.floor <= FLOOR_MAX):
+        raise SystemExit(f"--floor must be in 0..{FLOOR_MAX} (0 = off)")
+    if args.floor == 1:
+        raise SystemExit(
+            "--floor 1 guarantees no wait at all: the timer is an integer "
+            "counter, so entering a hair before it ticks releases immediately. "
+            "Use 2 (the smallest value that guarantees a full count) or 0 to "
+            "disable the floor."
+        )
 
     if args.verify_only:
         vdata = open(args.verify_only, "rb").read()
@@ -1014,15 +1175,17 @@ def main(argv=None):
         pace_note = (f"  [--pace {args.pace}: period {b2.period_now}->{args.pace}, "
                      f"~{100 / max(args.pace, 1):.1f} fps]" if args.pace is not None else "")
         print(f"build={b2.name}  hook(call)={b2.call_site:#x}  frame_fn={b2.frame_fn:#x}  "
-              f"cave={b2.cave_va:#x}  mailbox={MB2_GUEST:#x}{mode}{pace_note}")
+              f"cave={b2.cave_va:#x}  mailbox={MB2_GUEST:#x}  "
+              f"timer=obj3+{b2.obj3ref_off:#x}{mode}{pace_note}")
         stub = patch_mc2(le, b2, wire=not args.inert, extend=not args.no_extend,
-                         pace=args.pace)
+                         pace=args.pace, floor=args.floor)
         out = _out_path()
         with open(out, "wb") as f:
             f.write(le.data)
         tag = ", INERT" if args.inert else ""
         pace_tag = f", pace={args.pace}" if args.pace is not None else ", signal-only"
-        print(f"wrote {out}  (stub {len(stub)} B{pace_tag}{tag})")
+        floor_tag = f", floor={args.floor}" if args.floor else ", floor=OFF"
+        print(f"wrote {out}  (stub {len(stub)} B{pace_tag}{floor_tag}{tag})")
         verify_mc2(out, inert=args.inert)
         return 0
 
@@ -1034,13 +1197,14 @@ def main(argv=None):
     print(f"build={b_.name}  hook={b_.hook_va:#x}  cave={b_.cave_va:#x}  "
           f"wallclock={b_.wallclock:#x}{mode}")
     stub = patch(le, b_, args.period, wire=not args.inert, passthrough=args.passthrough,
-                 extend=not args.no_extend)
+                 extend=not args.no_extend, floor=args.floor)
 
     out = _out_path()
     with open(out, "wb") as f:
         f.write(le.data)
     tag = ", INERT" if args.inert else ", PASSTHROUGH" if args.passthrough else ""
-    print(f"wrote {out}  (stub {len(stub)} B, period={args.period}{tag})")
+    floor_tag = f", floor={args.floor}" if args.floor else ", floor=OFF"
+    print(f"wrote {out}  (stub {len(stub)} B, period={args.period}{floor_tag}{tag})")
     verify(out, args.period, inert=args.inert, passthrough=args.passthrough)
     return 0
 

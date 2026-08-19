@@ -1575,12 +1575,16 @@ def pin_terrain(mem: GuestMem, loc: Located, layout: Layout) -> None:
     both alignment and readiness; MC2 height is generator-clamped ≤196
     (terraform can push a handful of cells past — soft 99% bound)."""
     if not layout.terrain_planes:
+        print("terrain: this layout declares no terrain planes — recording "
+              "without the terrain channel", file=sys.stderr)
         return
     if loc.static_base is None or loc.build is None:
         print("terrain: no static frame — recording without the terrain "
               "channel", file=sys.stderr)
         return
     if loc.build.terrain_guest == 0:
+        print(f"terrain: build {loc.build.name} has no terrain base address "
+              "— recording without the terrain channel", file=sys.stderr)
         return
     n = _terrain_cells(layout)
     base = loc.static_base + loc.build.terrain_guest
@@ -1591,7 +1595,7 @@ def pin_terrain(mem: GuestMem, loc: Located, layout: Layout) -> None:
             planes.append(layout.terrain_cave_plane)
             print("terrain: cave level — capturing the ceiling plane too",
                   file=sys.stderr)
-    hosts = []
+    hosts, why = [], {}
     for name, off in planes:
         host = base + off
         a = mem.pread(host, n)
@@ -1601,12 +1605,39 @@ def pin_terrain(mem: GuestMem, loc: Located, layout: Layout) -> None:
                   f"0x{host:x} — recording without the terrain channel",
                   file=sys.stderr)
             return
-        why = _implausible_plane(layout, name, a)
-        if why is not None:
-            print(f"terrain: plane '{name}' failed validation ({why}) — "
-                  "recording without the terrain channel", file=sys.stderr)
-            return
+        why[name] = _implausible_plane(layout, name, a)
         hosts.append((name, host))
+
+    # Weigh the failures rather than rejecting on the first one, because the
+    # planes are not equally good witnesses. For MC1 the SHADING plane answers
+    # both questions the validators exist to ask — is the frame aligned, and
+    # has the generator finished — and answers them with no tolerance at all:
+    # one cell of 65536 outside [28,47] fails it, so a misaligned frame cannot
+    # survive it. Once shading has vouched, a height reading past the
+    # generator's clamp is DATA, not misalignment: building stamps are added
+    # unclamped, so a level authored high carries thousands of such cells
+    # legitimately (mc1l32 is a maze in the sky — 1695 cells, 2.6%, against a
+    # 1% bound calibrated on low-lying levels that measure exactly 0). Warn
+    # there instead of dropping the channel; the old behaviour cost mc1l32
+    # four takes, each silently degraded to format 1 and unrepairable after
+    # the fact. MC2's shading has no validator, so height stays its primary
+    # alignment check and stays fatal.
+    shading_is_oracle = layout.family == "mc1"  # mirrors _implausible_plane
+    vouched = (shading_is_oracle and "shading" in why
+               and why["shading"] is None)
+    fatal = [(nm, w) for nm, w in why.items()
+             if w is not None and not (vouched and nm == "height")]
+    if not fatal:
+        for nm, w in why.items():
+            if w is not None:
+                print(f"terrain: plane '{nm}' is outside the generator's "
+                      f"clamp ({w}), but shading vouches for the frame — "
+                      f"keeping the terrain channel", file=sys.stderr)
+    if fatal:
+        nm, w = fatal[0]
+        print(f"terrain: plane '{nm}' failed validation ({w}) — "
+              "recording without the terrain channel", file=sys.stderr)
+        return
     loc.terrain_hosts = tuple(hosts)
     names = ", ".join(nm for nm, _ in hosts)
     print(f"terrain planes pinned ({names}), {n} cells each — "
@@ -1628,8 +1659,14 @@ def _implausible_plane(layout: Layout, name: str, data: bytes
         return None
     if name == "height":
         # Generation clamps ≤196 (MC1 :40296-305, MC2 Terrain.cpp:103);
-        # terraform can push a handful of cells past (building stamps
-        # add unclamped), so require 99% within bounds, not all.
+        # building stamps are added UNCLAMPED, so require 99% within
+        # bounds, not all. The 1% is a floor under MC2, where nothing
+        # else checks alignment — it is NOT a bound on how high a level
+        # may legitimately sit. Measured on MC1: seven low-lying levels
+        # give exactly 0 cells over 200 (max height 169-192), while
+        # mc1l32, a maze in the sky, gives 1695 (2.6%). pin_terrain
+        # therefore treats this as fatal only when shading has not
+        # already vouched for the frame.
         over = sum(1 for v in data if v > 200)
         if over > len(data) // 100:
             return f"{over} height cells > 200"
