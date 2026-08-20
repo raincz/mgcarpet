@@ -892,6 +892,30 @@ impl World {
             ..Player::default()
         };
 
+        // The speed-token boost direction: retail keeps the live burst
+        // in the token's +48 and the Type_160 speed override; the
+        // port's shadow is `player.accel`. Unseeded, a pair inside a
+        // burst flew unboosted (the accel-domain pose gate papers over
+        // the pose half) AND the v_14 resist arm read no-boost — so
+        // the down-cursor cancel never fired and the token ran laps
+        // retail had killed (mc1l32 t=9218/11984/…: +48 snapped 7→0
+        // against the port's decrement, one +100 regen and a contrail
+        // puff along with it).
+        self.player.accel = st
+            .ents
+            .iter()
+            .find_map(|e| {
+                (e.class64 == 12 && e.f144 == 0 && e.f48 != 0 && matches!(e.model65, 2 | 21))
+                    .then_some(if e.model65 == 2 { 1 } else { -1 })
+            })
+            .unwrap_or(0);
+        // The v_14 kill latch rides the captured Type_160 directly:
+        // sampled post-tick at N, it is exactly what a below-carpet
+        // speed token reads during pair N→N+1 (the pair never runs
+        // the carpet dispatch that would recompute it). Unseeded, the
+        // resisting-press cancel never fired in pair mode.
+        self.mc1_v14 = wiz.v14 != 0;
+
         // Per-wizard cast-charge meters (Type_160 u8_326) — seeded
         // like the regen stall: unseeded, every bolt spawned inside a
         // pair would bank a made-up charge in its +26.

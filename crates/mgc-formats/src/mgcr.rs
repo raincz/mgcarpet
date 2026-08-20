@@ -992,6 +992,12 @@ pub struct RetailWizardMc1 {
     pub roll_delta: i16, // +4
     pub pitch_delta: i16, // +6
     pub cmd_speed: i16,   // +12
+    /// The v_14 latch (+14): armed when a speed press MOVED v_12 this
+    /// dispatch (:55780) — during a boost the resisting press always
+    /// arms it (v_12 sits outside the ±80 band) and the speed token's
+    /// next pass kills the burst (:65146-50). Sampled post-tick, it is
+    /// exactly what a below-carpet token reads on the pair's tick.
+    pub v14: i16, // +14
     pub strafe: i16,      // +16
     /// Knock/buffet channel: magnitude v_22 / direction v_24.
     pub knock_mag: i16, // +22
@@ -1204,6 +1210,7 @@ fn decode_retail_wizard_mc1(d: &[u8], i: u16) -> RetailWizardMc1 {
         roll_delta: i16_(d, t + 4),
         pitch_delta: i16_(d, t + 6),
         cmd_speed: i16_(d, t + 12),
+        v14: i16_(d, t + 14),
         strafe: i16_(d, t + 16),
         knock_mag: i16_(d, t + 22),
         knock_dir: u16_(d, t + 24),

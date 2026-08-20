@@ -127,17 +127,16 @@ impl Gen {
     /// ⚠ It is NOT inert under [`Gen::mail_write_single`], MC1's
     /// point-damage writer, whose branches are the exact INVERSE.
     pub(crate) fn mail_write(&mut self, tgt: MailTarget, ch: usize, amt: u32, src: u16) {
-        if ch == 0 && matches!(tgt, MailTarget::Pool(486) | MailTarget::Player) {
-            if let Ok(v) = std::env::var("MGC_MAIL_TRACE") {
-                if !v.is_empty() {
-                    let who = if matches!(tgt, MailTarget::Player) {
-                        "player"
-                    } else {
-                        "castle"
-                    };
-                    eprintln!("[mail] AREA->{who} amt={amt} src={src}");
-                }
-            }
+        if ch == 0
+            && matches!(tgt, MailTarget::Pool(486) | MailTarget::Player)
+            && let Some(t) = crate::mail_trace()
+        {
+            let who = if matches!(tgt, MailTarget::Player) {
+                "player"
+            } else {
+                "castle"
+            };
+            eprintln!("[mail] t={t} AREA->{who} amt={amt} src={src}");
         }
         let m = match tgt {
             MailTarget::Pool(i) => &mut self.ent[i].mail[ch],
@@ -170,17 +169,16 @@ impl Gen {
     /// pending across four writes and the amounts record
     /// 1200/800/1200/400 with no compounding at all.
     pub(crate) fn mail_write_single(&mut self, tgt: MailTarget, ch: usize, amt: u32, src: u16) {
-        if ch == 0 && matches!(tgt, MailTarget::Pool(486) | MailTarget::Player) {
-            if let Ok(v) = std::env::var("MGC_MAIL_TRACE") {
-                if !v.is_empty() {
-                    let who = if matches!(tgt, MailTarget::Player) {
-                        "player"
-                    } else {
-                        "castle"
-                    };
-                    eprintln!("[mail] SINGLE->{who} amt={amt} src={src}");
-                }
-            }
+        if ch == 0
+            && matches!(tgt, MailTarget::Pool(486) | MailTarget::Player)
+            && let Some(t) = crate::mail_trace()
+        {
+            let who = if matches!(tgt, MailTarget::Player) {
+                "player"
+            } else {
+                "castle"
+            };
+            eprintln!("[mail] t={t} SINGLE->{who} amt={amt} src={src}");
         }
         let m = match tgt {
             MailTarget::Pool(i) => &mut self.ent[i].mail[ch],
@@ -400,17 +398,23 @@ impl Gen {
         // / `my_sign32` fixups wrapped around them are DEAD, the
         // extent field is uint16 so the sum never goes negative.
         //
-        // ⚠ The `.max(1)` is OURS and it is NOT retail: a zero-extent
-        // writer runs `for i = -0; i <= 0` there and scans its OWN
-        // TILE ALONE, where we hand it a 3x3. HELD BACK deliberately
-        // 2026-08-12, with the projectile-probe geometry it belongs
-        // to — see docs/CONFORMANCE-FINDINGS.md §THE HELD-BACK AREA
-        // FIXES. Measured: removing it buys NOTHING on the corpus
-        // (mc1l0 whole take identical to the tick) and it breaks the
-        // MC2 arrow's direct hit, because the port's compensating
-        // window inflation and its anti-tunnel chord march are one
-        // family and have to come out together.
-        let r = ((self.ent[i].f80 as i32 + 255) >> 8).max(1);
+        // ⚠ The `.max(1)` floor is OURS and it is NOT retail: a
+        // zero-extent writer runs `for i = -0; i <= 0` there and
+        // scans its OWN TILE ALONE, where the floor hands it a 3x3.
+        // Held back whole 2026-08-12 (§THE HELD-BACK AREA FIXES)
+        // because removing it bought nothing on mc1l0 — mc1l32 paid
+        // the MC1 receipt: a (10,17) blast ring's FIRST dispatched
+        // tick runs with entry f26 = 0, extents 0, so retail's window
+        // is the single ch0 back-biased tile — which does not even
+        // cover the ring's own position tile — and the victim standing
+        // ON the impact point is missed for exactly that one tick
+        // (t=29834 pair: field 260's 1000 reaches crab 324 a tick
+        // early in the port, retail 883 vs port 1883). MC2 keeps the
+        // floor: its arrow's direct hit rides this window because the
+        // port's anti-tunnel chord march never engages on that path —
+        // the two are one compensating family (same section).
+        let r = (self.ent[i].f80 as i32 + 255) >> 8;
+        let r = if mc2 { r.max(1) } else { r };
         // Pass 2 OWNS the buildings, so the tile scan must not also
         // find them: `&& (class != 10 || model != 45)` sits at
         // EF:4135 right beside the castle exclusion, and for the same
@@ -508,10 +512,12 @@ impl Gen {
             && Self::filter_admits(f66, f67, 3, 0)
             && self.player_overlap(i, ctx)
         {
-            if ch == 0 && std::env::var_os("MGC_MAIL_TRACE").is_some() {
+            if ch == 0
+                && let Some(t) = crate::mail_trace()
+            {
                 let e = &self.ent[i];
                 eprintln!(
-                    "[mail]   ^player-post from slot {i} ({},{}) at ({},{},{}) f80={} f84={} f78={} ctx=({},{},{})",
+                    "[mail] t={t} ^player-post from slot {i} ({},{}) at ({},{},{}) f80={} f84={} f78={} ctx=({},{},{})",
                     e.class64,
                     e.model65,
                     e.x,
@@ -1202,6 +1208,14 @@ impl Gen {
     #[cfg(test)]
     pub(crate) fn home_for_test(&mut self, i: usize, ctx: &MobCtx) -> bool {
         self.home(i, ctx)
+    }
+
+    /// Test seam for [`Self::proj_move_and_hit`]'s generic arm (the
+    /// strike's move-then-probe-then-snap chain choreography is
+    /// otherwise only reachable through a full flight tick).
+    #[cfg(test)]
+    pub(crate) fn proj_strike_for_test(&mut self, i: usize, ctx: &MobCtx) -> bool {
+        self.proj_move_and_hit(i, ctx, false, false, DeflectLaw::Generic)
     }
 
     fn home(&mut self, i: usize, ctx: &MobCtx) -> bool {
@@ -2680,7 +2694,17 @@ impl Gen {
             // snaps and stops there, and easing starts the tick after.
             self.home(i, ctx);
         }
-        if fire_trail {
+        let r = self.proj_move_and_hit(i, ctx, true, true, DeflectLaw::Generic);
+        // :63027-38 — the m3 trail wrapper (sub_53070) mints the
+        // seeder AFTER the core returns: at the POST-step position,
+        // and on the detonation tick too (`+64` still reads 10
+        // through the soft kill — only a hard free skips it, the +64
+        // gate). The port minted it pre-move, so every trail puff was
+        // born one flight step behind (mc1l32's (10,1) x/y/z family,
+        // ~1,450 pairs) and the dying tick's payload/puff free-stack
+        // pops landed in swapped slots (t=24700: retail field@53
+        // puff@20, port inverted).
+        if fire_trail && self.ent[i].class64 != 0 {
             let (x, y, z, owner) = {
                 let e = &self.ent[i];
                 (e.x, e.y, e.z, e.id24)
@@ -2692,7 +2716,7 @@ impl Gen {
                 self.ent[s].id24 = owner;
             }
         }
-        self.proj_move_and_hit(i, ctx, true, true, DeflectLaw::Generic)
+        r
     }
 
     /// sub_530C0 (:63048): m11's bolt — explodes ONLY on wizard-family
@@ -2747,14 +2771,19 @@ impl Gen {
         } else {
             2 * (e.f128 - e.f126).signum()
         };
-        // Move.
+        // Move — and RELINK, before the probe (:63103-05: `sub_41C70`
+        // to the stepped point, then `sub_11980` at the moved self).
+        // The step out of and back into a tile re-heads the record in
+        // its chain; endpoint-only probing dropped those chain ops
+        // (the t=7785 lineage — see `proj_move_and_hit`).
         let mut tmp = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
         let (yaw, pitch, speed) = {
             let e = &self.ent[i];
             (e.f30, e.f32, e.f126)
         };
         Self::polar_step(&mut tmp, yaw, pitch, speed);
-        if let Some(v) = self.victim_scan_at(i, tmp, ctx) {
+        self.move_relink(i, tmp.0, tmp.1, tmp.2);
+        if let Some(v) = self.victim_scan(i, ctx) {
             let wizard = match v {
                 MailTarget::Player => true,
                 MailTarget::Pool(j) => self.ent[j].class64 == 3 && self.ent[j].model65 <= 1,
@@ -2790,18 +2819,14 @@ impl Gen {
         }
         let ground = self.ground_z(tmp.0, tmp.1) as i16;
         if ground <= tmp.2 {
-            self.move_relink(i, tmp.0, tmp.1, tmp.2);
             self.ent[i].act_life -= 1;
             if self.ent[i].act_life < 0 {
                 self.ent[i].flags |= 0x400; // silent timeout
             }
         } else {
-            // Terrain block: the relink to the stepped point is
-            // UNCONDITIONAL and happens before the probe (:63104), and
-            // this arm has no revert — the water test, the splash and
-            // the silent end all read the point the seeker flew TO
-            // (:63161-83), not the one it flew from.
-            self.move_relink(i, tmp.0, tmp.1, tmp.2);
+            // Terrain block: no revert — the water test, the splash
+            // and the silent end all read the point the seeker flew
+            // TO (:63161-83), where the pre-probe move left it.
             if self.on_water_pub(tmp.0, tmp.1) {
                 self.splash_and_die(i);
             } else {
@@ -3891,13 +3916,29 @@ impl Gen {
         stamp_victim: bool,
         law: DeflectLaw,
     ) -> bool {
-        let mut tmp = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
+        let start = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
+        let mut tmp = start;
         let (yaw, pitch, speed) = {
             let e = &self.ent[i];
             (e.f30, e.f32, e.f126)
         };
         Self::polar_step(&mut tmp, yaw, pitch, speed);
-        if let Some(v) = self.victim_scan_at(i, tmp, ctx) {
+        // Retail MOVES FIRST and probes at its own moved position —
+        // `sub_41C70` then `sub_11980` (:62675-76 generic, :62843-44
+        // fireball with the pre-step `v21` saved for its terrain
+        // revert); a strike then moves AGAIN onto the victim. Each
+        // move is a tile-chain relink when it crosses a tile edge, so
+        // a step that leaves and re-enters a tile RE-HEADS the record
+        // even though its net tile never changed. The old
+        // endpoint-only `victim_scan_at` probe dropped every one of
+        // those chain ops: mc1l32's free run carried 69k silent
+        // next20/prev22 shadow rows from t=7785 (a fireball strike's
+        // re-head) and paid at t=29922, where the (9,14) bolt at 986
+        // walked a differently-ordered village chain, struck the
+        // wrong first match, and the human never took the recorded
+        // 780 — the t=29923 knock reads retail mag 74, port 0.
+        self.move_relink(i, tmp.0, tmp.1, tmp.2);
+        if let Some(v) = self.victim_scan(i, ctx) {
             // Rebound (+17 bit 7): mana-shield deflection. The human
             // carpet's bit is the Rebound spell (14, :65774 — the
             // ported deflection-bit semantics). The Generic arm only
@@ -3972,9 +4013,8 @@ impl Gen {
                             // Afford-fail (:62859's false arm — v24
                             // stays clear): NO hit at all. No sound, no
                             // debit, no explosion — the bolt keeps its
-                            // stepped position and flies straight
-                            // through.
-                            self.move_relink(i, tmp.0, tmp.1, tmp.2);
+                            // stepped position (already moved above)
+                            // and flies straight through.
                             return false;
                         }
                         // Generic refusal falls through to the plain
@@ -4036,22 +4076,21 @@ impl Gen {
         }
         let ground = self.ground_z(tmp.0, tmp.1) as i16;
         if ground <= tmp.2 {
-            self.move_relink(i, tmp.0, tmp.1, tmp.2);
             self.ent[i].act_life -= 1;
             if self.ent[i].act_life < 0 {
                 self.proj_explode(i, ctx, None, copy_f44, stamp_victim); // midair expiry
             }
         } else {
             // Terrain impact. The position law differs by function:
-            // the FIREBALL (:62899-908) moves, then REVERTS to the
-            // pre-step position (`sub_41C70(a1, &v21)`) — its water
-            // test, splash and detonation all happen at the point it
-            // flew FROM; the GENERIC (:62680-701) has no revert — it
-            // keeps the stepped position for all three. Both exempt
-            // model 4 (the volcano lob) from the splash: over water
-            // it detonates like on land.
-            if law == DeflectLaw::Generic {
-                self.move_relink(i, tmp.0, tmp.1, tmp.2);
+            // the FIREBALL (:62899-908) REVERTS to the pre-step
+            // position (`sub_41C70(a1, &v21)` — a second relink) —
+            // its water test, splash and detonation all happen at the
+            // point it flew FROM; the GENERIC (:62680-701) has no
+            // revert — it keeps the stepped position for all three.
+            // Both exempt model 4 (the volcano lob) from the splash:
+            // over water it detonates like on land.
+            if law == DeflectLaw::Fireball {
+                self.move_relink(i, start.0, start.1, start.2);
             }
             let (ix, iy) = (self.ent[i].x, self.ent[i].y);
             if self.ent[i].model65 != 4 && self.on_water_pub(ix, iy) {

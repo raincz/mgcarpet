@@ -516,17 +516,26 @@ fn dump_state(args: &Args) -> i32 {
                     .filter(|(_, c)| **c != 0)
                     .map(|(s, c)| (s, *c))
                     .collect();
-                let owned: Vec<usize> = w
+                let owned: Vec<(usize, u16)> = w
                     .owned_slots
                     .iter()
                     .enumerate()
                     .filter(|(_, m)| **m != 0)
-                    .map(|(s, _)| s)
+                    .map(|(s, m)| (s, *m))
                     .collect();
+                let learn: Vec<(usize, u16)> = w
+                    .learn
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| **c != 0)
+                    .map(|(s, c)| (s, *c))
+                    .collect();
+                let acq: Vec<i32> = w.spell_list.iter().copied().filter(|&s| s != 0).collect();
                 println!(
                     "t={t} wiz {i}: ent={} mv={:#x} hands=({},{}) charge={} \
                      grace={} stall={} rate={} ai_state={} burst={} pov={} \
-                     castle={} aggro={} breg={:?} owned={owned:?} cool={cools:?}",
+                     castle={} aggro={} breg={:?} owned={owned:?} cool={cools:?} \
+                     learn={learn:?} acq={acq:?}",
                     w.play_index,
                     w.move_bits,
                     w.hand_left,

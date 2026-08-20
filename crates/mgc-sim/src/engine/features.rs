@@ -2655,6 +2655,12 @@ impl Gen {
                 e.tick70 = 36;
                 e.max_life = 0;
                 e.act_life = 0;
+                // :47343-44 — the ctor's own +66/+67 stamp (3, −1);
+                // sclass is a graded shadow lane and the unstamped 255
+                // capped mc1l32's free run at t=15113 (the portal
+                // births mid-take there).
+                e.f66 = 3;
+                e.f67 = 255;
                 e.flags = 0;
                 e.dest_x = e.x;
                 e.dest_y = e.y;
@@ -2665,6 +2671,10 @@ impl Gen {
                 self.ent[i].f82 = 256;
                 self.ent[i].f84 = 256;
                 self.link(i, x, y, z.wrapping_add(640));
+                // :47353 — +154 takes the linked hover z (dest x/y
+                // were copied above; a THING post-init overwrites
+                // them for authored portals).
+                self.ent[i].site_z = self.ent[i].z;
             }
             // sub_3B860 (:47613): the crab egg (10,52). Laid at RUNTIME
             // by the adult crab (mobs.rs) — authored (10,52) records are
@@ -5055,7 +5065,10 @@ impl Gen {
                 e.x = x;
                 e.y = y;
                 e.z = site_z;
-                e.flags = 0;
+                // Retail's build (:56517-24) writes NO flag word: the
+                // scratch keeps whatever the last collapse left (its
+                // own `|= 0x400` mark persists across demolishes),
+                // and the chase lost-test reads those bytes verbatim.
             }
             self.tick_building_collapse(SCRATCH);
             self.ent[SCRATCH].class64 = 0;
@@ -5445,8 +5458,22 @@ impl Gen {
                 // the mc1l0 endgame — the t=4948 collapse-evac
                 // militia acquired the human where retail's scan,
                 // wanted 0, found no admissible target.
+                // ⚠ The test is `model65 <= 1` alone, but the WRITE
+                // goes through the attacker record's +160 WIZEXT
+                // pointer (`pool[+40].+160->u16_528 = 200`): only a
+                // wizard record has a live wizext, so a model-0 FIRE
+                // spreading onto the house arms NOBODY — the write
+                // vanishes through the non-wizard's pointer (the
+                // null-probe family, write face). mc1l32 t=45218: the
+                // torched house pops its defender in both, but the
+                // port's model-only gate armed the human's wanted off
+                // the (10,0) fire and the 45231/45249 pack militia
+                // acquired a carpet retail's scan, wanted 0, never saw.
                 if src == crate::mc1::mobs::PLAYER_TARGET
-                    || self.ent.get(src as usize).is_some_and(|e| e.model65 <= 1)
+                    || self
+                        .ent
+                        .get(src as usize)
+                        .is_some_and(|e| e.class64 == 3 && e.model65 <= 1)
                 {
                     self.flag_village_wanted(src);
                 }

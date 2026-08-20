@@ -273,11 +273,23 @@ fn flight_tier_golden_state_hashes() {
     // image. The flight tracks themselves are untouched — no house is
     // in either carpet's path and the ball physics reads none of these
     // fields.
+    // BOTH arrays re-pinned (post-init and A-C, both tiers) for the
+    // l32 ROUND-1 commit's accel/boost drive-path mapping (b62f7fc:
+    // `player.accel` + the explicit boost cases in
+    // `step_player_flight` — the resisting-press law's drive half).
+    // The move is the FLIGHT tier's alone: all world-tier goldens in
+    // this file and level_005's OBSERVABLE companions hold, and the
+    // conformance brief baseline is byte-identical on all seven
+    // certified takes — the changed bytes are Simulation flyer
+    // state, hashed here and nowhere else. Verified PRE-EXISTING at
+    // b62f7fc (the rig worktree fails with these exact actuals
+    // before this session's laws), so the pin belongs to that
+    // commit's law, not to the session that noticed it.
     const FAITHFUL: [u64; 4] = [
-        0x1cf548af8b0245a8, // post-init
-        0xef4f1d5818878469, // A: 40 ticks of forward thrust
-        0x2f9c1198de59746b, // B: 30 ticks of banked turn + strafe
-        0x4e70d1d4dc0201d6, // C: 40 ticks of coast
+        0x4463963d16af120c, // post-init
+        0xe76322d53e9352be, // A: 40 ticks of forward thrust
+        0x257eb2f2b839bd72, // B: 30 ticks of banked turn + strafe
+        0x4eda561bc9cc9789, // C: 40 ticks of coast
     ];
     // Re-pinned for the enhanced-bank strafe fix (2026-07-27): the
     // proportional camera bank no longer gates off while strafing — it
@@ -293,10 +305,10 @@ fn flight_tier_golden_state_hashes() {
     // ENHANCED re-pinned with the same ball-ctor stamps — the
     // background balls carry them under either mover.
     const ENHANCED: [u64; 4] = [
-        0x18794b6f3eb902f5, // post-init
-        0xb7d214212f4ac164, // A
-        0x57fd578078fae766, // B: strafe+turn now banks on forward speed
-        0xea0902a198a99189, // C
+        0x895c40c80bbd125d, // post-init
+        0x5f1b1f34c38600fe, // A
+        0x1c66f63aa1b1f768, // B: strafe+turn now banks on forward speed
+        0x5e9d8acbf05875d9, // C
     ];
     assert_eq!(
         (faithful, enhanced),

@@ -16408,3 +16408,396 @@ the player's go-ahead; then the un-attributed pair residues (l5 1591
 pairs, l4 40+3, l42 1, l1's ledgered 3) whenever a session wants
 them; the MC2 playtest remains deferred; `cast_bomb` still wears the
 f128-pin shape (no corpus row yet).
+
+## 🏆🏆 mc1l32 v2 ROUND 1 — THE TRAIL PUFFS AFTER THE CORE, THE PORTAL
+## BYTE, THE 2-D CRAB AND THE RESISTING PRESS (2026-08-23, same session)
+
+Intake predicted one whale; round 1 confirmed it. **mc1l32: 1,462
+dirty pairs / 11,564 rows → 36 / 233 (97.5% closed); free run 1,466
+devs / horizon 15,112 → 69 devs / horizon 25,380.** All seven
+certified takes hold END in BOTH instruments after every law; 445
+tests; 129+6 fixtures green; six new fixtures rig-receipted at
+01dc934, each regressing with exactly its own lanes. mc1l1's last
+ledgered pair-mode FIELD row closed as a side effect (the v_14 seed).
+
+1. ⭐⭐⭐ **THE METEOR TRAIL PUFFS AFTER THE CORE** (~99% of the
+   take's rows — both "eras" of the intake map, one law). The m3
+   wrapper `sub_53070` runs `sub_52770` FIRST — flight step,
+   detonation payload, soft kill — and only then mints the
+   damage-suppressed (10,1) seeder at the POST-step position, gated
+   on `+64` alone (:63027-38): the dying detonation tick still
+   puffs (the walled-in family's projectile face). The port minted
+   the puff BEFORE the move: every in-flight trail puff was born one
+   flight step behind (the (10,1)/(10,0)/(10,17) x/y/z corpse-lane
+   families, ~1,450 pairs), and on detonation ticks the payload/puff
+   free-stack pops landed in SWAPPED slots (t=24700: retail
+   (10,17)@53 + (10,1)@20, the port inverted — same two entities,
+   exchanged). Fixture @24700.
+2. ⭐ **THE PORTAL BYTE + THE FIRST-TICK LATCH**: `sub_3B300` stamps
+   `+66 = 3` / `+67 = −1` (:47343-44) and `+154` = the hover z
+   (:47353) — the port left sclass at the NewEvent 255, ONE BYTE
+   that capped the free run at the portal's mid-take birth. And
+   `sub_26A60` opens on the flags-bit-1 latch + positional hum 21
+   (:29186-89, the MC2 pad's exact shape) with expiry sound 20
+   (:29196-97) — the port had neither. ⚠ retail's warp scan walks
+   EVERY wizard — the rival-warp arm stays owed, the same register
+   the MC2 pad carries. Fixtures @15112/@15113.
+3. ⭐⭐ **THE CRAB EATS IN TWO DIMENSIONS, OFF THE TICK-TOP CHAIN,
+   WITH NO 0x400**: the absorb probe is `sub_423D0` (:23068) — x/y
+   ALONE; the port's added z term pushed a ball under the crab past
+   the 5·actSpeed ring, so the port chased where retail ate (t=22114:
+   mana 1500 vs 1000, one 5,000 rung of the growth ladder behind).
+   The eat and steer ball tests are `+64/+65` alone (:23063 — no
+   0x400), and the nearest-ball scan walks the TICK-TOP BALL CHAIN
+   (+36466, bucket[1]) with the `+65 == 39` per-node gate alone
+   (:22928-45) — the port's live-pool scan with invented gates was
+   the chain-vs-pool bug's FOURTH costume. Fixtures @22114/@23672.
+4. ⭐⭐ **THE RESISTING PRESS KILLS THE BOOST — AND THE PAIR READS
+   V_14 FROM THE CAPTURE**: during a speed burst retail's v_12 sits
+   OUTSIDE the ±80 band (the token overrides target and actual), so
+   :55766-73's band test resolves by SIGN — the sustaining press
+   never arms v_14, the resisting press always does, and the token's
+   next pass kills the burst (:65146-50). The port's boost rides
+   `player.accel` with tgt_speed as an unboosted shadow, so the
+   drive path now maps the boost cases explicitly; the PAIR path
+   never runs the carpet dispatch at all, so the import now seeds
+   `mc1_v14` from the captured Type_160 `+14` (decoded at last —
+   it sat between cmd_speed and strafe, the volcano-register story
+   again) and `player.accel` from the human's mid-burst (12,2)/(12,21)
+   token. Five cancels across the take's accel play, each costing a
+   +100 regen and a phantom (10,2) contrail. Fixture @9218.
+
+REMAINING mc1l32 (36 pairs / 233 rows): the crab damage/regen life
+deltas (~15 rows, t=27365..33855 — the free run's 25,381 (3,3) cap
+is likely upstream of these), the village churn family (t=37298+,
+the banked-OPEN law: (2,1)+(11,0) re-mints, (11,2) cadence ±1, and
+its t=37544 slot-allocation echo), one extra (12,1) heal token
+@21715, the 45215 smodel/speed pair, 2 rand rows, pose 8+8+2.
+
+## 🏆🏆 mc1l32 v2 ROUND 2 — THE HELD-BACK WINDOW PAYS, THE DEATH-TICK
+## REGEN, THE MID-WALK TRIGGER POSE AND THE STRIKE'S DOUBLE RELINK
+## (2026-08-21)
+
+**mc1l32: 36 dirty pairs / 233 rows → 2 / 4 (52,138 of 52,140
+conforming); free run 69 devs / horizon 25,380 → 16 excess resets /
+horizon 29,923 (17 segments, 1 LOCAL + 13 INHERITED heads).** All
+seven certified takes hold END in BOTH instruments after every law
+(brief baseline byte-identical); 716 tests; 32 l32 fixtures green —
+five new, each rig-receipted against b62f7fc (the session-start
+verify run IS the pre-fix probe: all five pairs dirty there with
+exactly their law's lanes, clean at HEAD). mc1hwl0 side-pay: devs
+8,362 → 7,254.
+
+1. ⭐⭐ **THE HELD-BACK `.max(1)` WINDOW FLOOR FINALLY PAYS — AND
+   COMES OUT, MC1-ONLY** (the crab damage family, ~15 rows + the
+   free-run 25381 balloon cap): retail's ch0 area window has NO
+   radius floor — a (10,17) blast ring born ON its victim (the
+   walk-cursor law keeps a below-cursor newborn undispatched on its
+   birth tick) runs its FIRST dispatched tick with entry f26 = 0,
+   extents 0, so its window is the single ch0 back-biased tile,
+   which does not even cover the ring's own position tile: the crab
+   standing on the impact point is missed for exactly one tick
+   (t=29834 pair: retail 883, port 1883 — the newborn's
+   f44/max_life = 1000 landed a tick early under the 3x3 floor).
+   2026-08-12 held the floor back as corpus-inert; mc1l32 is the
+   receipt. MC2 keeps it (the arrow/chord-march compensating pair).
+2. ⭐⭐ **THE M5 REGEN TRAILER RUNS ON THE DEATH TICK** (the corpse
+   overshoot family): sub_1BF60/:22959 and sub_1C110/:22976 run
+   `if (act < max) act += max >> 7` UNCONDITIONALLY after the shared
+   core — the fatal hit's return lands back in the wrapper and the
+   trailer credits the fresh corpse. Every crab death overshoot read
+   the port |max >> 7| deep: 117/78/39/312 for max
+   15000/10000/5000/40000 (t=29840/27365/27371/30954/33484/33855).
+   The walled-in-parting-shot family, regen face.
+3. ⭐⭐ **A TRIGGER VOLUME PROBES THE CARPET AS OF ITS OWN WALK SLOT**
+   (the village churn family, ~20 pairs, + t=45215 and the 21715-era
+   militia rows): the class-11 handlers read live records —
+   sub_5A090 walks bucket[0] carpets (f63&7-gated, ground-snap side
+   effect), sub_5A120 sweeps the wizext carpets every tick — so a
+   volume ABOVE the carpet's slot sees the SETTLED pose. mc1l32's
+   carpet sits at slot 14, below the village volumes; the port's
+   `human_pose_prev` echo (the mc1l1 t=3082 fix, overfit to l1's
+   carpet-above-all-volumes layout) fed every volume yesterday's
+   pose: the (11,0) one-shot at 17 fired its house-pair disposition
+   ~250 ticks late (t=37298: retail mints (2,1)@18 + (11,0)@19,
+   kills 17; the port's late mints were the t=37544/37809
+   slot-allocation echoes) and the (11,2) rearm at 28 counted the
+   ±1 f26 cadence family. Fix: pass the mid-walk `player` — l1's
+   below-carpet volumes still get the pre pose through the swap.
+4. ⭐ **THE STRIKE IS A DOUBLE MOVE, AND BOTH MOVES RELINK**: retail
+   moves (sub_41C70 — a tile-chain relink when the step crosses an
+   edge) BEFORE probing (:62675-76 generic, :62843-44 fireball with
+   the pre-step v21 saved for its terrain REVERT, :63103-05 the m8
+   seeker), then a strike moves AGAIN onto the victim; a step that
+   leaves and re-enters a tile RE-HEADS the record. The port's
+   endpoint-only `victim_scan_at` probe dropped every one of those
+   chain ops — 69k silent next20/prev22 shadow rows from t=7785.
+   Landed as the probe-order reorder in `proj_move_and_hit` + the
+   m8 arm; pair-invisible (unit-test class), corpus-neutral on all
+   seven certified takes, hwl0 pays ~1,100 devs.
+
+**REMAINING mc1l32 (the certification wall):**
+- **Free run, 16 excess resets.** The head at 29923 is fully
+  root-caused up to one open question: the (9,14) bolt at 986
+  (owner-crab id 337) strikes the CARPET during 29921 and its
+  explode child — the (10,0) fire REVIVED at 984 with the copied
+  f44=780 and f146=14 — first-dispatches at 29922 and area-posts
+  780/src=337 into the player box (pending at end-29922 in the
+  capture, (780,337) on slot 14's record; the 29923 carpet drain
+  arms the knock 78→74 that shoves the recorded pose). The FREE
+  port posts the SAME 780/src=337 at the SAME tick (measured:
+  MGC_MAIL_TRACE's one `AREA->player amt=780 src=337` with
+  ctx=(3678,44849,6327) = the bit-exact 29922 pose) — and its
+  29923 drain still arms NOTHING (`knock_mag retail 74 port 0`).
+  The suspect is player-box interleaving between the post and the
+  drain (the village militia's SINGLE 350s from slots 3-17 land
+  below the carpet slot; single-write semantics REPLACE on a
+  pending src). Next instrument: stamp MGC_MAIL_TRACE lines with
+  DEBUG_TICK and diff the post/drain interleave 29922-29923
+  free-vs-pair. The 33148+ target_yaw creeps, 37400 and 45231/45249
+  are downstream pose-tracking echoes of the same class.
+  ⚠ PLAYER NOTE (2026-08-21): the horizon sits in an ENTITY-POOL
+  EXHAUSTION era — the strike child at 984 is a REVIVED birth
+  scavenged from a reap-flagged corpse with ZERO free-stack pops
+  that tick, i.e. allocation is already on the pressure path — so
+  a missing bolt/child around these resets may be fully expected
+  allocator-parity noise (the mc1l42 overflow class), not a law.
+  Weigh that before promoting any 29923-era residue to a fixture.
+- **Pair mode, 2 pairs / 4 rows.** (a) t=21715: one extra (12,1) —
+  the port's phase-2 heal jar at 355 granted and re-minted where
+  retail's seat was already taken: retail's +628 DELAYED RE-GRANT
+  timer (wizext, 24 words at +628 — armed 200, decremented per
+  tick by the sub_15EC0-region pass :19404-41 while +676[spell]
+  is clear) expired that tick and ADOPTED the orphaned death-drop
+  token at 84 (the ctor thunk adopts an existing orphan — no free
+  pop, no field change; only the +532 seat write) — the port
+  models neither the timer nor the adopt, and the import does not
+  seed +628. (b) t=39873: two z rows + one rand row (one
+  pose-phase-tagged) — a detonation-cascade mint-order echo: the
+  runner's two passes mint slot 51's fire from DIFFERENT parents
+  (50 vs 52), and every child's rand steps by exactly 9377 in mint
+  order, so one reordered mint shifts the chain.
+- **Pose channel 18 rows — 16 are an INSTRUMENT blind spot, not a
+  sim defect**: the free run is pose-bit-exact through 29,922, and
+  the 21740-22358 pair rows sit on knock ticks where
+  `recover::consumed_knock` cannot reconstruct a small knock
+  (armed 4..7 from a 40-79 hit) that decays to zero within its own
+  tick — the endpoints show only the direction change
+  (knock_dir 104→1893, mag 0→0) and the rearm arm requires
+  `mag1 != 0`. Fixing the RECONSTRUCTION (e.g. arming from the
+  drained amount) would close them; the sim needs nothing. t=2234
+  and t=32662 (x off 1484, near the warp era) are unattributed.
+- The flight-tier state-hash golden was re-pinned THIS session for
+  b62f7fc's own accel/boost drive-path law (verified pre-existing:
+  the rig fails with identical actuals before today's laws; all
+  world-tier goldens and the whole brief baseline hold).
+
+## 🏆🏆🏆 mc1l32 CERTIFIED — THE FREED-SOURCE KNOCK, THE M5 PHASE
+## SEED, THE SCRATCH CHASE AND THE INVENTED MILITIA GRUDGE
+## (2026-08-21b)
+
+**mc1l32 CERTIFIED: ONE bit-exact segment t=0..52,140, ZERO
+divergence, in BOTH instruments (`mgc-conform replay` AND the app's
+`--replay-check`) — the eighth corpus take, and ALL EIGHT are now
+one-segment.** Free run 16 excess resets / horizon 29,923 → 0 / END
+on FIVE laws worked strictly head-by-head; every reset head turned
+out to be a REAL LAW (the pool-exhaustion era excused nothing).
+Pair mode: still exactly 2 dirty pairs / 4 rows (21715, 39873 — both
+import-boundary laws, see REMAINING). All seven previously certified
+takes hold END (brief baseline byte-identical, now includes l32);
+140 fixtures green; 776 tests (4 new law tests); the level_005
+GOLDEN+OBSERVABLE re-pinned behaviorally (post-init/A/B hold in
+OBSERVABLE, C/D/E move by design). mc1hwl0 unmoved.
+
+1. ⭐⭐ **THE KNOCK ARM'S ONLY GATE IS `src != 0`** (:55711 — a bare
+   `&pool[src] > pool` pointer compare; the 29923 wall): no class,
+   life or flags test — a source freed between the area post and the
+   carpet's drain still bears the knock off its record's STALE
+   position (the null-probe family, knock face). t=29922 the crab's
+   bolt child (10,0)@984 posts 780/src=337; the crab at 337 is
+   already freed (class64 0, act_life −1000); retail's 29923 drain
+   arms knock 78 off the corpse bytes where the port's invented
+   `class64 != 0` conjunct armed nothing. The DRAIN ran in both
+   (life paid 780) — only the arm was gated. Pair-invisible (the
+   pose pair drives the carpet; knock_mag is a shadow lane) → unit
+   test `a_knock_from_a_freed_source_still_arms_off_the_stale_record`.
+   ⚠ the banked "militia single-write interleave" suspect was WRONG —
+   one windowed MGC_MAIL_TRACE run (now DEBUG_TICK-stamped, with an
+   optional `t0:t1` window value) settled it: post 29922, drain 29923,
+   src_class=0.
+2. ⭐⭐ **THE M5 CTOR SEEDS `+58` WITH THE ROW-17 PHASE SPREAD**
+   (:45004 — `v26 − (ord % v26) + 4`, v26=30): the ctor census puts
+   the formula on rows 14/16/17/21/24 (+ the m1 `v26+1` on 13, the
+   worm rows 12/15) — the port had model 5 misfiled under the flat
+   64. t=33135: the (11,0) village trigger mints two dwellers at
+   54/56 (both sides, same tick — the graded lanes never moved) and
+   retail seeds f58 = 30/29 for ctor ordinals 4/5 where the port
+   wrote 64 — the dwellers stayed awake 34 ticks long. ⚠ `+63` IS
+   WALK-CLOCKED for creatures too: the end-of-mint-tick f63 reads
+   ordinal+1 (the newborn above the minting trigger's slot is walked
+   its birth tick), which is what made the seed look off-by-one
+   against the banked table value. Unit test
+   `the_m5_ctor_seeds_the_phase_spread_awake_counter`.
+3. ⭐⭐ **THE CHASE LOST TEST IS THE TARGET RECORD'S BYTES AND
+   NOTHING ELSE** (:21658 — `+12 < 0 || (+17 & 4)`): an ALL-ZEROS
+   scratch record reads NOT-lost, so a pack-recruited chaser holding
+   `+146 = 0` keeps hunting the origin for its whole v_26 window —
+   t=33144: crab 139 (PACK) recruits villager 155 into CHASE with
+   +146=0; retail holds state 44 aiming at (0,0) (target_yaw 958→960
+   = the bearing there) while the port's `class64 == 0` conjunct
+   dropped it back to WANDER the same tick, ±2 yaw creeps from
+   33148. The l3/l4 receipts survive WITHOUT the conjunct: their
+   scratch read lost through its OWN 0x400 — the destroy mark a
+   prior collapse leaves and retail never clears. The conjunct was a
+   stand-in for the port's demolish stamping `flags = 0` into the
+   scratch build — retail's build (:56517-24) writes NO flag word,
+   so that stamp is deleted with it. Unit test
+   `a_chase_onto_the_zeroed_scratch_record_is_not_lost`.
+4. ⭐⭐ **A MILITIA DEATH ARMS NO VILLAGE-WANTED TIMER** (the
+   45231/45249 wall): the `+528 = 200` census finds death-tick arms
+   for models 8/12/13/14 ALONE (:23580/:25291/:25459/:25638) — the
+   port's "m4 corpse analog" was INVENTED. t=45218: three militia
+   burn to death with killer f38 = 14 (the carpet) and retail's
+   wanted stays 0; the invented arm set player_aggro = 200 and the
+   45231/45249 pack scans acquired a carpet retail's scan (wanted 0)
+   never admitted. Unit test `a_militia_death_arms_no_village_wanted`
+   (m12 death = the positive control). Side-tightening: the
+   house-hit arm (:30798) WRITES through the attacker's +160 wizext
+   pointer (the null-probe family, write face) — only a wizard
+   record receives it, so the port's gate now requires class 3;
+   behaviorally inert today (`flag_village_wanted` already no-ops on
+   non-wizard tags) but shape-faithful.
+5. ⭐ Instrument: `MGC_MAIL_TRACE` lines carry `t=` (DEBUG_TICK) and
+   the toggle takes an optional `t0:t1` window; DRAIN/GRACE-WIPE/
+   DEAD-DISCARD consumers now print too; `flag_village_wanted` has a
+   `#[track_caller]` trace on the same toggle (it named mobs.rs's
+   death-arm site in one run).
+
+**METHOD:** the head-by-head loop paid five-for-five: run the free
+replay `--start` just before the head, read the D1 rows, then
+raw-shadow the clean window and look for the LATEST-starting family
+(the standing ones are ballast; the fresh one is the law). ⚠⚠ a
+`--start`-anchored window can DIVERGE where the full walked run is
+bit-exact — the anchor is an IMPORT, and the import's ungraded gaps
+(+628, portal bytes) tip metastable allocation neighborhoods: the
+39874 "head" exists only downstream of an anchor. Diagnose full-run
+resets on the full run.
+
+**REMAINING mc1l32 (the pair-perfection debt, 2 pairs / 4 rows +
+pose 18):** — **PAID SAME SESSION, see 2026-08-21c below.**
+- **t=21715, one extra (12,1)** — the banked "+628 DELAYED RE-GRANT"
+  hypothesis was REFUTED by measurement (learn[] is EMPTY through
+  the whole incident); the real law is sub_45C10's derived owned
+  register (2026-08-21c law 6). (The +628 decode stands for its own
+  sake: `RetailWizardMc1.learn` IS the +628 array, `owned_slots` IS
+  var_676; the rival LEARN arm is :64813-14 in sub_55A40 — rivals
+  arm 200 on seeing a cast, book byte +796-gated. The human-side
+  face remains unwitnessed by this corpus.)
+- **t=39873, two z + one rand** = the death-fall trail scratch's
+  TOUCHDOWN reconstruction (2026-08-21c law 7) — the mc1l42 law's
+  pair face, not allocator noise.
+- **Pose 18 rows**: 16 = the consumed_knock small-knock blind spot
+  (armed 4..7 decays to 0 in-tick; endpoints show only the dir
+  change and `recover::consumed_knock` requires mag1 != 0. Fix =
+  arm from the DRAINED AMOUNT — the callers in pose_lane.rs have
+  the pair's mail context; `(amt/10).clamp(0,80)` in 4..=7 with
+  dir1 != dir0 is the signature). t=2234 / t=32662 unattributed.
+  STILL OPEN (instrument-side; does not gate the pair verdicts).
+- The round-2 chain-order unit test is PAID same session:
+  `a_strikes_out_and_back_step_reheads_the_tile_chain` drives the
+  real `proj_move_and_hit` strike path (a `#[cfg(test)]` seam beside
+  `home_for_test`) through a step that crosses the north tile edge
+  and a victim snap that crosses back, and asserts the bolt lands
+  AHEAD of the victim in the tile chain (next20/prev22 both ways).
+  Non-vacuity A/B-PROVEN, and the doctrine earned its keep doing it:
+  the first revert attempt patched a DIFFERENT mover with the
+  byte-identical move-then-probe shape (combat.rs has several) and
+  the test kept passing — ⚠ when A/B-reverting by text patch, verify
+  the patched LINE NUMBERS land inside the function under test.
+  Reverting the real site (endpoint-only: both moves as raw position
+  writes) fails the test; the fix restored, 450 lib tests green.
+
+## 🏆🏆🏆 mc1l32 PAIR-PERFECT — THE DERIVED OWNED REGISTER AND THE
+## TOUCHDOWN SCRATCH (2026-08-21c)
+
+**mc1l32: 52,140 / 52,140 pairs conforming — ZERO field rows, ZERO
+extra/missing, rng 0/52,140 — PAIR-PERFECT ON TOP OF CERTIFICATION
+(the second take to reach it, after mc1l3).** Two laws, same
+session as the certification above; both pair-visible → 2 fixtures
+(34 l32 total), each rig-receipted at 87c92e3 (regressing with
+exactly its lanes: `extra:12,1` / `field:10,0:rand 10,0:z 10,1:z`).
+All eight certified takes hold END byte-identical to the brief
+baseline; 43 test suites green; l3's pair-perfection HOLDS.
+Side-pay: mc1l42's single ledgered pair (t=17343, the documented
+touchdown) improves from 39 z-units off to 2 (the live-stick mover
+ride, see law 7). l1 2-extra / l4 3+40 / l5 1591 unchanged
+(ledgered). mc1hwl0 excluded from the gate (player call: not a
+certified take).
+
+6. ⭐⭐ **THE OWNED-SPELL REGISTER IS DERIVED, EVERY TICK**
+   (sub_45C10 :55310-19, called as the human dispatch's FIRST
+   statement, sub_45C90 :55342; also the rival upkeep :17969 and
+   init/respawn :54962/:55033): memset the whole var_676, then
+   re-register each nonzero +532 acquisition entry under the MODEL
+   byte of the pool record it points at — a BLIND read, later
+   entries win. The port's `player.owned` was hand-maintained at
+   grant/pickup only. mc1l32 t=21715/21716 pins it: the phase-2
+   heal jar at 84 grants at 21715 (seat write at walk slot 84,
+   above the carpet); its phase-2 re-mint twin at 355 polls the
+   SAME pickup point at 21716, and retail's 355 takes the
+   already-known FLAG-TOUCH because the carpet's 21716 rebuild (at
+   slot 14, below both jars) registered 84 first — the port's
+   imported register (+676 = pre-rebuild) read heal as unowned and
+   re-granted, minting the extra (12,1) at 823.
+   ⚠⚠ **THE BANKED "+628 DELAYED RE-GRANT" WAS REFUTED BY ONE
+   INSTRUMENT RUN**: dump-state now prints wiz `learn=`/`acq=`, and
+   learn[] is EMPTY through the whole incident — the round-2 timer
+   story died on first measurement (a banked hypothesis is not a
+   measurement, again). The seat-then-owned two-tick shape is the
+   PICKUP plus the NEXT tick's rebuild, no timer anywhere.
+   ⚠⚠ a port-side "safety" guard on a retail-blind read is a BUG
+   FARM: the first cut skipped entries flagged in `death_owned` —
+   but acq entries are POOL SLOTS and this take's tokens sit at
+   slots 1/6/8/9/11/23, so stale bank flags zeroed real
+   registrations and 27k pairs went dirty before the guard came
+   out. Retail-blind, bounds-only.
+7. ⭐⭐ **THE TOUCHDOWN BREAKS SETTLED-MINUS-STEP** (the mc1l42
+   fall-scratch law's PAIR face — the hole its own doc predicted):
+   the death-fall trail's (10,1) spawns at the POST-MOVE,
+   PRE-GRAVITY scratch; a pinned pair reconstructs it as
+   `settled z − applied +46`, which carries the live-stick mover
+   ride correctly (mc1l42 t=17330: scratch 2604 = 2556 − (−48),
+   tick-entry z only 2599) but breaks on the TOUCHDOWN tick, where
+   the floor clamp lands the carpet at ground+128 and the
+   subtraction overshoots (mc1l32 pair 39873→39874: clamped 6375,
+   back-derived 6403, true scratch 6391 = the frozen-stick
+   tick-entry z). Landed as a tick-head entry-z latch
+   (`mc1_fall_entry_z`, sample-stable — the tick-entry player feed
+   is the PRE sample under either pose-pair pass) consumed only by
+   the touchdown arm; ordinary fall ticks keep the subtraction; a
+   driven fall's integrator still publishes the exact axis. The
+   trail child had minted 12 high and shifted the whole
+   death-cascade mint chain one draw (slot 51 z, slot 75 rand —
+   `retail = port + 1 LCG step` was the tell). mc1l42's t=17343
+   pair narrows 39 → 2: the remaining 2 = the touchdown tick's own
+   mover ride, unknowable from endpoints (the recording never
+   captured the scratch; the "CAPTURE it" prescription was never
+   implemented and the format carries no lane for it) — ledgered.
+
+**METHOD (the reconstruction detours, all measured same session):**
+- ⚠⚠ `human_pose` is NOT tick-stable: `adopt_walk_pose` overwrites
+  it MID-WALK with the settled sample (the round-2 mid-walk law's
+  own machinery), so a consumer below the carpet slot reads pose(t)
+  and one above reads pose(t+1) — a "tick-entry" read through it
+  produced 13 sample-dependent (pose-phase-explained) rows across
+  the fall window. Latch tick-entry values AT the tick head.
+- ⚠⚠ the pooled carpet record is NOT installed at tick head in a
+  pinned pair (the anchor installs it AT the walk slot): a tick-head
+  `ent[carpet_slot]` read gives z=0 — 47 rows of trail fires minted
+  at the map floor before the trace showed `record_z=0`.
+- ⚠ verify-deltas' `--end` loose parse struck again (ran the whole
+  take twice); check the tail line count before reading tallies.
+
+**REMAINING mc1l32:** the pose channel's 18 instrument rows alone
+(16 consumed_knock + 2234/32662), and nothing else. The take is
+certified AND pair-perfect.

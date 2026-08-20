@@ -563,7 +563,15 @@ impl Gen {
         self.spawn_count[model as usize] = ordinal.wrapping_add(1);
         self.ent[i].f58 = match model {
             1 => (v26 & 0xFF) + 1,
-            2 | 4 | 9 | 15 => v26 - (ordinal as i16 % v26) + 4,
+            // The phase-spread family by ROW, not by intuition: the
+            // ctor census finds the `v26 - (ord % v26) + 4` seed on
+            // rows 14 (:44753), 16 (:44934), 17 (:45004), 21 (:45283)
+            // and 24 (:45629) — m5's row-17 site was misfiled here
+            // under the flat 64 (mc1l32 t=33135: the village dwellers
+            // at slots 54/56 seed 30/29 = 30 - ord + 4, and the port's
+            // 64 woke them 34 ticks long, flipping the crab chase at
+            // 33144 via the pack scan).
+            2 | 4 | 5 | 9 | 15 => v26 - (ordinal as i16 % v26) + 4,
             _ => 64,
         };
         if model == 15 {
@@ -1090,7 +1098,14 @@ impl Gen {
     /// Flag a wizard village-wanted for 200 ticks (the +528 = 200
     /// writers): the human raises `player_aggro`, a rival its
     /// `rival_wanted` slot. A non-wizard tag is a no-op.
+    #[track_caller]
     pub(crate) fn flag_village_wanted(&mut self, id: u16) {
+        if let Some(t) = crate::mail_trace() {
+            eprintln!(
+                "[wanted] t={t} id={id} from {}",
+                std::panic::Location::caller()
+            );
+        }
         match self.wizard_slot_of(id) {
             Some(0) => self.player_aggro = 200,
             Some(s) => self.rival_wanted[s] = 200,
@@ -1230,21 +1245,27 @@ impl Gen {
             // are the same law in two takes: the survivor aims at
             // slot 0 and only then drops back to `base + 1`. The early
             // return skipped the re-bear and left `+34` stale.
-            // ⚠ Keep the `class64 == 0` conjunct in `lost` below — it
-            // is what makes slot 0 read as lost here, since the port's
-            // SCRATCH record carries `flags = 0` where retail's
-            // carries 0x400. The bound is memory safety only.
+            // The bound is memory safety only.
             if t >= self.ent.len() {
                 self.ent[i].tick70 = base + 1;
                 return false;
             }
             // Target lost (:21658-61). Retail's pair is `+12 < 0 ||
-            // (+17 & 4)` — dead OR DESTROY-FLAGGED (+17 bit 2 is the
-            // 0x400 the port names `flags & 0x400`); the class-0 test
-            // is a port guard against freed slots. The verdict is
-            // taken here but applied only AFTER the shared re-bear.
+            // (+17 & 4)` — dead OR DESTROY-FLAGGED — and NOTHING
+            // else: no class test. A scratch/freed target's verdict
+            // comes off its record BYTES, so an all-zeros slot 0
+            // reads NOT-lost and the chaser keeps hunting the origin
+            // (mc1l32 t=33144: the pack-recruited villager holds
+            // state 44 on `+146 = 0` for a whole v_26 window, target
+            // yaw = the bearing to (0,0)). mc1l3/l4's scratch read
+            // lost through its own 0x400 — a prior collapse's mark,
+            // which retail never clears — not through a class test;
+            // the port's old `class64 == 0` conjunct was a stand-in
+            // for its demolish stamp zeroing the scratch flags
+            // (removed with it). The verdict is taken here but
+            // applied only AFTER the shared re-bear.
             let c = &self.ent[t];
-            let lost = c.class64 == 0 || c.act_life < 0 || c.flags & 0x400 != 0;
+            let lost = c.act_life < 0 || c.flags & 0x400 != 0;
             (c.x, c.y, c.z, c.f66, c.f67, lost)
         };
         // Re-aim cadence. The shared chase re-bears every 4th tick
@@ -2010,10 +2031,11 @@ impl Gen {
                 self.ent[i].tick70 = base + 2;
             } else if self.ent[i].f146 != 0 {
                 let t = self.ent[i].f146 as usize;
-                let is_ball = t < self.ent.len()
-                    && self.ent[t].class64 == 10
-                    && self.ent[t].model65 == 39
-                    && self.ent[t].flags & 0x400 == 0;
+                // :22907-08 — the steer arm re-tests +64/+65 ALONE: no
+                // 0x400 conjunct, a soft-killed ball stays a target
+                // until the reap wipes its class.
+                let is_ball =
+                    t < self.ent.len() && self.ent[t].class64 == 10 && self.ent[t].model65 == 39;
                 if is_ball {
                     let e = &self.ent[i];
                     let (bx, by) = (self.ent[t].x, self.ent[t].y);
@@ -2028,12 +2050,19 @@ impl Gen {
                     self.ent[i].f146 = 0;
                 }
             } else {
-                // Nearest loose ball, any range (:22928-45).
+                // Nearest loose ball, any range (:22928-45) — the
+                // walk is the TICK-TOP BALL CHAIN (+36466, bucket[1]),
+                // per-node gate `+65 == 39` ALONE: no 0x400, no life
+                // test — a ball eaten mid-tick still scores, a ball
+                // born mid-tick is invisible (the chain-vs-pool bug in
+                // its fourth costume).
                 let (ex, ey) = (self.ent[i].x, self.ent[i].y);
                 let mut best: Option<(usize, i32)> = None;
-                for j in 1..self.ent.len() {
+                let n = self.ball_chain.visible_len();
+                for k in 0..n {
+                    let j = self.ball_chain.list[k] as usize;
                     let c = &self.ent[j];
-                    if c.class64 != 10 || c.model65 != 39 || c.flags & 0x400 != 0 {
+                    if c.model65 != 39 {
                         continue;
                     }
                     let d2 = Self::dist2_sq(ex, ey, c.x, c.y);
@@ -2077,20 +2106,22 @@ impl Gen {
             return;
         }
         let t = self.ent[i].f146 as usize;
-        let is_ball = t != 0
-            && t < self.ent.len()
-            && self.ent[t].class64 == 10
-            && self.ent[t].model65 == 39
-            && self.ent[t].flags & 0x400 == 0;
+        // :23063 — class/model ALONE again (no 0x400; slot-0 scratch
+        // fails the class test, covering the f146==0 case).
+        let is_ball =
+            t != 0 && t < self.ent.len() && self.ent[t].class64 == 10 && self.ent[t].model65 == 39;
         if !is_ball {
             self.ent[i].f146 = 0;
             self.ent[i].tick70 = base + 1;
             return;
         }
         let e = &self.ent[i];
-        let (bx, by, bz) = (self.ent[t].x, self.ent[t].y, self.ent[t].z);
-        let dz = bz.wrapping_sub(e.z) as i32;
-        let d2 = Self::dist2_sq(e.x, e.y, bx, by).wrapping_add(dz.wrapping_mul(dz));
+        let (bx, by) = (self.ent[t].x, self.ent[t].y);
+        // :23068 sub_423D0 — the eat range is 2-D (x/y alone; the
+        // port's added z term made a ball under the crab read too far
+        // — mc1l32 t=22114: retail absorbs, the port kept chasing and
+        // sat one 5000-step of growth behind for the rest of the era).
+        let d2 = Self::dist2_sq(e.x, e.y, bx, by);
         let dist = Self::isqrt(d2 as u32);
         let max = self.ent[i].f128 as u32;
         if dist > 5 * max {
@@ -3875,10 +3906,16 @@ impl Gen {
                     }
                 }
                 // Killing village folk puts the wizard on the wanted
-                // list (m12 :25291, m13 :25459, m14 :25638, m4's
-                // corpse analog) — and so does killing a griffon
-                // (sub_1CF60 :23578-80): the flock avenges it.
-                if matches!(model, 4 | 8 | 12 | 13 | 14) {
+                // list (m12 :25291, m13 :25459, m14 :25638) — and so
+                // does killing a griffon (sub_1CF60 :23578-80): the
+                // flock avenges it. NO m4 site exists — the +528=200
+                // census finds death-tick arms for 8/12/13/14 alone,
+                // and a MILITIA death arms nobody (mc1l32 t=45218:
+                // three militia burn with f38=14 and retail's wanted
+                // stays 0; the port's invented "m4 corpse analog"
+                // armed the human and the 45231/45249 pack scans
+                // acquired a carpet retail never marked).
+                if matches!(model, 8 | 12 | 13 | 14) {
                     self.flag_village_wanted(self.ent[i].f38);
                 }
                 self.ent[i].tick70 = base + 4;
@@ -3896,6 +3933,19 @@ impl Gen {
                 // later, in the death state itself).
                 if model == 0 && matches!(role, 1..=3) {
                     self.flyer_bob(i);
+                }
+                // ...and m5's regen trailer runs on the DEATH tick
+                // too: the fatal hit returns out of the shared core
+                // back into sub_1BF60/sub_1C110, whose unconditional
+                // `if (act < max) act += max >> 7` then credits the
+                // fresh corpse (act is deep negative, trivially
+                // < max). mc1l32 pins it four ways — every crab death
+                // overshoot reads |port| high by exactly max >> 7:
+                // t=29840 slot 324 retail -1007 = -1124 + 117
+                // (max 15000), t=27365 slot 323 Δ78 (10000), t=27371
+                // slot 115 Δ39 (5000), t=30954 slot 63 Δ312 (40000).
+                if model == 5 && matches!(role, 1 | 2) {
+                    self.m5_regen(i);
                 }
                 return;
             }
@@ -4064,9 +4114,10 @@ impl Gen {
                 // max 5000 / 10000 / 15000). It rides the WIZARD path
                 // too, now that that path falls through: mc1l32
                 // t=19430 slot 323, retail 4658 vs port 4619.
-                // Scoped to the HIT arm on purpose: the death arm's
-                // trailer would credit a corpse, and no corpus row
-                // exercises it.
+                // The DEATH arm runs the same trailer (see
+                // `Inbox::Dead` above) — retail's wrapper tail is
+                // unconditional, so it credits the fresh corpse; the
+                // l32 death-overshoot family is the receipt.
                 if model == 5 && matches!(role, 1 | 2) {
                     self.m5_regen(i);
                 }

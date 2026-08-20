@@ -856,12 +856,35 @@ fn level_005_golden_state_hashes() {
         // t=5152-5155 pins the machine (token 679 reads 10000/99 at
         // t=3 and 20000/198 after the t=5153 upgrade, both matched);
         // l0/l1/l2/l3/l4/l42 all bit-exact END in both instruments.
-        0xf51e27b4fd17e7d2, // post-init
-        0x2284a50b1bb99645, // A
-        0x5dcad133edb720a3, // B
-        0x92aa6a185053821e, // C
-        0xa06ec233dd58731f, // D: 64 ticks of two-hand fireball combat
-        0xd1ee1a60430e5fd7, // E: 100 aftermath ticks
+        // ⭐ ALL SIX re-pinned for THE mc1l32 CERTIFICATION SESSION's
+        // three laws. (1) THE M5 CTOR f58 PHASE SEED: model 5's row-17
+        // mint site (:45004) carries the `v26 - (ord % v26) + 4`
+        // phase-spread like rows 14/16/21/24, not the flat 64 the port
+        // filed it under (mc1l32 t=33135 pins it: the village-trigger
+        // dwellers at slots 54/56 read 30/29 for ordinals 4/5) — the
+        // seed byte is hashed state from the authored mints on, so
+        // post-init..B move in GOLDEN while OBSERVABLE holds there
+        // (a wake-phase byte with no behavioral divergence yet).
+        // (2) THE CHASE LOST TEST IS THE RECORD'S BYTES (:21658):
+        // `+12 < 0 || (+17 & 4)` and no class test — a pack-recruited
+        // chaser holding `+146 = 0` keeps hunting the all-zeros
+        // scratch record for its whole v_26 window (mc1l32 t=33144)
+        // where the port's `class64 == 0` conjunct dropped it to
+        // WANDER on the same tick. (3) THE PLAYER KNOCK ARM gates on
+        // `src != 0` alone (:55711) — a source freed between the post
+        // and the drain still bears the knock off its stale record
+        // (mc1l32 t=29923). OBSERVABLE moves at C/D/E — REAL behavior
+        // by design: chasers persist through pack handoffs and the
+        // house-emit m5s wake on retail's phase. Corpus: mc1l32 free
+        // run 16 excess resets -> 2, horizon 29,923 -> 45,231, final
+        // segment bit-exact to END; l0/l1/l2/l3 re-verified END
+        // bit-exact under all three laws.
+        0xac013c377e17a279, // post-init
+        0x1425a09285152c87, // A
+        0x17b7bac172ad5992, // B
+        0xd91a848f4264dd7e, // C
+        0x9511b8b62e2b1e05, // D: 64 ticks of two-hand fireball combat
+        0x8e5f8f10143c5c65, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,
@@ -1045,9 +1068,13 @@ fn level_005_golden_state_hashes() {
         // genuinely differ. Post-init..C hold — nothing casts 23
         // before D.
         0x43bf391b4fe16821, // B — settler phase + feeder leash
-        0x39bac991e82e172d, // C — trigger pre-move pose law
-        0xdfc55622b7f62818, // D
-        0xd86d6ea8a2a0e935, // E
+        // C..E re-pinned with the mc1l32 certification session (see
+        // the GOLDEN note): the scratch-chase persistence, the m5
+        // wake phase and the freed-source knock arm first bite in the
+        // C window and compound through combat/aftermath.
+        0x3ab68929d7e226fd, // C
+        0xd5f0bb85237a1c61, // D
+        0x325841fe2feb9fe0, // E
     ];
     assert_eq!(
         obs, OBSERVABLE,

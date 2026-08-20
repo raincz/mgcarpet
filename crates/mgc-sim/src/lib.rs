@@ -30,6 +30,25 @@ pub use patches::WorldPatches;
 /// eprintlns can label themselves. Never read by simulation logic.
 pub static DEBUG_TICK: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
+/// MGC_MAIL_TRACE gate: `Some(t)` (the current [`DEBUG_TICK`]) when the
+/// mailbox trace is enabled and t falls inside the toggle's optional
+/// `t0:t1` window (`MGC_MAIL_TRACE=1` = everywhere).
+pub fn mail_trace() -> Option<u64> {
+    let v = std::env::var("MGC_MAIL_TRACE").ok()?;
+    if v.is_empty() {
+        return None;
+    }
+    let t = DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed);
+    if let Some((a, b)) = v.split_once(':')
+        && let (Ok(a), Ok(b)) = (a.parse::<u64>(), b.parse::<u64>())
+    {
+        if t < a || t > b {
+            return None;
+        }
+    }
+    Some(t)
+}
+
 use engine::{features, world};
 use mc1::spells;
 

@@ -766,6 +766,16 @@ pub struct World {
     /// over: the free replay is BOTH a retail import and an
     /// integrating driver.
     mc1_fall_pre_z: Option<i16>,
+    /// The falling carpet's TICK-ENTRY z (end of the previous tick),
+    /// latched at the tick head for the pinned-pair TOUCHDOWN
+    /// reconstruction: the clamp breaks `settled − step` exactly
+    /// there, and with the stick frozen the mover's own z ride is
+    /// zero, so the entry z IS the scratch (mc1l32 pair 39873→39874:
+    /// clamped 6375, back-derived 6403, true 6391). Ordinary fall
+    /// ticks keep the `settled − step` reconstruction — the settled
+    /// pose carries the live-stick mover ride the entry z cannot see
+    /// (mc1l42 t=17330: entry 2599, retail's scratch 2604).
+    mc1_fall_entry_z: i16,
     /// The human player's spell/mana state (spells cast through the
     /// per-hand dispatcher, sub_46B00_46E40 :55851).
     pub(crate) player: Player,
@@ -1621,6 +1631,7 @@ impl World {
             pending_speed_base: None,
             mc1_v14: false,
             mc1_fall_pre_z: None,
+            mc1_fall_entry_z: 0,
             player: Player::default(),
             win_pct: 0,
             win_streak: 0,
@@ -2574,6 +2585,12 @@ impl World {
             // Falling/dead: the landing wipe already cleared the
             // mailbox; discard anything new (the original's dead
             // wizard never reads it).
+            if self.g.player_mail[0].1 != 0
+                && let Some(t) = crate::mail_trace()
+            {
+                let (amt, src) = self.g.player_mail[0];
+                eprintln!("[mail] t={t} DEAD-DISCARD amt={amt} src={src}");
+            }
             self.g.player_mail = [(0, 0); 6];
             return;
         }
@@ -2585,8 +2602,8 @@ impl World {
                 && let Some(c) = self.player_castle()
             {
                 let (amt, src) = self.g.player_mail[0];
-                if std::env::var_os("MGC_MAIL_TRACE").is_some() {
-                    eprintln!("[mail] REDIRECT amt={amt} src={src}");
+                if let Some(t) = crate::mail_trace() {
+                    eprintln!("[mail] t={t} REDIRECT amt={amt} src={src}");
                 }
                 // The AREA order — retail inlines the forward at
                 // :55357-60 with pending→ACCUMULATE, NOT the
@@ -2634,13 +2651,11 @@ impl World {
                 };
                 // Positional KNOCKBACK still lands (god-mode is
                 // life-only): a hit shoves the player, so the
-                // kraken's lightning still pushes you OUT.
+                // kraken's lightning still pushes you OUT. Same
+                // src != 0-only gate as the live drain (:55711) —
+                // a freed source still bears off its stale record.
                 let s = src as usize;
-                if src != 0
-                    && src != PLAYER_TARGET
-                    && s < self.g.ent.len()
-                    && self.g.ent[s].class64 != 0
-                {
+                if src != 0 && src != PLAYER_TARGET && s < self.g.ent.len() {
                     let dir =
                         Gen::angle_between(self.g.ent[s].x, self.g.ent[s].y, player.x, player.y)
                             & 0x7FF;
@@ -2656,6 +2671,15 @@ impl World {
             // The spawn-grace memset (:55367-71): every channel
             // wiped, total immunity — steal and grip included, and
             // the danger music stays calm (sub_46540 never runs).
+            if self.g.player_mail[0].1 != 0
+                && let Some(t) = crate::mail_trace()
+            {
+                let (amt, src) = self.g.player_mail[0];
+                eprintln!(
+                    "[mail] t={t} GRACE-WIPE amt={amt} src={src} grace={}",
+                    self.player.grace
+                );
+            }
             self.player.grace -= 1;
             self.g.player_mail = [(0, 0); 6];
         } else {
@@ -2831,7 +2855,22 @@ impl World {
         // walk order gives the read its retail phase for free (a
         // token below the carpet reads LAST dispatch's latch, one
         // above reads this one's).
-        self.mc1_v14 = moved.speed_touched;
+        //
+        // :55766-73 — during a BOOST retail's v_12 sits OUTSIDE the
+        // ±80 band (the speed token overrides target AND actual), so
+        // the band test resolves by SIGN alone: the sustaining press
+        // can never move it, the resisting press always does. The
+        // port's boost rides `player.accel` with tgt_speed as the
+        // unboosted shadow, so the boost cases map explicitly
+        // (mc1l32 t=9218: speed-down held under a forward boost with
+        // tgt parked at −80 — retail arms the kill and the token
+        // dies, the port ran the burst out; five cancels across the
+        // take's accel play).
+        self.mc1_v14 = match self.player.accel {
+            1 => !d.inp.no_command && d.inp.speed_down,
+            -1 => !d.inp.no_command && d.inp.speed_up,
+            _ => moved.speed_touched,
+        };
         if moved.flutter {
             self.push_player_sound(46);
         }
@@ -3086,6 +3125,13 @@ impl World {
         };
         self.human_pose_prev = self.human_pose;
         self.human_pose = (player.x, player.y, player.z);
+        // The falling carpet's tick-entry z — the touchdown
+        // reconstruction's anchor (see `mc1_fall_entry_z`). The
+        // tick-head `player` feed is the PRE sample under either
+        // pose-pair pass, so the latch is sample-stable.
+        if self.player.state == LifeState::Falling {
+            self.mc1_fall_entry_z = player.z;
+        }
 
         // The duel pull on the CASTER (:55228-48): while latched,
         // drag the human toward the victim; release at 1000 ticks,
@@ -3408,6 +3454,12 @@ impl World {
                 if self.midtick_ground_armed {
                     self.midtick_ground_armed = false;
                     self.midtick_ground = Some(self.g.t.height.clone());
+                }
+                // sub_45C90's FIRST statement (:55342): the +676
+                // owned rebuild, before the at-castle test and the
+                // whole mailbox/cast/move body.
+                if self.player.state == LifeState::Alive {
+                    self.mc1_owned_rebuild();
                 }
                 let (at_castle, at_dolmen) = self.regen_boost(&ctx);
                 self.player_mail_block(player, at_castle);
@@ -3801,27 +3853,27 @@ impl World {
                 // keeps its handlers.
                 11 if matches!(self.game, GameId::Mc2) => self.mc2_switch_tick(i),
                 11 => {
-                    // The probe reads the PRE-move carpet (mc1l1
-                    // t=3082 worm wave, fired one 8-tick probe window
-                    // early off the post-move pose): retail's carpet
-                    // is a pooled entity ABOVE every authored volume
-                    // (slot 280 in the l1 lane, dis-0 records first),
-                    // so a slot-ordered walk always probes it before
-                    // it moves — the same pre-pass law as the awake
-                    // gate's `human_pose_prev` echo, first-tick
-                    // fallback included (prev is (0,0,0) before the
-                    // first stamp).
-                    let prev = if self.human_pose_prev == (0, 0, 0) {
-                        player
-                    } else {
-                        PlayerPose {
-                            x: self.human_pose_prev.0,
-                            y: self.human_pose_prev.1,
-                            z: self.human_pose_prev.2,
-                            ..player
-                        }
-                    };
-                    self.trigger_tick(i, prev, &buckets)
+                    // The probe reads the carpet AS OF THE VOLUME'S
+                    // WALK SLOT — `player` is exactly that (it swaps
+                    // to the settled pose at the carpet's dispatch).
+                    // The old `human_pose_prev` echo was the mc1l1
+                    // t=3082 fix (a worm-wave volume fired one 8-tick
+                    // probe window early off the post-move pose) —
+                    // but its "retail's carpet sits ABOVE every
+                    // authored volume" premise is l1's slot layout
+                    // (carpet 280, dis-0 records first), not a law:
+                    // mc1l32 puts the carpet at slot 14, BELOW the
+                    // village volumes, and retail's slot-ordered walk
+                    // then probes them with the SETTLED pose — the
+                    // (11,0) one-shot at slot 17 fires its house-pair
+                    // disposition off the post-move overlap (t=37298
+                    // pair: retail mints (2,1)@18+(11,0)@19, kills 17;
+                    // the echo-fed port fired ~250 ticks late) and the
+                    // (11,2) repeating rearm at 28 held/counted on the
+                    // wrong pose (the f26 ±1 cadence family). The
+                    // mid-walk `player` serves both layouts; l1's
+                    // volumes still see the pre pose through the swap.
+                    self.trigger_tick(i, player, &buckets)
                 }
                 // Wizard castles and balloons — owner-generic (id24).
                 // MC2 runs its native column (mc2::castle): the
@@ -4058,6 +4110,10 @@ impl World {
             if self.midtick_ground_armed {
                 self.midtick_ground_armed = false;
                 self.midtick_ground = Some(self.g.t.height.clone());
+            }
+            // sub_45C90's first statement (:55342), post-walk anchor.
+            if self.player.state == LifeState::Alive {
+                self.mc1_owned_rebuild();
             }
             let (at_castle, at_dolmen) = self.regen_boost(&ctx);
             self.player_mail_block(player, at_castle);
@@ -4443,6 +4499,15 @@ impl World {
         // ch0 physical (:55698-735).
         if self.g.player_mail[0].1 != 0 {
             let (mut amt, src) = self.g.player_mail[0];
+            if let Some(t) = crate::mail_trace() {
+                let s = src as usize;
+                let cls = if src != 0 && src != PLAYER_TARGET && s < self.g.ent.len() {
+                    self.g.ent[s].class64 as i32
+                } else {
+                    -1
+                };
+                eprintln!("[mail] t={t} DRAIN amt={amt} src={src} src_class={cls}");
+            }
             // Shield (:55700-07): quarter the damage, and the
             // quarter is ALSO paid from mana. The original CLEARS the
             // +17 0x40 flag per absorb; the machine re-publishes it
@@ -4462,13 +4527,15 @@ impl World {
             self.player.life -= amt as i32;
             // Knockback (:55711-21): v_24 = the source→victim
             // bearing, v_22 = amount/10 clamped [0, 80] — an
-            // overwrite of whatever knock was pending.
+            // overwrite of whatever knock was pending. The ONLY
+            // retail gate is `&pool[src] > pool` (:55711), i.e.
+            // src != 0 — no class/life/flags test: a source freed
+            // between the post and the drain still bears the knock
+            // off its record's stale position (the null-probe
+            // stale-read family; mc1l32 t=29923, the crab's bolt
+            // child posts 780 and the reaped crab at 337 arms 78).
             let s = src as usize;
-            if src != 0
-                && src != PLAYER_TARGET
-                && s < self.g.ent.len()
-                && self.g.ent[s].class64 != 0
-            {
+            if src != 0 && src != PLAYER_TARGET && s < self.g.ent.len() {
                 let dir = Gen::angle_between(self.g.ent[s].x, self.g.ent[s].y, player.x, player.y)
                     & 0x7FF;
                 self.g.player_knock = (dir, ((amt / 10) as i16).clamp(0, 80));
@@ -4536,21 +4603,31 @@ impl World {
                 // above where it ends up. Ours spawned at the settled
                 // pose and ran the whole fall one step low.
                 //
-                // Under a conformance import nothing integrates the
-                // human (the pose is pinned), so the recorded +46 IS
-                // this tick's applied step; natively the fall already
-                // consumed and decremented it in `step_player_flight`.
                 // Whoever integrated the fall hands over the axis it
                 // moved through ([`Self::step_player_flight`]); a
                 // pinned pair, where nothing moves the human at all,
-                // reconstructs it from the recorded `+46` instead.
+                // reconstructs it. `settled − applied step` is exact
+                // on ordinary fall ticks (the settled pose carries
+                // the live-stick mover ride: mc1l42 t=17330, scratch
+                // 2604 = 2556 − (−48), entry 2599) — but the floor
+                // clamp breaks it on the TOUCHDOWN tick, where the
+                // frozen-stick entry z IS the scratch (mc1l32 pair
+                // 39873→39874: clamped 6375, back-derived 6403, true
+                // 6391 — the trail child minted 12 high and the whole
+                // death-cascade mint chain shifted one draw).
+                let ground = self.g.ground_z(player.x, player.y) as i16;
+                let touchdown = player.z <= ground.saturating_add(128);
                 let tz = self.mc1_fall_pre_z.take().unwrap_or_else(|| {
-                    let applied = if self.strict_retail {
-                        self.player.fall_speed
+                    if touchdown {
+                        self.mc1_fall_entry_z
                     } else {
-                        (self.player.fall_speed + 2).min(0)
-                    };
-                    player.z.wrapping_sub(applied)
+                        let applied = if self.strict_retail {
+                            self.player.fall_speed
+                        } else {
+                            (self.player.fall_speed + 2).min(0)
+                        };
+                        player.z.wrapping_sub(applied)
+                    }
                 });
                 // Retail's ctor decorations are exactly `flags |= 0x80`
                 // and `+24 = the wizard's own +24` (:55480-82) — no
@@ -4562,9 +4639,9 @@ impl World {
                     self.g.ent[s].id24 = PLAYER_TARGET;
                 }
                 // Landing (:55485): the sim's fall integration rides
-                // the z-floor down; ground+128 is touchdown.
-                let ground = self.g.ground_z(player.x, player.y) as i16;
-                if player.z <= ground.saturating_add(128) {
+                // the z-floor down; ground+128 is touchdown (the same
+                // test the scratch reconstruction read above).
+                if touchdown {
                     self.player_land(player);
                 }
             }
@@ -5180,6 +5257,44 @@ impl World {
         }
     }
 
+    /// `sub_45C10` (:55310-19) — THE OWNED-SPELL REGISTER IS DERIVED,
+    /// EVERY TICK: memset the whole +676 array, then re-register each
+    /// live +532 acquisition entry under the MODEL byte of the pool
+    /// record it points at. The call is the FIRST statement of the
+    /// human's carpet dispatch (`sub_45C90` :55342; also the rival
+    /// upkeep :17969 and the init/respawn sites :54962/:55033), so a
+    /// seat written at a higher walk slot last tick becomes owned the
+    /// moment the carpet dispatches — BEFORE any higher-slot jar
+    /// polls. mc1l32 t=21715/21716 is the whole law: the phase-2 heal
+    /// jar at 84 grants at 21715 (seat write at walk slot 84, above
+    /// the carpet), its re-minted twin at 355 polls the SAME pickup
+    /// point at 21716 — and retail's 355 takes the already-known
+    /// flag-touch because the carpet's 21716 rebuild registered 84
+    /// first, where the port's hand-maintained register (imported
+    /// +676 = pre-rebuild, no heal) re-granted and minted an extra
+    /// (12,1). The model read is BLIND in retail — a stale entry
+    /// stamps through whatever record sits at that index (retail's
+    /// alive-path entries are always slot-form: the one-shot respawn
+    /// loop zeroes a starved entry at :54917; the port's retry
+    /// deviation can leave a model-form entry for a few alive ticks,
+    /// and the blind read is kept verbatim there too — it self-heals
+    /// on the retry's success). Bounds are memory safety only.
+    fn mc1_owned_rebuild(&mut self) {
+        self.player.owned = [0; SPELL_COUNT];
+        for k in 0..self.mc1_acq.len() {
+            let e = self.mc1_acq[k];
+            if e == 0 {
+                continue;
+            }
+            if let Some(r) = self.g.ent.get(e as usize) {
+                let m = r.model65 as usize;
+                if m < SPELL_COUNT {
+                    self.player.owned[m] = e;
+                }
+            }
+        }
+    }
+
     fn grant_spell(&mut self, spell: SpellId) -> Option<usize> {
         // MC1 class-12 manifestations never exist on the MC2 column
         // (the native book owns spells there; the dev/plausible
@@ -5453,6 +5568,7 @@ impl World {
             pending_speed_base: _,
             mc1_v14: _,
             mc1_fall_pre_z: _,
+            mc1_fall_entry_z: _,
             player,
             rivals,
             mc2_rivals,
@@ -10988,11 +11104,23 @@ impl World {
     /// you fly INTO the vortex) is moved to the destination point. The
     /// portal's altitude follows the ground each tick.
     fn portal_tick(&mut self, i: usize, player: PlayerPose) {
+        // :29186-89 — the first-tick bit-1 latch + positional hum 21,
+        // the same shape as the MC2 pad's (mc1l32 t=15113: the fresh
+        // vortex's flags read 6, not 4). Expiry carries sound 20
+        // (:29196-97). ⚠ retail's warp scan walks EVERY wizard
+        // (var_u16_10, the carpet ent through wizext+10) — the
+        // rival-warp arm is owed with a corpus that exercises it,
+        // the same register the MC2 pad carries.
+        if self.g.ent[i].flags & 2 == 0 {
+            self.g.ent[i].flags |= 2;
+            self.g.snd(21, i);
+        }
         let life = self.g.ent[i].act_life;
         if life > 0 {
             self.g.ent[i].act_life = life - 1;
             if life == 1 {
                 self.g.ent[i].flags |= 0x400;
+                self.g.snd(20, i);
                 return;
             }
         }
@@ -12348,6 +12476,7 @@ impl World {
             // Not saved: a within-tick scratch, re-derived by the next
             // mover pass (a restore never lands mid-dispatch).
             mc1_fall_pre_z: _,
+            mc1_fall_entry_z: _,
             player,
             rivals,
             mc2_rivals,
@@ -12763,6 +12892,205 @@ mod tests {
             life0 - 112 - 448,
             "the second hit is unshielded"
         );
+    }
+
+    /// The knock arm's ONLY retail gate is `src != 0` (:55711 — a bare
+    /// `&pool[src] > pool` pointer compare): a source freed between the
+    /// post and the drain still bears the knock off its record's stale
+    /// position. mc1l32 t=29923 pins it — the crab's bolt child posts
+    /// 780 at 29922, the reaped crab at 337 (class64 0) arms knock 78
+    /// on the 29923 drain. Pair mode cannot see this lane (the pose
+    /// pair drives the carpet and knock_mag is a shadow lane), so the
+    /// unit test is the guard. Non-vacuous: restoring the old
+    /// `class64 != 0` conjunct arms nothing here.
+    #[test]
+    fn a_knock_from_a_freed_source_still_arms_off_the_stale_record() {
+        let mut w = flat_world();
+        let s = w.g.spawn_creature(7, 50 << 8, 105 << 8, 100).unwrap();
+        let (sx, sy) = (w.g.ent[s].x, w.g.ent[s].y);
+        w.g.free_entity(s);
+        assert_eq!(w.g.ent[s].class64, 0, "freed: the class byte clears");
+        assert_eq!(w.g.ent[s].x, sx, "freed: the position bytes stay");
+        let pose = away();
+        w.g.player_mail[0] = (780, s as u16);
+        w.apply_player_damage(pose);
+        let want = Gen::angle_between(sx, sy, pose.x, pose.y) & 0x7FF;
+        assert_eq!(
+            w.g.player_knock,
+            (want, 78),
+            "the freed record's stale position bears the knock (amt/10)"
+        );
+    }
+
+    /// The m5 ctor seeds `+58` with the row-17 PHASE SPREAD
+    /// (`v26 - (ord % v26) + 4`, :45004), not the flat 64 — the ctor
+    /// census puts the formula on rows 14/16/17/21/24. mc1l32 t=33135:
+    /// the village trigger's two dwellers (ordinals 4/5, row 17's
+    /// v26 = 30) read 30/29; the port's 64 kept them awake 34 ticks
+    /// long and the pack chase downstream flipped a tick late.
+    #[test]
+    fn the_m5_ctor_seeds_the_phase_spread_awake_counter() {
+        let mut w = flat_world();
+        let a = w.g.spawn_creature(5, 50 << 8, 50 << 8, 100).unwrap();
+        let b = w.g.spawn_creature(5, 52 << 8, 50 << 8, 100).unwrap();
+        // Ordinals 0 and 1 against row 17's v26 = 30: 30-0+4, 30-1+4.
+        assert_eq!(w.g.ent[a].f58, 34, "ordinal 0: v26 - 0 + 4");
+        assert_eq!(w.g.ent[b].f58, 33, "ordinal 1: v26 - 1 + 4");
+        // Negative control: a flat-64 family (row 19, the m7 site
+        // :45160/:45184 pair) keeps the constant seed.
+        let c = w.g.spawn_creature(7, 54 << 8, 50 << 8, 100).unwrap();
+        assert_eq!(w.g.ent[c].f58, 64, "m7 keeps the flat 64");
+    }
+
+    /// The chase lost test is the target RECORD's bytes and nothing
+    /// else (:21658 — `+12 < 0 || (+17 & 4)`): a chaser holding
+    /// `+146 = 0` over the all-zeros scratch record is NOT lost and
+    /// keeps hunting the origin (mc1l32 t=33144, the pack-recruited
+    /// villager), while a destroy-flagged scratch (the mark a prior
+    /// collapse leaves, mc1l3's shape) drops it to WANDER.
+    #[test]
+    fn a_chase_onto_the_zeroed_scratch_record_is_not_lost() {
+        let mut w = flat_world();
+        let ctx = MobCtx {
+            px: 200 << 8,
+            py: 200 << 8,
+            pz: 100,
+            pyaw: 0,
+            pmana: 0,
+            pmana_max: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        let s = w.g.spawn_creature(7, 100 << 8, 100 << 8, 100).unwrap();
+        w.g.ent[s].tick70 = 44; // model-7 CHASE (base 42 + 2)
+        w.g.ent[s].f146 = 0; // the scratch record
+        w.g.ent[s].f26 = 0; // keep the m7 prework quiet
+        w.g.ent[s].f63 = 5; // off the v_26 range-drop cadence
+        assert_eq!(w.g.ent[0].flags & 0x400, 0, "scratch starts unmarked");
+        w.g.creature_tick(s, &ctx);
+        assert_eq!(
+            w.g.ent[s].tick70, 44,
+            "an all-zeros scratch target reads NOT lost — the chase holds"
+        );
+        w.g.ent[0].flags = 0x400; // a prior collapse's destroy mark
+        w.g.creature_tick(s, &ctx);
+        assert_eq!(
+            w.g.ent[s].tick70, 43,
+            "a destroy-flagged scratch reads lost — back to WANDER"
+        );
+    }
+
+    /// A militia death arms NO village-wanted timer: the +528 = 200
+    /// census finds death-tick arms for models 8/12/13/14 alone (m8
+    /// :23580, m12 :25291, m13 :25459, m14 :25638) — the port's old
+    /// "m4 corpse analog" was invented. mc1l32 t=45218: three militia
+    /// burn with `f38 = 14` and retail's wanted stays 0; the invented
+    /// arm let the 45231/45249 pack scans acquire a carpet retail
+    /// never marked. The settler (m12) death is the positive control.
+    #[test]
+    fn a_militia_death_arms_no_village_wanted() {
+        use crate::mc1::mobs::PLAYER_TARGET;
+        let mut w = flat_world();
+        let ctx = MobCtx {
+            px: 200 << 8,
+            py: 200 << 8,
+            pz: 100,
+            pyaw: 0,
+            pmana: 0,
+            pmana_max: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        let m = w.g.spawn_creature(4, 100 << 8, 100 << 8, 100).unwrap();
+        w.g.ent[m].f58 = 16; // awake — the inbox drains
+        w.g.mail_write(MailTarget::Pool(m), 0, 50_000, PLAYER_TARGET);
+        w.g.creature_tick(m, &ctx);
+        assert!(w.g.ent[m].act_life < 0, "the militia died");
+        assert_eq!(w.g.player_aggro, 0, "an m4 death marks nobody");
+        let s = w.g.spawn_creature(12, 102 << 8, 100 << 8, 100).unwrap();
+        w.g.ent[s].f58 = 16;
+        w.g.mail_write(MailTarget::Pool(s), 0, 50_000, PLAYER_TARGET);
+        w.g.creature_tick(s, &ctx);
+        assert!(w.g.ent[s].act_life < 0, "the settler died");
+        assert_eq!(w.g.player_aggro, 200, "an m12 death arms the wanted timer");
+    }
+
+    /// THE STRIKE IS A DOUBLE MOVE, AND BOTH MOVES RELINK (the
+    /// mc1l32 round-2 law, its owed unit test): retail moves the bolt
+    /// (sub_41C70 — a tile-chain relink when the step crosses an
+    /// edge) BEFORE probing (:62675-76), then a strike moves it AGAIN
+    /// onto the victim (:62852-55) — so a step that leaves and
+    /// re-enters a tile RE-HEADS the record in that tile's chain even
+    /// though its net tile never changed. The old endpoint-only probe
+    /// compared start and end tiles, saw them equal, and did no chain
+    /// op at all — 69k silent next20/prev22 shadow rows from t=7785,
+    /// and the t=29922 bolt walked a differently-ordered village
+    /// chain to the wrong first match. Pair-invisible (the importer
+    /// restores the chain every tick), so this test is the receipt:
+    /// it fails under the endpoint-only shape by construction (same
+    /// start/end tile ⇒ no relink ⇒ the order below never flips).
+    #[test]
+    fn a_strikes_out_and_back_step_reheads_the_tile_chain() {
+        let mut w = flat_world();
+        let ctx = MobCtx {
+            px: 200 << 8,
+            py: 200 << 8,
+            pz: 100,
+            pyaw: 0,
+            pmana: 0,
+            pmana_max: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        // The victim, mid-tile (100,100).
+        let v =
+            w.g.spawn_creature(7, (100 << 8) + 100, (100 << 8) + 128, 3400)
+                .unwrap();
+        w.g.ent[v].flags |= 8; // damageable — the probe's +16&8 gate
+        let (vz, vf78) = (w.g.ent[v].z, w.g.ent[v].f78 as i16);
+        // The bolt, in the SAME tile near its north edge: the yaw-0
+        // step (128 north) crosses into tile (100,99); the probe's
+        // rounded centre and ring-1 window still cover the victim,
+        // and the strike snap onto the victim crosses BACK.
+        let p = w.g.new_event().unwrap();
+        {
+            let e = &mut w.g.ent[p];
+            e.class64 = 9;
+            e.model65 = 0;
+            e.id24 = 999;
+            e.f30 = 0; // yaw 0 = -y
+            e.f32 = 0;
+            e.f126 = 128;
+            e.f66 = 0xFF;
+            e.f67 = 0xFF;
+            e.f80 = 128;
+            e.f82 = 128;
+            e.f84 = 128;
+            e.f78 = 0;
+        }
+        w.g.link(p, (100 << 8) + 100, (100 << 8) + 40, vz.wrapping_add(vf78));
+        // Chain order in tile (100,100) before the strike: V head, P
+        // second — the strike must FLIP them.
+        w.g.relink_head(v);
+        assert_eq!(w.g.ent[v].next20, p as u16, "pre: V heads the chain");
+        w.g.proj_strike_for_test(p, &ctx);
+        assert!(w.g.ent[p].flags & 4 != 0, "the struck bolt is still linked");
+        assert_eq!(
+            (w.g.ent[p].x, w.g.ent[p].y),
+            (w.g.ent[v].x, w.g.ent[v].y),
+            "the strike snapped the bolt onto the victim"
+        );
+        assert_eq!(
+            w.g.ent[p].next20, v as u16,
+            "the out-and-back re-headed the bolt AHEAD of the victim"
+        );
+        assert_eq!(w.g.ent[v].prev22, p as u16, "the victim's back link agrees");
     }
 
     /// The m4 militia / m8 griffon `wanted_only` gate: a rival is a
