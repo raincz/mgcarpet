@@ -184,6 +184,11 @@ pub struct FlightInput {
     pub respawn: bool,
     /// The demolish key (Shift+L; the unique control word 48).
     pub demolish: bool,
+    /// The suicide key (Shift+K — retail in BOTH games: MC1
+    /// :20492-93, MC2 PlayerInput.cpp:239-41). Not a control word in
+    /// retail (a direct life write in the key handler), so captures
+    /// never carry it; live input only.
+    pub suicide: bool,
     /// MC2's barrel roll trigger — both strafe keys pressed the same
     /// tick from neutral (the app's edge detect mirrors retail's
     /// prev-frame strafe byte, PlayerInput.cpp:2080-97 → command bit
@@ -918,6 +923,7 @@ impl Simulation {
             spell_ring: input.spell_ring,
             respawn: input.respawn,
             demolish: input.demolish,
+            suicide: input.suicide,
         };
         // Faithful MC1/HW on a live world: the pre-move channels are
         // sampled at the tick head (the conform replay driver's phase
@@ -1871,6 +1877,40 @@ mod tests {
         }
         let assets = FeatureAssets::parse(&grid, &tab, &dat).unwrap();
         world::World::new(planes, &[], 7, assets)
+    }
+
+    /// The retail suicide key (Shift+K, MC1 :20492-93 / MC2
+    /// PlayerInput.cpp:239-41): the bare `life = -1` write enters the
+    /// ordinary death chain with NO killer latched, and it bypasses
+    /// invincibility (retail's write never enters the damage head).
+    #[test]
+    fn suicide_key_kills_with_no_killer_even_invincible() {
+        let mut sim = Simulation::with_world(flat_world(vec![100; 0x10000]));
+        sim.flyer.x = 112.5;
+        sim.flyer.z = 116.5;
+        sim.flyer.y = 100.0 / 8.0 + 3.0;
+        sim.sync_carpet_from_flyer();
+        sim.world.as_mut().unwrap().set_invincible(true);
+        let input = FlightInput {
+            suicide: true,
+            ..Default::default()
+        };
+        sim.step(&input);
+        {
+            let w = sim.world.as_ref().unwrap();
+            assert_ne!(
+                w.vitals().state,
+                world::LifeState::Alive,
+                "the suicide tick must leave Alive despite invincibility"
+            );
+        }
+        for _ in 0..200 {
+            sim.step(&FlightInput::default());
+            if sim.world.as_ref().unwrap().player_dead() {
+                return;
+            }
+        }
+        panic!("the suicide never landed");
     }
 
     /// The death fall lands and the landing chain runs — faithful

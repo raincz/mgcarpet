@@ -582,9 +582,17 @@ canSummon = (SPELLS_BEGIN_BUFFER_str[spell].subspell[level].maxManaLimit_A == 0)
          || (haveCastle && maxManaLimit_A <= Entities_EA3E4[CastleEntityIndex]->mana_0x90_144);
 ```
 `maxManaLimit_A` is the level's **mana threshold to be usable at all** (needs enough *castle* mana);
-`manaCost_6` is the **per-shot cost**. Unaffordable → box uses the dark panel (91 / 162) and the
-icon is drawn transparent/ghosted (`EF:22537`, `EF:22544`, `EF:22628`); affordable → bright panel
-(89 / 161) and opaque icon, plus a live shot-count meter on the hovered box (`EF:22515-22529`).
+`manaCost_6` is the **per-shot cost**. The two panels key on DIFFERENT predicates (corrected
+2026-08-21 after player retail-verification):
+
+- **Grid box (89/91)**: castle-pool ONLY. `!canSummon` → dark panel 91 + ghosted icon
+  (`EF:22537`, `EF:22544`). Hand mana never darkens a grid box — a broke-but-eligible spell
+  stays bright with an empty shot meter on hover (`EF:22515-22529`).
+- **Flyout level box (161/162)**: the tile is `canSubSummon && manaPart` where
+  `manaPart = playerMana / GetSpellManaCost(spell, tier)` per tier (`EF:22609`, `EF:22618`) —
+  so an unaffordable single cast ALSO darkens the tier's frame (162), while the icon ghosts on
+  the pool test ALONE (`EF:22625-28`): pool-ok-but-broke = dark frame + LIT icon; pool-fail =
+  dark frame + ghosted icon.
 
 Locked **levels** (level > `SpellLevels_0x41D_1053z[spell]`, the max unlocked) are drawn as empty
 boxes (`EF:22611`), and `SelectSpell_6D4F0` clamps the cursor so a locked level cannot be selected

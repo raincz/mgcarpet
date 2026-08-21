@@ -18,6 +18,7 @@ pub mod music;
 pub mod output;
 
 use std::path::Path;
+use std::sync::Arc;
 
 use mgc_formats::bundle::AudioBundle;
 pub use mixer::{FaithfulMixer, Listener, Sounds, Source};
@@ -61,6 +62,23 @@ pub struct Audio {
     movie_voices: Vec<(usize, u32)>,
     /// The sample bank the movie player's `'E'` cue selected.
     movie_bank: u32,
+    /// Renderer-state cache for the stream-rebuild resend: the
+    /// renderer lives inside the cpal callback and dies with it on a
+    /// fatal stream error (Windows standby / display sleep /
+    /// default-endpoint change — the "sound never comes back after a
+    /// long pause" report), so a rebuilt stream starts blank and
+    /// must be re-primed (`resend_state`).
+    volumes: (f32, f32),
+    suspended: bool,
+    /// The playing track's decoded payload (Arc-cheap), for replay
+    /// after a rebuild — `play_music`'s same-name guard would
+    /// otherwise refuse to restart it.
+    music_cmd: Option<(Arc<Vec<i16>>, Option<Arc<Vec<i16>>>, u16, u32, bool)>,
+    /// Stream watchdog: last observed heartbeat, ticks it has been
+    /// stale, and the reopen retry backoff.
+    last_beat: u32,
+    stale_ticks: u32,
+    reopen_backoff: u32,
 }
 
 impl Audio {
@@ -81,6 +99,12 @@ impl Audio {
             duck_gain: 1.0,
             movie_voices: Vec::new(),
             movie_bank: 0,
+            volumes: (1.0, 1.0),
+            suspended: false,
+            music_cmd: None,
+            last_beat: 0,
+            stale_ticks: 0,
+            reopen_backoff: 0,
         }
     }
 
@@ -115,6 +139,7 @@ impl Audio {
     /// tick — the original's deferred-ding quirk (our per-id request
     /// slot plays it once even if the map toggled twice).
     pub fn set_paused(&mut self, on: bool) {
+        self.suspended = on;
         let _ = self.out.tx.send(output::Cmd::Suspend { on });
     }
 
@@ -141,9 +166,66 @@ impl Audio {
         }
     }
 
+    /// Stream watchdog, run once per tick: rebuild the output after
+    /// a fatal stream error (the error-callback flag) or a stalled
+    /// data callback (~3 s without a heartbeat — the callback beats
+    /// even while suspended, so a live stream never trips it). The
+    /// backoff retries a failed rebuild every ~5 s, which doubles as
+    /// device-hotplug recovery for a session that started silent.
+    fn watchdog(&mut self) {
+        let beat = self.out.heartbeat();
+        if beat != self.last_beat {
+            self.last_beat = beat;
+            self.stale_ticks = 0;
+        } else {
+            self.stale_ticks = self.stale_ticks.saturating_add(1);
+        }
+        self.reopen_backoff = self.reopen_backoff.saturating_sub(1);
+        let dead = self.out.needs_reopen() || self.stale_ticks > (3.0 * TICK_RATE) as u32;
+        if dead && self.reopen_backoff == 0 {
+            self.reopen_backoff = (5.0 * TICK_RATE) as u32;
+            if self.out.reopen() {
+                eprintln!("audio: output stream rebuilt");
+                self.stale_ticks = 0;
+                self.resend_state();
+            }
+        }
+    }
+
+    /// Re-prime a rebuilt renderer: gains, suspend, duck, the danger
+    /// overlay level and the playing music track (restarted from the
+    /// top — the loop point is presentation-only). SFX voices are
+    /// transient and simply re-fill from the mixer.
+    fn resend_state(&mut self) {
+        let (sfx, music) = self.volumes;
+        let _ = self.out.tx.send(output::Cmd::MasterVol { sfx, music });
+        let _ = self
+            .out
+            .tx
+            .send(output::Cmd::Suspend { on: self.suspended });
+        let _ = self.out.tx.send(output::Cmd::Duck {
+            gain: self.duck_gain,
+        });
+        let lvl = self.danger_level / 126.0;
+        let _ = self
+            .out
+            .tx
+            .send(output::Cmd::MusicOverlayGain { gain: lvl * lvl });
+        if let Some((pcm, overlay, channels, sample_rate, looped)) = &self.music_cmd {
+            let _ = self.out.tx.send(output::Cmd::Music {
+                pcm: pcm.clone(),
+                overlay: overlay.clone(),
+                channels: *channels,
+                sample_rate: *sample_rate,
+                looped: *looped,
+            });
+        }
+    }
+
     /// Per-sim-tick flush (24 Hz = `mgc_sim::TICK_RATE_HZ` — the fade
     /// ramps are per-tick).
     pub fn tick(&mut self) {
+        self.watchdog();
         if let Some(sounds) = &self.sounds {
             self.mixer.tick(sounds, &self.out.tx, self.out.live_mask());
         }
@@ -343,6 +425,13 @@ impl Audio {
             Some(f) => Some(music::decode_flac(&bundle.dir.join(f))?.pcm),
             None => None,
         };
+        self.music_cmd = Some((
+            decoded.pcm.clone(),
+            overlay.clone(),
+            decoded.channels,
+            decoded.sample_rate,
+            looped,
+        ));
         let _ = self.out.tx.send(output::Cmd::Music {
             pcm: decoded.pcm,
             overlay,
@@ -357,10 +446,12 @@ impl Audio {
     pub fn stop_music(&mut self) {
         let _ = self.out.tx.send(output::Cmd::StopMusic);
         self.music_playing = None;
+        self.music_cmd = None;
     }
 
     /// Master gains, 0..=1.
     pub fn set_volumes(&mut self, sfx: f32, music: f32) {
+        self.volumes = (sfx, music);
         let _ = self.out.tx.send(output::Cmd::MasterVol { sfx, music });
     }
 }

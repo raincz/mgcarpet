@@ -274,12 +274,12 @@ impl ReplayDriver {
 
     fn refresh_hud(&mut self, t: u64) {
         self.hud = match (&self.diverged, self.source) {
-            (Some((dt, lane)), _) => format!("REPLAY t={t} — diverged since t={dt} ({lane})"),
+            (Some((dt, lane)), _) => format!("REPLAY t={t} - diverged since t={dt} ({lane})"),
             (None, ReplaySource::Retail) => {
-                format!("REPLAY t={t} — pose bit-exact ({} graded)", self.graded)
+                format!("REPLAY t={t} - pose bit-exact ({} graded)", self.graded)
             }
             (None, ReplaySource::Port) => {
-                format!("REPLAY t={t} — hash-exact ({} graded)", self.graded)
+                format!("REPLAY t={t} - hash-exact ({} graded)", self.graded)
             }
         };
     }
@@ -704,6 +704,9 @@ fn flight_input_from(p: &PortInput) -> FlightInput {
         full_stop: p.full_stop,
         respawn: p.respawn,
         demolish: p.demolish,
+        // Retail's suicide is a direct life write in the key
+        // handler, never a control word — no capture carries it.
+        suicide: false,
         barrel_roll: p.barrel_roll,
         raw_dx: p.raw_dx,
         mc1_move_byte: p.mc1_move_byte,

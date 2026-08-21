@@ -772,7 +772,12 @@ fn wrap_bolt_to_camera(
     )
 }
 
-fn camera_basis(cam: &CameraView) -> ([f32; 3], [f32; 3], [f32; 3]) {
+/// The camera basis before bank: horizontal right, pitch-tilted up.
+/// Billboards expand on this one — sprites keep the pitch tilt of the
+/// original's 2D screen blit but stay upright over the terrain when
+/// the carpet banks (retail counter-rotates the sprite rasterizer by
+/// -roll, SetBillboards_3B560, to the same end).
+fn camera_flat_basis(cam: &CameraView) -> ([f32; 3], [f32; 3], [f32; 3]) {
     let (sy, cy) = cam.yaw.sin_cos();
     let (sp, cp) = cam.pitch.sin_cos();
     let fwd = [sy * cp, sp, -cy * cp];
@@ -782,6 +787,11 @@ fn camera_basis(cam: &CameraView) -> ([f32; 3], [f32; 3], [f32; 3]) {
         flat_right[2] * fwd[0] - flat_right[0] * fwd[2],
         flat_right[0] * fwd[1] - flat_right[1] * fwd[0],
     ];
+    (flat_right, flat_up, fwd)
+}
+
+fn camera_basis(cam: &CameraView) -> ([f32; 3], [f32; 3], [f32; 3]) {
+    let (flat_right, flat_up, fwd) = camera_flat_basis(cam);
     // Bank: rotate right/up about fwd; positive roll tips the up
     // vector toward +right (the camera leans into a right turn).
     let (sr, cr) = cam.roll.sin_cos();
@@ -805,10 +815,16 @@ struct Globals {
     fog_color: [f32; 4],
     /// x = atlas cell count (0 = untextured), y/z/w reserved.
     atlas: [u32; 4],
-    /// Camera basis for billboard expansion (screen-aligned quads);
-    /// the w slots carry tan(fov/2) h/v for the sky ray.
+    /// Camera basis, bank included (sky ray reconstruction, mirror
+    /// reach); the w slots carry tan(fov/2) h/v for the sky ray.
     cam_right: [f32; 4],
     cam_up: [f32; 4],
+    /// The pre-bank basis (`camera_flat_basis`) for billboard
+    /// expansion: sprites keep the pitch tilt but stay upright over
+    /// the terrain when the carpet banks, matching retail's -roll
+    /// sprite counter-rotation (SetBillboards_3B560). w slots unused.
+    bb_right: [f32; 4],
+    bb_up: [f32; 4],
     /// x/y = framebuffer size in pixels, z = sea-sheen flag for this
     /// pass (1 = the main pass runs the mirror/haze blend on water; 0
     /// in the mirror pass itself and when reflections are off — note
@@ -1565,6 +1581,12 @@ pub struct Renderer {
     /// Radar output alpha — HUD transparency (1 = opaque; the MC1
     /// default matches the translucent panels, MC2/opaque = 1).
     minimap_alpha: f32,
+    /// Level-end fade coverage over the screen-space map markers
+    /// (0 = none, 1 = black). The app's fade quad rides in
+    /// `ui_quads`, but in FLIGHT the stamps draw after the app UI
+    /// (the dots must read over the radar frame art), so the fade
+    /// quad cannot cover them — they dim themselves instead.
+    overlay_fade: f32,
     fill_pipeline: wgpu::RenderPipeline,
     /// The textured parallax-sky pass; the bind groups exist only
     /// while a level's sky bitmap is loaded (see `load_sky`). The
@@ -2989,6 +3011,7 @@ impl Renderer {
             minimap_zoom: MINIMAP_ZOOM,
             map_zoom_mult: 1.0,
             minimap_alpha: 1.0,
+            overlay_fade: 0.0,
             map_bind_group_layout,
             map_bind_group: None,
             fill_pipeline,
@@ -3360,6 +3383,15 @@ impl Renderer {
     /// toggle). Alpha kept in sync with the panel alpha in ui.rs.
     pub fn set_hud_transparent(&mut self, transparent: bool) {
         self.minimap_alpha = if transparent { HUD_PANEL_ALPHA } else { 1.0 };
+    }
+
+    /// The level-end fade's reach into the screen-space map markers
+    /// (dots/stamps/ants/objective marks): 0 = no fade, 1 = fully
+    /// black. In flight those draw ABOVE the app's full-screen fade
+    /// quad, so without this they sit at full opacity on the black
+    /// screen; the baked radar disc fades for free in the world pass.
+    pub fn set_overlay_fade(&mut self, fade: f32) {
+        self.overlay_fade = fade.clamp(0.0, 1.0);
     }
 
     /// Multiply the radar zoom (tiles across the disc), clamped to a
@@ -4897,11 +4929,11 @@ impl Renderer {
         };
         let view_proj = camera_matrix(cam, aspect);
         let sky = self.sky_color_linear();
-        // Camera right/up for billboard expansion (matches
-        // `camera_matrix`'s basis, bank included — billboards stay
-        // screen-aligned in the rolled view like retail's
-        // SetBillboards_3B560(-roll)).
         let (right, up, fwd) = camera_basis(cam);
+        // Billboards expand on the PRE-bank basis — retail counter-
+        // rotates its sprite rasterizer by -roll (SetBillboards_3B560),
+        // so sprites stand on the terrain, not the rolled viewport.
+        let (bb_right, bb_up, _) = camera_flat_basis(cam);
         // The basis w slots carry tan(fov/2) h/v — the sky shader's
         // per-pixel ray reconstruction (billboards read .xyz only).
         let tan_v = (cam.fov_y * 0.5).tan();
@@ -4936,6 +4968,8 @@ impl Renderer {
             ],
             cam_right: [right[0], right[1], right[2], tan_h],
             cam_up: [up[0], up[1], up[2], tan_v],
+            bb_right: [bb_right[0], bb_right[1], bb_right[2], 0.0],
+            bb_up: [bb_up[0], bb_up[1], bb_up[2], 0.0],
             viewport: [
                 w as f32,
                 hpx as f32,
@@ -5268,6 +5302,18 @@ impl Renderer {
                         scale,
                     ));
                 }
+            }
+        }
+
+        // The level-end fade over the marker layer: in flight the
+        // stamps draw after the app UI (and so after its fade quad) —
+        // dim them here so the radar markers sink into the black with
+        // the rest of the HUD. On the map screen the app UI draws
+        // last and the fade quad already covers them.
+        if self.overlay_fade > 0.0 && !self.map_view {
+            let keep = 1.0 - self.overlay_fade;
+            for q in &mut stamp_quads {
+                q.tint[3] *= keep;
             }
         }
 

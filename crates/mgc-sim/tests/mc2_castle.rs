@@ -654,6 +654,19 @@ fn mc2_pane_castable_reflects_castle_gate() {
         bv.castable.iter().flatten().any(|c| !c),
         "castle-less world: at least one castle-gated tier reads grey"
     );
+    // The flyout's SECOND grey term (EF:22609/:22618, player
+    // retail-verified 2026-08-21): the broke test compares hand mana
+    // against a PER-TIER recomputed cost, so the view must surface
+    // every tier's cost, not just the selected one's — and the
+    // owned base fireball's cost must be live in it.
+    assert_eq!(
+        bv.cost_tier[0][0], bv.cost[0],
+        "tier 0 of the selected-tier-0 fireball matches the selected cost"
+    );
+    assert!(
+        bv.cost_tier[0][0] > 0,
+        "fireball's base tier carries a nonzero per-cast cost"
+    );
 }
 
 /// A castle's terrain must not outlive it — on SLOPED ground.

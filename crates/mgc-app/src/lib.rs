@@ -1680,11 +1680,19 @@ struct App {
     /// on the 24Hz wall clock alongside the toast (never sim ticks —
     /// it overtitles wall-time speech), drawn centered over the view.
     subtitle: Option<(String, u16)>,
+    /// O held: retail's on-demand objective box
+    /// (PlayerInput.cpp:393-98 re-arms the box counter to 2 every
+    /// polled frame, so the box lives exactly as long as the key is
+    /// down). A control, not a presentation option — deliberately
+    /// NOT gated on `audio.subtitles`.
+    objective_held: bool,
     /// Space pressed since the last sim tick (respawn confirm).
     pending_full_stop: bool,
     pending_respawn: bool,
     /// Shift+L pressed since the last sim tick (castle demolish).
     pending_demolish: bool,
+    /// Shift+K pressed since the last sim tick (retail suicide).
+    pending_suicide: bool,
     /// Which spell-selection surfaces are live (config
     /// `spell_selector` resolved against the running game): the MC1
     /// map-screen spellbook and/or the MC2 CTRL-hold pane.
@@ -1993,9 +2001,11 @@ impl App {
             rival_tags_cur: Vec::new(),
             stick_idle_ticks: 0,
             subtitle: None,
+            objective_held: false,
             pending_full_stop: false,
             pending_respawn: false,
             pending_demolish: false,
+            pending_suicide: false,
             selector,
             ctrl_held: false,
             ctrl_grab_restore: false,
@@ -3725,6 +3735,7 @@ impl App {
             full_stop: std::mem::take(&mut self.pending_full_stop),
             respawn: std::mem::take(&mut self.pending_respawn),
             demolish: std::mem::take(&mut self.pending_demolish),
+            suicide: std::mem::take(&mut self.pending_suicide),
             barrel_roll,
             raw_dx: std::mem::take(&mut self.roll_dx)
                 .round()
@@ -5846,15 +5857,20 @@ impl App {
             let vitals = w.vitals();
             let is_mc2 = matches!(sess.level.game, mgc_sim::ids::GameId::Mc2);
             let mc2_book = is_mc2.then(|| w.mc2_book_view());
-            // The alert-marble flicker approximates retail's
-            // per-frame [55]/[41] alternation at tick parity.
+            // Retail's HUD blink bank (str_93/colorIndex_121[k] =
+            // (Turn/k)&1, :48548-53 / EF:37563-66): index [1] =
+            // Turn&1 drives the alert marbles, hit flashes and the
+            // spell-hand expiry blink; index [2] = (Turn/2)&1 the
+            // goal-tick colour ramp. Two phases, not one.
             let alert_blink = sess.sim.tick % 2 == 0;
+            let goal_blink = (sess.sim.tick / 2) % 2 == 0;
             let (mut quads, hovered) = if self.book_open() {
                 if self.selector.map_book {
                     ui::book_quads(
                         assets,
                         &loadout,
                         &self.quick_binds,
+                        alert_blink,
                         size.0,
                         size.1,
                         self.cursor,
@@ -5874,6 +5890,7 @@ impl App {
                         &vitals,
                         self.hud_transparent(),
                         alert_blink,
+                        goal_blink,
                         is_mc2,
                         mc2_book.as_ref(),
                         self.cfg.gameplay.cheat.dev_spells,
@@ -5894,11 +5911,13 @@ impl App {
                     let mut castable = [false; 26];
                     let mut castable_tier = [[true; 3]; 26];
                     let mut cost = [0u32; 26];
+                    let mut cost_tier = [[0u32; 3]; 26];
                     let mut max_level = [0u8; 26];
                     let mut sel = [0u8; 26];
                     let mut xp = [0i32; 26];
                     let mut xpos = [[0i32; 3]; 26];
                     let mut ring = [0u8; 26];
+                    let mut expiring = [false; 26];
                     let mut bound = [loadout.left, loadout.right];
                     if mc2 {
                         // The native spell book: ownership,
@@ -5924,6 +5943,7 @@ impl App {
                                     castable_tier[s] = bv.castable[s];
                                 }
                                 cost[s] = bv.cost[s];
+                                cost_tier[s] = bv.cost_tier[s];
                                 // The G instrument keeps all
                                 // tiers exercisable; the
                                 // earned ceiling is the XP
@@ -5937,6 +5957,7 @@ impl App {
                                 xp[s] = bv.xp[s];
                                 xpos[s] = bv.xpos[s];
                                 ring[s] = bv.ring[s];
+                                expiring[s] = bv.expiring[s];
                             }
                             bound = [u8::try_from(bv.left).ok(), u8::try_from(bv.right).ok()];
                             // `spell_levels` is NOT mirrored here
@@ -5951,9 +5972,11 @@ impl App {
                             castable[s] = loadout.bindable[s];
                             castable_tier[s] = [loadout.bindable[s]; 3];
                             cost[s] = mgc_sim::mc1::spells::SPELLS[s].possess_mana;
+                            cost_tier[s] = [cost[s]; 3];
                             max_level[s] = pane.levels - 1;
                             sel[s] = self.spell_levels[s];
                             ring[s] = loadout.ring[s];
+                            expiring[s] = loadout.expiring[s];
                         }
                     }
                     let view = ui::SelectorView {
@@ -5966,8 +5989,11 @@ impl App {
                         ring: &ring[..n],
                         mana: loadout.mana,
                         cost: &cost[..n],
+                        cost_tier: &cost_tier[..n],
                         xp: &xp[..n],
                         xpos: &xpos[..n],
+                        expiring: &expiring[..n],
+                        blink: alert_blink,
                     };
                     let (pq, hover) = ui::selector_quads(
                         assets,
@@ -6013,12 +6039,15 @@ impl App {
                     );
                     let mut rows: [Option<ui::RosterEntry>; 8] = Default::default();
                     // Slot 0 = the human. Retail's in-play flag
-                    // (+6) drops at the death event, so the row
-                    // exists only while Alive. Name: the
+                    // (+6) clears only when the wizard is OUT of
+                    // the level (castle-less death / banishment,
+                    // MC1 :48585/:55622, MC2 EF:37663/:37777) —
+                    // never on a temporary death, so the row rides
+                    // through the respawn wait. Name: the
                     // campaign's entered name (retail overrides
                     // the slot-0 table name with the player
                     // string), else the table default.
-                    if vitals.state == mgc_sim::engine::world::LifeState::Alive {
+                    if !vitals.lost {
                         let name = self
                             .campaign
                             .as_ref()
@@ -6046,7 +6075,7 @@ impl App {
                     }
                     for r in w.rival_views() {
                         let slot = r.slot as usize;
-                        if r.alive && (1..8).contains(&slot) {
+                        if !r.eliminated && (1..8).contains(&slot) {
                             rows[slot] = Some(ui::RosterEntry {
                                 name: r.name.to_string(),
                                 mana: r.mana_max,
@@ -6407,31 +6436,39 @@ impl App {
                     );
                     quads.extend(assets.text_quads(&msg, ax * hud_s, ay * hud_s, black, font_s));
                 }
-                // The narration subtitle (MC2 objective
-                // voiceover text): word-wrapped, centered,
-                // one line-height below the toast row so the
-                // two never collide. White ink — the
-                // conventional subtitle color (the retail
-                // textbox look is not reproduced; P-class
-                // presentation).
-                if let Some((text, _)) = &self.subtitle {
-                    let (_, ay) = assets.hud_notification_anchor();
-                    // Uniform HUD scale (`ui::HudFrame`): the
-                    // toast rides under the LEFT-anchored panel
-                    // group, so its anchor is native×s. The font
-                    // runs at 2× because FONT1 is 320-native.
+                // The MC2 objective TEXTBOX (the retail frame +
+                // red letters, DrawCurrentObjectiveTextbox_30630)
+                // replaces the old white-subtitle presentation.
+                // Two feeds, hold wins (retail has ONE box + one
+                // counter): held O = the LIVE objective on demand
+                // (PlayerInput.cpp:393-98, works regardless of the
+                // subtitles setting — a control, not presentation);
+                // else the declare-time dwell (`subtitle`, 200
+                // frames like retail's = 200). Menu open suppresses
+                // it (GameUI.cpp:683 clears the counter).
+                let box_text = if self.objective_held && self.menu.is_none() {
+                    let is_mc2 = matches!(sess.level.game, mgc_sim::ids::GameId::Mc2);
+                    is_mc2
+                        .then(|| {
+                            let (row, _) = w.mc2_objective_view();
+                            let seg = if w.completed() { 9 } else { row as u8 + 1 };
+                            mc2_narration_etext(sess.level.level_number, seg)
+                                .and_then(|idx| sess.level.etext.get(idx))
+                                .filter(|s| !s.is_empty())
+                                .cloned()
+                        })
+                        .flatten()
+                } else {
+                    self.subtitle.as_ref().map(|(t, _)| t.clone())
+                };
+                if let Some(text) = box_text {
                     let hud_s = ui::HudFrame::new(size.0, size.1).s;
                     let font_s = 2.0 * hud_s;
-                    let lh = assets.font_line_height();
-                    let white = [1.0, 1.0, 1.0, 1.0];
-                    let max_w = size.0 * 0.8 / font_s;
-                    let mut y = ay * hud_s + 1.5 * lh * font_s;
-                    for line in wrap_font_text(assets, text, max_w) {
-                        let w_px = assets.text_width(&line) * font_s;
-                        let x = (size.0 - w_px) / 2.0;
-                        quads.extend(assets.text_quads(&line, x, y, white, font_s));
-                        y += lh * font_s;
-                    }
+                    // Retail wraps toward a 320-of-640 text width
+                    // (ComputeTextboxSizesFromTextWords GU:3479).
+                    let max_w = size.0 * 0.55 / font_s;
+                    let lines = wrap_font_text(assets, &text, max_w);
+                    quads.extend(ui::objective_box_quads(assets, &lines, size.0, size.1));
                 }
             }
             // The end-of-game fadeout: the MC2 ending's
@@ -6532,6 +6569,10 @@ impl App {
             self.hovered = hovered;
             self.append_software_cursor(&mut quads);
             if let Some(r) = &mut self.renderer {
+                // The screen-space map markers draw above the fade
+                // quad in flight — hand the renderer the fade level
+                // so they dim in step (set_overlay_fade).
+                r.set_overlay_fade(fade);
                 r.set_ui_quads(quads);
             }
         }
@@ -7158,6 +7199,7 @@ impl ApplicationHandler for App {
                 self.alt_held = false;
                 self.shift_held = false;
                 self.ctrl_mod = false;
+                self.objective_held = false;
             }
             // Returning focus re-applies the pointer mode the screen
             // wants: Windows clears cursor confinement across the
@@ -7193,6 +7235,14 @@ impl ApplicationHandler for App {
                     PhysicalKey::Code(KeyCode::AltLeft | KeyCode::AltRight)
                 ) {
                     self.alt_held = down;
+                }
+                // Hold-O = retail's on-demand objective box (MC2
+                // PlayerInput.cpp:393-98, scancode 0x18). A
+                // NON-CONSUMING latch like retail's poll — flight
+                // stays live under it; the draw site gates on MC2 +
+                // in-level.
+                if matches!(event.physical_key, PhysicalKey::Code(KeyCode::KeyO)) {
+                    self.objective_held = down;
                 }
                 if down && self.alt_held && event.logical_key == Key::Named(NamedKey::Enter) {
                     self.toggle_fullscreen();
@@ -7413,6 +7463,18 @@ impl ApplicationHandler for App {
                 // behind pause too).
                 if down && event.physical_key == PhysicalKey::Code(KeyCode::KeyP) {
                     self.toggle_menu();
+                    return;
+                }
+                // The suicide key (Shift+K — retail in BOTH games:
+                // MC1 scancode 0x25 under the shift branch
+                // :20492-93, MC2 PlayerInput.cpp:239-41; a bare
+                // `life = -1`, the ordinary death chain follows).
+                // Sits ABOVE the option keys because bare K is the
+                // coords-overlay toggle and option_key carries no
+                // shift test.
+                if down && self.shift_held && event.physical_key == PhysicalKey::Code(KeyCode::KeyK)
+                {
+                    self.pending_suicide = true;
                     return;
                 }
                 // The runtime option keys (F1/F2/F3/F5/F6, T/V/G/H/B/C)
@@ -9162,15 +9224,26 @@ fn run_screenshot(
                 // shows the stretched live view instead.
                 Vec::new()
             } else {
-                ui::book_quads(assets, &loadout, &[None; 10], 1280.0, 960.0, (-1.0, -1.0)).0
+                ui::book_quads(
+                    assets,
+                    &loadout,
+                    &[None; 10],
+                    true,
+                    1280.0,
+                    960.0,
+                    (-1.0, -1.0),
+                )
+                .0
             }
         } else {
-            // alert_blink=true: a screenshot shows any armed alert.
+            // Both blink phases pinned true: a screenshot shows any
+            // armed alert, expiring panel and goal tick.
             ui::hud_quads(
                 assets,
                 &loadout,
                 &vitals,
                 hud_transparent,
+                true,
                 true,
                 shot_is_mc2,
                 mc2_book.as_ref(),
@@ -9810,6 +9883,7 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
     }
     println!("          Backspace full-stops the carpet (speed + steering; MC2's stabilize key),");
     println!("          Space respawns after death (at your castle; no castle = level restart),");
+    println!("          Shift+K is the retail suicide key (both games),");
     println!("          Shift+L demolishes your own castle one level per press,");
     println!("          LMB/RMB cast the equipped hand's spell (hold = channel),");
     if selector.map_book {

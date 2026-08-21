@@ -18,6 +18,10 @@ struct Globals {
     atlas: vec4<u32>,
     cam_right: vec4<f32>,
     cam_up: vec4<f32>,
+    // Pre-bank basis (see billboard.wgsl) — flames stand on the
+    // terrain, not the rolled viewport.
+    bb_right: vec4<f32>,
+    bb_up: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> globals: Globals;
@@ -63,7 +67,7 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: Instance) -> VsOut {
     );
     let c = corners[vid];
     var anchor = inst.pos;
-    var up = globals.cam_up.xyz;
+    var up = globals.bb_up.xyz;
     // Water-reflection MIRROR pass (atlas.w = 2): the flame hangs
     // upside-down under the water — flip the ANCHOR about the sea
     // plane and expand DOWN the real camera's up axis (flipping the
@@ -74,7 +78,7 @@ fn vs_main(@builtin(vertex_index) vid: u32, inst: Instance) -> VsOut {
         up = -up;
     }
     let world = anchor
-        + globals.cam_right.xyz * (c.x * inst.size.x)
+        + globals.bb_right.xyz * (c.x * inst.size.x)
         + up * (c.y * inst.size.y);
     var out: VsOut;
     out.clip = globals.view_proj * vec4<f32>(world, 1.0);

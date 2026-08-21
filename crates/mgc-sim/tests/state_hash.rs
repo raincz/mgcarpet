@@ -1067,13 +1067,20 @@ fn level_005_golden_state_hashes() {
         // projectile poses, impacts and the populations that survive
         // genuinely differ. Post-init..C hold — nothing casts 23
         // before D.
-        0x43bf391b4fe16821, // B — settler phase + feeder leash
+        // B..D re-pinned for THE BUGFIX SIDE QUEST's drawable()
+        // admissions: the (10,2) accelerate contrail (map-only pose,
+        // the radar speed tail) and the (10,13)/(10,14) smoke-puff
+        // billboards now project on MC1 worlds. The STATE hashes
+        // hold byte-for-byte — no sim change; the projection simply
+        // sees entities that were always ticking. E holds because no
+        // puff/contrail is alive at its pin point.
+        0x624fc42100d11222, // B — settler phase + feeder leash
         // C..E re-pinned with the mc1l32 certification session (see
         // the GOLDEN note): the scratch-chase persistence, the m5
         // wake phase and the freed-source knock arm first bite in the
         // C window and compound through combat/aftermath.
-        0x3ab68929d7e226fd, // C
-        0xd5f0bb85237a1c61, // D
+        0x65911f0d01d3d01d, // C
+        0xcb00a12fcb061278, // D
         0x325841fe2feb9fe0, // E
     ];
     assert_eq!(

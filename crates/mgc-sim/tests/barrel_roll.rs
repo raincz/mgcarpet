@@ -90,6 +90,7 @@ const ROLL: FlightInput = FlightInput {
     full_stop: false,
     respawn: false,
     demolish: false,
+    suicide: false,
     barrel_roll: true,
     raw_dx: 0,
     mc1_move_byte: None,

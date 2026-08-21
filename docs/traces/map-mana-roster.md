@@ -43,8 +43,10 @@ the trigger and small dressing details differ.
 
 ## The screen (shared)
 
-Centered grid, one row per LIVING wizard (slot in-play flag +6 == 1 —
-cleared on wizard death, so dead wizards vanish from rows). Tiles from
+Centered grid, one row per IN-PLAY wizard (slot in-play flag +6 == 1 —
+cleared only on elimination: quit, castle-less death or the banish
+opcode (MC1 :48585/:48825/:55622; MC2 EF:37614/:37663/:37777), never
+on a temporary death, so a respawning wizard keeps the row). Tiles from
 the UI sprite bank, same indices in BOTH games (already in our baked
 `ui-sprites` atlases): **[85]** = 104×38 head tile, **[86]** = 36×38
 matrix cell (MC2 names them SPELL_TILE / SPELL_TILE_MINI,

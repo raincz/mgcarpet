@@ -506,34 +506,116 @@ pub struct Output {
     _stream: Option<cpal::Stream>,
     live: Arc<std::sync::atomic::AtomicU32>,
     speech_live: Arc<std::sync::atomic::AtomicBool>,
+    /// Set by the stream's error callback on a fatal error kind. On
+    /// Windows/WASAPI those break the worker loop and exit the stream
+    /// thread (display sleep taking an HDMI endpoint, standby
+    /// invalidating every client, the default endpoint changing) —
+    /// the renderer and the command receiver die with it, and every
+    /// later send is silently discarded. The flag is the rebuild
+    /// request consumed by [`Output::reopen`].
+    dead: Arc<std::sync::atomic::AtomicBool>,
+    /// Bumped by every data callback — the liveness heartbeat: a
+    /// counter that stops advancing means the worker thread is gone
+    /// even when no error callback fired (the callback runs and
+    /// renders silence even while suspended, so a live stream always
+    /// beats).
+    beat: Arc<std::sync::atomic::AtomicU32>,
 }
 
 impl Output {
     /// Open the default output device. Returns a silent stub when no
     /// device is available (headless runs must not fail).
     pub fn open() -> Output {
-        use cpal::traits::{DeviceTrait, HostTrait};
-        let (tx, rx) = std::sync::mpsc::channel();
         let live = Arc::new(std::sync::atomic::AtomicU32::new(0));
         let speech_live = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let dead = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let beat = Arc::new(std::sync::atomic::AtomicU32::new(0));
+        let (tx, stream) = Self::build(&live, &speech_live, &dead, &beat);
+        if stream.is_none() {
+            eprintln!("note: no audio output device — sound disabled");
+        }
+        Output {
+            tx,
+            _stream: stream,
+            live,
+            speech_live,
+            dead,
+            beat,
+        }
+    }
 
+    /// Build one stream + its command channel around a fresh
+    /// [`Renderer`]. Shared by [`Output::open`] and
+    /// [`Output::reopen`].
+    fn build(
+        live: &Arc<std::sync::atomic::AtomicU32>,
+        speech_live: &Arc<std::sync::atomic::AtomicBool>,
+        dead: &Arc<std::sync::atomic::AtomicBool>,
+        beat: &Arc<std::sync::atomic::AtomicU32>,
+    ) -> (Sender<Cmd>, Option<cpal::Stream>) {
+        use cpal::traits::{DeviceTrait, HostTrait};
+        let (tx, rx) = std::sync::mpsc::channel();
         let stream = (|| {
             let host = cpal::default_host();
             let device = host.default_output_device()?;
             let config = device.default_output_config().ok()?;
             let rate = config.sample_rate();
+            // The mixer's native layout is interleaved stereo. Open
+            // stereo when the endpoint ranges allow it; otherwise
+            // take the endpoint's own channel count (5.1/7.1 or mono
+            // defaults reject a 2-channel open — previously audio
+            // never started on those) and adapt in the callback.
+            let stereo_ok = config.channels() == 2
+                || device.supported_output_configs().is_ok_and(|mut it| {
+                    it.any(|c| {
+                        c.channels() == 2
+                            && c.min_sample_rate() <= rate
+                            && rate <= c.max_sample_rate()
+                    })
+                });
+            let out_ch = if stereo_ok {
+                2
+            } else {
+                config.channels().max(1)
+            };
             let mut renderer = Renderer::new(rx, rate);
             let live_w = live.clone();
             let speech_live_w = speech_live.clone();
+            let dead_w = dead.clone();
+            let beat_w = beat.clone();
+            let mut scratch: Vec<f32> = Vec::new();
             let stream = device
                 .build_output_stream(
                     cpal::StreamConfig {
-                        channels: 2,
+                        channels: out_ch,
                         sample_rate: rate,
                         buffer_size: cpal::BufferSize::Default,
                     },
                     move |data: &mut [f32], _| {
-                        renderer.render(data);
+                        if out_ch == 2 {
+                            renderer.render(data);
+                        } else {
+                            // Render stereo into the scratch, then
+                            // spread it: mono = the L/R average,
+                            // surround = front L/R with the rest
+                            // silent.
+                            let ch = out_ch as usize;
+                            let frames = data.len() / ch.max(1);
+                            scratch.resize(frames * 2, 0.0);
+                            renderer.render(&mut scratch);
+                            if out_ch == 1 {
+                                for f in 0..frames {
+                                    data[f] = 0.5 * (scratch[2 * f] + scratch[2 * f + 1]);
+                                }
+                            } else {
+                                data.fill(0.0);
+                                for f in 0..frames {
+                                    data[f * ch] = scratch[2 * f];
+                                    data[f * ch + 1] = scratch[2 * f + 1];
+                                }
+                            }
+                        }
+                        beat_w.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                         live_w.store(renderer.live_mask(), std::sync::atomic::Ordering::Relaxed);
                         speech_live_w
                             .store(renderer.speech_live(), std::sync::atomic::Ordering::Relaxed);
@@ -547,9 +629,25 @@ impl Output {
                         // itself. Print each DISTINCT error once;
                         // swallow identical repeats, surfacing the
                         // count only if a different error follows.
+                        // FATAL kinds additionally raise the rebuild
+                        // flag — dedup must never swallow that.
                         let mut last = String::new();
                         let mut repeats = 0u32;
-                        move |e| {
+                        move |e: cpal::Error| {
+                            use cpal::ErrorKind as K;
+                            if matches!(
+                                e.kind(),
+                                K::DeviceNotAvailable
+                                    | K::StreamInvalidated
+                                    | K::HostUnavailable
+                                    | K::DeviceChanged
+                            ) {
+                                // DeviceChanged nominally keeps the
+                                // stream alive, but it plays on into
+                                // the OLD endpoint — rebuilding is
+                                // what follows the new default.
+                                dead_w.store(true, std::sync::atomic::Ordering::Relaxed);
+                            }
                             let msg = e.to_string();
                             if msg == last {
                                 repeats += 1;
@@ -573,15 +671,36 @@ impl Output {
             stream.play().ok()?;
             Some(stream)
         })();
-        if stream.is_none() {
-            eprintln!("note: no audio output device — sound disabled");
+        (tx, stream)
+    }
+
+    /// Whether the stream reported a fatal error and needs a rebuild.
+    pub fn needs_reopen(&self) -> bool {
+        self.dead.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// The data-callback liveness counter (see the `beat` field).
+    pub fn heartbeat(&self) -> u32 {
+        self.beat.load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    /// Tear down the dead stream and build a fresh one (new channel,
+    /// new renderer). ALL renderer state is lost with the old
+    /// callback — the caller must resend gains/suspend/duck/music
+    /// afterwards. Returns false when no device came up; the rebuild
+    /// flag stays set so the caller retries later (which also grants
+    /// device-hotplug recovery to a session that started silent).
+    pub fn reopen(&mut self) -> bool {
+        self._stream = None; // release the old endpoint first
+        self.dead.store(false, std::sync::atomic::Ordering::Relaxed);
+        let (tx, stream) = Self::build(&self.live, &self.speech_live, &self.dead, &self.beat);
+        self.tx = tx;
+        let ok = stream.is_some();
+        self._stream = stream;
+        if !ok {
+            self.dead.store(true, std::sync::atomic::Ordering::Relaxed);
         }
-        Output {
-            tx,
-            _stream: stream,
-            live,
-            speech_live,
-        }
+        ok
     }
 
     pub fn live_mask(&self) -> u32 {

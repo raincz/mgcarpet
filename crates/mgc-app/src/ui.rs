@@ -50,9 +50,12 @@ pub struct UiAssets {
     /// colourize-0xA6 icon)]. Empty on MC1 atlases.
     pane_uv: Vec<[[f32; 4]; 4]>,
     /// MC2 selector FLYOUT tiles: uv per (spell·3 + level) ×
-    /// [0 unlocked-affordable(161), 1 unlocked-unaffordable(162)],
-    /// number badge + per-level icon baked in. Empty on MC1 atlases.
-    sub_uv: Vec<[[f32; 4]; 2]>,
+    /// [0 lit(161), 1 pool-fail(162 + LUT-ghosted icon), 2 broke
+    /// (162 + LIT icon — retail keys the tile on `canSubSummon &&
+    /// mana/cost` at EF:22618 but ghosts the icon on the pool test
+    /// ALONE at EF:22625-28)], number badge + per-level icon baked
+    /// in. Empty on MC1 atlases.
+    sub_uv: Vec<[[f32; 4]; 3]>,
     /// Messaging-font glyph UV rects (texels into `atlas_rgba`), indexed
     /// by sprite id = ASCII char + 1 (id 33 = space); None for absent
     /// glyphs. The masks are baked WHITE — text is tinted at draw time,
@@ -223,7 +226,7 @@ impl UiAssets {
         let grid_per_row = (base_w / gw.max(1)).max(1);
         let grid_rows = (n_mc2 * 4).div_ceil(grid_per_row);
         let sub_per_row = (base_w / sw.max(1)).max(1);
-        let sub_rows = (n_mc2 * 3 * 2).div_ceil(sub_per_row);
+        let sub_rows = (n_mc2 * 3 * 3).div_ceil(sub_per_row);
         let grid_y0 = base_h + tile_rows * tile_h;
         let sub_y0 = grid_y0 + grid_rows * gh;
 
@@ -355,13 +358,18 @@ impl UiAssets {
                 for level in 0..3usize {
                     let sub_icon = sprite_px(MC2_SPR_SUB_ICON + 3 * spell + level);
                     let badge = sprite_px(MC2_SPR_SUB_NUM + level);
-                    let mut uvs = [[0.0f32; 4]; 2];
-                    for (variant, (bg, ink)) in
-                        [(&sub_box, PaneInk::Raw), (&sub_dark_box, PaneInk::Blend)]
-                            .iter()
-                            .enumerate()
+                    let mut uvs = [[0.0f32; 4]; 3];
+                    for (variant, (bg, ink)) in [
+                        (&sub_box, PaneInk::Raw),
+                        (&sub_dark_box, PaneInk::Blend),
+                        // Dark frame, LIT icon: pool ok but the hand
+                        // can't pay one cast (EF:22618 vs :22625-28).
+                        (&sub_dark_box, PaneInk::Raw),
+                    ]
+                    .iter()
+                    .enumerate()
                     {
-                        let t = (spell * 3 + level) * 2 + variant;
+                        let t = (spell * 3 + level) * 3 + variant;
                         let (tx, ty) = ((t % sub_per_row) * sw, sub_y0 + (t / sub_per_row) * sh);
                         uvs[variant] = [tx as f32, ty as f32, sw as f32, sh as f32];
                         let mut tile = vec![0u8; sw * sh];
@@ -552,7 +560,9 @@ impl UiAssets {
     /// single lines (the subtitle wrap/centering; the plain toast is
     /// left-aligned).
     pub fn text_width(&self, s: &str) -> f32 {
-        s.bytes().map(|b| self.glyph_advance(b)).sum()
+        s.chars()
+            .map(|c| self.glyph_advance(if c.is_ascii() { c as u8 } else { b'?' }))
+            .sum()
     }
 
     /// Build quads for `s` in the messaging font, top-left at screen
@@ -564,14 +574,14 @@ impl UiAssets {
     pub fn text_quads(&self, s: &str, x: f32, y: f32, color: [f32; 4], scale: f32) -> Vec<UiQuad> {
         let mut quads = Vec::with_capacity(s.len());
         let (mut cx, mut cy) = (x, y);
-        for b in s.bytes() {
-            match b {
-                b'\n' => {
+        for c in s.chars() {
+            match c {
+                '\n' => {
                     cy += self.line_height * scale;
                     cx = x;
                     continue;
                 }
-                b'\t' => {
+                '\t' => {
                     // Retail advances tab (and space) by the space glyph
                     // width (`GetLetterWidth_6FC10` = glyph[33].width).
                     cx += self.glyph_advance(b' ') * scale;
@@ -579,6 +589,11 @@ impl UiAssets {
                 }
                 _ => {}
             }
+            // FONT1 is a byte-indexed ASCII bank — a multi-byte char
+            // must never walk it per BYTE (an em-dash rendered as
+            // THREE garbage glyphs, player-reported on the replay
+            // HUD). Non-ASCII falls back to '?'.
+            let b = if c.is_ascii() { c as u8 } else { b'?' };
             if let Some(uv) = self.glyph_uv.get(b as usize + 1).copied().flatten() {
                 let (gw, gh) = (uv[2], uv[3]);
                 if gh > 0.0 && gw > 0.0 {
@@ -617,9 +632,10 @@ impl UiAssets {
     }
 
     /// A pre-composited MC2 flyout tile (see `sub_uv`); None on MC1
-    /// atlases.
-    fn sub_tile(&self, spell: usize, level: usize, dark: bool) -> Option<[f32; 4]> {
-        self.sub_uv.get(spell * 3 + level).map(|v| v[dark as usize])
+    /// atlases. `variant`: 0 lit, 1 pool-fail (ghost icon), 2 broke
+    /// (dark frame, lit icon).
+    fn sub_tile(&self, spell: usize, level: usize, variant: usize) -> Option<[f32; 4]> {
+        self.sub_uv.get(spell * 3 + level).map(|v| v[variant])
     }
 
     /// The UI-atlas UV rect (texels) for one HSPR sprite, for map
@@ -1065,6 +1081,7 @@ pub fn book_quads(
     assets: &UiAssets,
     loadout: &LoadoutView,
     quick_binds: &[Option<u8>; 10],
+    alert_blink: bool,
     w: f32,
     h: f32,
     cursor: (f32, f32),
@@ -1103,6 +1120,14 @@ pub fn book_quads(
         // the CAST keeps fizzling sim-side until the castle stores enough.
         if over && owned {
             hovered = Some(spell_id);
+        }
+        // THE EXPIRY BLINK (sub_24230 :27807 — the same gate as the
+        // hand panel's :27670): the owned cell's whole draw — slab,
+        // icon, badge — SKIPS on odd turns while the spell's
+        // countdown runs its last window. Hover/bind stays live
+        // above: retail never keys input to the draw phase.
+        if owned && loadout.expiring[spell as usize] && !alert_blink {
+            continue;
         }
 
         // The stone slab fills the cell, drawn DARKER (the original's
@@ -1197,7 +1222,9 @@ pub fn book_quads(
     // the translucent sub_23940 blend), overdrawing its neighbours
     // with the 64×44 frame. Frame [1]/[2] by the burst counter, icon
     // raw, availability meter at (+4,+36).
-    if let Some(spell_id) = hovered {
+    // The redraw carries sub_23D40's expiry-blink gate too (the
+    // :26967 caller runs the same :27670 skip).
+    if let Some(spell_id) = hovered.filter(|sp| alert_blink || !loadout.expiring[sp.0 as usize]) {
         let sp = spell_id.0;
         let k = DISPLAY_ORDER.iter().position(|&d| d == sp).unwrap_or(0);
         let cell = book_cell(w, h, k);
@@ -1272,8 +1299,10 @@ pub struct RosterEntry {
 /// draw the same centered grid from the same tile sprites: head tile
 /// [85] (name at +8,+6; total mana `%d` at +8,+20) plus an 8-wide
 /// kill-matrix of cell tiles [86] (`%03d` at +8,+10, the Type_160+30 /
-/// word_0x26_38 kill tallies). Rows exist only for LIVING wizards
-/// (slot flag +6 == 1); layout centers by the living count.
+/// word_0x26_38 kill tallies). Rows exist for IN-PLAY wizards (slot
+/// flag +6 == 1 — cleared only on elimination/banishment, never on a
+/// temporary death, so a respawning wizard keeps the row); layout
+/// centers by the in-play count.
 ///
 /// Both games FILL the tile interiors (inset 4, size − 8) with the
 /// wizard's box color, opaque: MC1 via sub_24C20 (:27070-89), MC2 via
@@ -1284,17 +1313,17 @@ pub struct RosterEntry {
 /// number.
 ///
 /// Per-game flavor kept faithful:
-///  - Absent/dead columns: MC1 draws NOTHING but still ADVANCES the
+///  - Absent/eliminated columns: MC1 draws NOTHING but still ADVANCES the
 ///    cursor (:27100-24 — only the self-cell arm draws inside the
 ///    skip branch; v9 += cellW runs regardless), leaving a GAP at a
-///    dead wizard's column. MC2 compacts — `blackBarX` advances only
+///    departed wizard's column. MC2 compacts — `blackBarX` advances only
 ///    inside the alive branch (EF:22318-56).
 ///  - Centering quirks are retail's own: MC1 widths count the living
 ///    columns + the head tile (:27042-47) though up to 8 column
 ///    positions span; MC2 counts living columns + ONE CELL width for
 ///    the head (EF:22264) though the head tile is wider.
 ///
-/// `rows[slot] = None` = slot absent or dead (retail's +6 != 1).
+/// `rows[slot] = None` = slot absent or eliminated (retail's +6 != 1).
 pub fn roster_quads(
     assets: &UiAssets,
     rows: &[Option<RosterEntry>; 8],
@@ -1565,6 +1594,7 @@ pub fn hud_quads(
     vitals: &PlayerVitals,
     transparent: bool,
     alert_blink: bool,
+    goal_blink: bool,
     mc2: bool,
     mc2_book: Option<&Mc2BookView>,
     dev_spells: bool,
@@ -1607,21 +1637,19 @@ pub fn hud_quads(
     // 2×2 ticks at y=26 and y=38 bracketing the mana ruler at win_pct%
     // of its 64px width (`v20 + (pct<<6)/100`), colour alternating
     // between the two team-ramp entries per blink frame (v28 =
-    // byte_99B58[2·owner + phase]; white/grey stand-ins until the LUT
-    // bake). The green completed state is our addition (deliberate:
-    // retail has no completion recolour here).
+    // byte_99B58[2·owner + phase]). The player's ramp reads WHITE /
+    // TRANSPARENT in retail (the off entry blends through the
+    // sub_616C0 translucency LUT, word_9ADFC & 4 — player
+    // retail-verified), so the off phase SKIPS the draw and the
+    // pixel below shows through. No completion recolour — retail
+    // keeps blinking after the goal is met. MC2's own ramp blinks
+    // white/blue-ish; reusing the MC1 white/transparent marker is a
+    // deliberate deviation (docs/DEVIATIONS.md).
     let win_tick = |quads: &mut Vec<UiQuad>, ox: f32| {
-        if loadout.win_pct > 0 {
+        if loadout.win_pct > 0 && goal_blink {
             let tx = (ox + BAR_X) * s + BAR_W * s * (loadout.win_pct as f32 / 100.0).min(1.0);
-            let tc = if loadout.completed {
-                [0.3, 0.95, 0.3, 1.0]
-            } else if alert_blink {
-                MANA_WHITE
-            } else {
-                METER_GREY
-            };
             for y in [26.0, 38.0] {
-                quads.push(solid([tx, y * s, 2.0 * s, 2.0 * s], tc));
+                quads.push(solid([tx, y * s, 2.0 * s, 2.0 * s], MANA_WHITE));
             }
         }
     };
@@ -1828,11 +1856,29 @@ pub fn hud_quads(
             };
             (sp, sp.is_some_and(|sp| loadout.cooldown[sp as usize] > 0.0))
         };
+        // THE EXPIRY BLINK (sub_23D40 :27670-71 / DrawSpellIcon_2E260
+        // GameUI.cpp:351-54): while the bound spell's countdown runs
+        // its last window (< 64 of a > 64 full count on MC1; < 32 on
+        // MC2's flag-4 long-runners), retail skips the WHOLE panel —
+        // frame art included — every other turn (blink bank index [1]
+        // = Turn & 1), letting the view show through. On Create
+        // Castle / Global Death the same gate reads as "recast almost
+        // ready" (their +48 is the recast lockout).
+        let expiring = spell.is_some_and(|sp| {
+            if let Some(bv) = mc2_book.filter(|_| mc2) {
+                bv.expiring[sp as usize]
+            } else {
+                loadout.expiring[sp as usize]
+            }
+        });
+        if expiring && !alert_blink {
+            continue;
+        }
         // Frame [2] = the CAST-IN-PROGRESS highlight (sub_23D40 :27675:
-        // `a3x->var_48` = the burst counter, nonzero only while firing/
-        // channeling), else the idle frame [1]. Equipped ≠ casting — the
+        // `a3x->var_48` = the burst/duration countdown, live from cast
+        // to expiry), else the idle frame [1]. Equipped ≠ casting — the
         // highlight flashes on projectile casts and stays lit for
-        // duration effects (speed etc.), driven by the burst counter.
+        // duration effects (speed etc.), driven by that countdown.
         let frame = if active { SPR_SLOT_HELD } else { SPR_SLOT_IDLE };
         push_opt(
             &mut quads,
@@ -1955,6 +2001,103 @@ pub fn exit_confirm_rects(w: f32, h: f32) -> ([f32; 4], [f32; 4]) {
 /// no OK/Cancel art (retail MC1 had no dialog), so it falls back to
 /// labeled slab buttons in the same geometry. The mild hover tint is
 /// presentational (deliberate; retail's feedback was the cursor itself).
+/// MC2's objective TEXTBOX (`DrawCurrentObjectiveTextbox_30630`
+/// GameUI.cpp:532-616): RED letters (CLRD 3840 = 0xF00) over a
+/// translucent black wash, inside the stone tile frame — corners
+/// [171], left/right columns [172], top/bottom runs [173]
+/// (`DrawTextboxFrame_89690` GU:3571-3607). The interior snaps to
+/// whole tile multiples like retail's `ComputeFrameSizes_89980`, the
+/// box centers on x and sits upper-middle, and TEXT draws before the
+/// FRAME (GU:614-15) so the border overlaps glyph bleed. Falls back
+/// to plain slab edges when the frame tiles are absent (MC1 banks).
+/// `lines` = pre-wrapped text (the caller owns the wrap width).
+pub fn objective_box_quads(assets: &UiAssets, lines: &[String], w: f32, h: f32) -> Vec<UiQuad> {
+    let mut quads = Vec::new();
+    if lines.is_empty() || !assets.has_font() {
+        return quads;
+    }
+    let s = HudFrame::new(w, h).s;
+    let font_s = 2.0 * s;
+    let lh = assets.font_line_height() * font_s;
+    let text_w = lines
+        .iter()
+        .map(|l| assets.text_width(l) * font_s)
+        .fold(0.0, f32::max);
+    let text_h = lines.len() as f32 * lh;
+    let (run_w, run_h) = assets
+        .sprite_dims(MC2_SPR_FRAME_RUN)
+        .unwrap_or((32.0, 10.0));
+    let (side_w, side_h) = assets
+        .sprite_dims(MC2_SPR_FRAME_SIDE)
+        .unwrap_or((16.0, 14.0));
+    // Interior snapped to whole frame tiles around the padded text.
+    let tiles_x = ((text_w + 16.0 * s) / (run_w * s)).ceil().max(1.0);
+    let tiles_y = ((text_h + 8.0 * s) / (side_h * s)).ceil().max(1.0);
+    let iw = tiles_x * run_w * s;
+    let ih = tiles_y * side_h * s;
+    let ix = (w - iw) / 2.0;
+    let iy = 0.32 * h - ih / 2.0;
+    // The interior wash (retail's ColorizeScreen blend-LUT darken).
+    quads.push(solid([ix, iy, iw, ih], [0.0, 0.0, 0.0, 0.55]));
+    // Text, centered in the interior, pure red.
+    let red = [1.0, 0.0, 0.0, 1.0];
+    let mut ty = iy + (ih - text_h) / 2.0;
+    for line in lines {
+        let lw = assets.text_width(line) * font_s;
+        quads.extend(assets.text_quads(line, ix + (iw - lw) / 2.0, ty, red, font_s));
+        ty += lh;
+    }
+    if assets.sprite_dims(MC2_SPR_FRAME_CORNER).is_some() {
+        // The tiled border, then the corners over the run ends.
+        for i in 0..tiles_x as usize {
+            let x = ix + i as f32 * run_w * s;
+            push_opt(
+                &mut quads,
+                assets.sprite_quad_tint(MC2_SPR_FRAME_RUN, x, iy - run_h * s, s, WHITE),
+            );
+            push_opt(
+                &mut quads,
+                assets.sprite_quad_tint(MC2_SPR_FRAME_RUN, x, iy + ih, s, WHITE),
+            );
+        }
+        for j in 0..tiles_y as usize {
+            let y = iy + j as f32 * side_h * s;
+            push_opt(
+                &mut quads,
+                assets.sprite_quad_tint(MC2_SPR_FRAME_SIDE, ix - side_w * s, y, s, WHITE),
+            );
+            push_opt(
+                &mut quads,
+                assets.sprite_quad_tint(MC2_SPR_FRAME_SIDE, ix + iw, y, s, WHITE),
+            );
+        }
+        let (cw, ch) = assets
+            .sprite_dims(MC2_SPR_FRAME_CORNER)
+            .unwrap_or((16.0, 12.0));
+        for (cx, cy) in [
+            (ix - cw * s, iy - ch * s),
+            (ix + iw, iy - ch * s),
+            (ix - cw * s, iy + ih),
+            (ix + iw, iy + ih),
+        ] {
+            push_opt(
+                &mut quads,
+                assets.sprite_quad_tint(MC2_SPR_FRAME_CORNER, cx, cy, s, WHITE),
+            );
+        }
+    } else {
+        // MC1-bank fallback: plain slab edges (the exit-confirm
+        // idiom) so held-O still reads as a box.
+        let t = 2.0 * s;
+        let edge = [0.6, 0.6, 0.6, 0.9];
+        quads.push(solid([ix - t, iy - t, iw + 2.0 * t, t], edge));
+        quads.push(solid([ix - t, iy + ih, iw + 2.0 * t, t], edge));
+        quads.push(solid([ix - t, iy, t, ih], edge));
+        quads.push(solid([ix + iw, iy, t, ih], edge));
+    }
+    quads
+}
+
 pub fn exit_confirm_quads(
     assets: &UiAssets,
     text: &str,
@@ -2216,6 +2359,10 @@ const MC2_SPR_SUB_OK: usize = 161; // level box, unlocked + affordable
 const MC2_SPR_SUB_DARK: usize = 162; // level box, unlocked + unaffordable
 const MC2_SPR_SUB_LOCKED: usize = 163; // level box, locked (drawn empty)
 const MC2_SPR_SUB_GOLD: usize = 164; // chosen-level gold frame
+// The textbox frame 9-slice (DrawTextboxFrame_89690 GU:3571-3607).
+const MC2_SPR_FRAME_CORNER: usize = 171;
+const MC2_SPR_FRAME_SIDE: usize = 172; // left/right column tile
+const MC2_SPR_FRAME_RUN: usize = 173; // top/bottom run tile
 const MC2_SPR_SUB_NUM: usize = 165; // + level: the "1/2/3" number bg
 const MC2_SPR_SUB_ICON: usize = 179; // + 3*spell + level: per-level icon
 
@@ -2326,9 +2473,19 @@ pub struct SelectorView<'a> {
     /// shot meter).
     pub mana: u32,
     pub cost: &'a [u32],
+    /// Per-tier one-cast cost (`GetSpellManaCost_6D710` per tier,
+    /// EF:22609) — the flyout's broke test against `mana`; `cost`
+    /// above carries the SELECTED tier only.
+    pub cost_tier: &'a [[u32; 3]],
     /// Effective spell XP (banked + volatile) — the flyout's per-tier
     /// unlock-progress bar (EF:22633-71). Empty on MC1.
     pub xp: &'a [i32],
+    /// Expiry-blink eligibility per spell (the hand panels' law —
+    /// EF:22493-99 runs the same gate on the pane cell).
+    pub expiring: &'a [bool],
+    /// The blink bank's index-[1] phase (Turn & 1); false = the
+    /// skip frame for expiring cells.
+    pub blink: bool,
     /// Per-tier `xpos1` thresholds (single-player ladder), same bar.
     pub xpos: &'a [[i32; 3]],
 }
@@ -2506,6 +2663,13 @@ pub fn selector_quads(
         let owned = view.owned[spell];
         let castable = owned && view.castable[spell];
         let hovered = hover.slot == Some(slot) || drag_slot == Some(slot);
+        // THE EXPIRY BLINK on the pane cell (EF:22493-99 — the same
+        // flag-4 + last-window gate as the hand panel skips the whole
+        // cell body on odd turns). The hit-test above stays live:
+        // retail never keys input to the draw phase.
+        if owned && view.expiring.get(spell).copied().unwrap_or(false) && !view.blink {
+            continue;
+        }
 
         if pane.mc2_art {
             // One pre-composited tile per box state (EF:22468-22544):
@@ -2741,20 +2905,24 @@ pub fn selector_quads(
                 );
                 continue;
             }
-            // One pre-composited flyout tile (box + number badge +
-            // per-level icon; the dark variant's icon went through
-            // the blend LUT at bake time). Dark = THIS tier's
+            // The retail THREE-STATE flyout tile (EF:22611-28): the
             // castle-pool prerequisite unmet (`canSubSummon`,
-            // EF:22602-08). Known approximation: retail also darkens
-            // the FRAME alone when no whole cast is affordable while
-            // the icon stays lit — the composited tile can't split
-            // frame from icon, so the tile keys on the prerequisite
-            // only.
-            let dark = !view
-                .castable_tier
-                .get(spell)
-                .is_none_or(|t| t[(l as usize).min(2)]);
-            if let Some(uv) = assets.sub_tile(spell, l as usize, dark) {
+            // EF:22602-08) = dark frame + LUT-ghosted icon; pool ok
+            // but the hand can't pay one cast (`manaPart = mana /
+            // cost`, EF:22609/:22618) = dark frame with the icon
+            // still LIT; else the lit tile. The broke term was a
+            // known approximation until player retail-verification
+            // (2026-08-21) promoted it.
+            let li = (l as usize).min(2);
+            let pool_ok = view.castable_tier.get(spell).is_some_and(|t| t[li]);
+            let variant = if !pool_ok {
+                1
+            } else if view.cost_tier.get(spell).is_some_and(|c| view.mana < c[li]) {
+                2
+            } else {
+                0
+            };
+            if let Some(uv) = assets.sub_tile(spell, l as usize, variant) {
                 quads.push(UiQuad {
                     rect: snap(cell),
                     uv,

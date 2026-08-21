@@ -157,17 +157,30 @@ pub struct Mc2BookView {
     /// The SELECTED tier's cast cost (`GetSpellManaCost_6D710` —
     /// castle rides the upgrade ladder).
     pub cost: [u32; 26],
+    /// EVERY tier's cast cost — the flyout's broke test recomputes
+    /// `GetSpellManaCost` per tier (EF:22609), not per selection.
+    pub cost_tier: [[u32; 3]; 26],
     /// Cast-in-progress (`word_0x2E_46` > 0) — the HUD hand-panel
     /// highlight (retail's burst-counter frame swap).
     pub armed: [bool; 26],
+    /// Retail's HUD EXPIRY-BLINK eligibility (DrawSpellIcon_2E260
+    /// GameUI.cpp:351-54): a flag-4 long-runner whose cast window
+    /// (`word_0x2E_46`) is live inside its last 31 ticks. While set,
+    /// retail SKIPS the whole panel (and the CTRL-pane cell,
+    /// EF:22493-99) on odd turns (`colorIndex_121[1]` = Turn & 1).
+    pub expiring: [bool; 26],
     /// Retail's `canSummon`/`canSubSummon` PER TIER (the pane
     /// grey-out, EF:22503-08 grid / EF:22602-08 flyout): the tier's
     /// `maxManaLimit_A` castle-pool prerequisite is zero, or the own
     /// castle's stored mana covers it. False = the dark box +
-    /// ghosted icon (SPELL_ICON_PANEL2 + transparent draw). Pool
-    /// affordability is deliberately NOT part of it — retail draws a
-    /// broke-but-eligible spell lit with an empty shot meter. The
-    /// grid keys on the SELECTED tier (`castable[s][sel[s]]`).
+    /// ghosted icon (SPELL_ICON_PANEL2 + transparent draw). Hand
+    /// mana is NOT part of THIS flag, and on the GRID and the HUD
+    /// hand panels retail truly ignores it (a broke-but-eligible
+    /// spell stays lit with an empty shot meter) — but the FLYOUT
+    /// tile ADDITIONALLY keys on `mana / cost` per tier
+    /// (EF:22609/:22618, player retail-verified 2026-08-21): the
+    /// app combines this flag with `cost_tier` there. The grid keys
+    /// on the SELECTED tier (`castable[s][sel[s]]`).
     pub castable: [[bool; 3]; 26],
     pub left: i8,
     pub right: i8,
@@ -708,7 +721,9 @@ impl World {
         let mut xp = [0i32; 26];
         let mut xpos = [[0i32; 3]; 26];
         let mut cost = [0u32; 26];
+        let mut cost_tier = [[0u32; 3]; 26];
         let mut armed = [false; 26];
+        let mut expiring = [false; 26];
         let mut castable = [[false; 3]; 26];
         // Retail's canSummon castle-pool probe (EF:22504-05): the own
         // castle's STORED mana, resolved once for the whole pane.
@@ -731,8 +746,18 @@ impl World {
                 }
             }
             cost[s] = self.mc2_spell_mana_cost(s, tier).max(0) as u32;
+            for t in 0..3 {
+                cost_tier[s][t] = self.mc2_spell_mana_cost(s, t).max(0) as u32;
+            }
             let m = self.mc2_book.ent[s] as usize;
             armed[s] = m != 0 && self.g.ent[m].f26 > 0;
+            // The blink set is retail's `isEnabled_1 & 4`, stamped in
+            // CODE, not the SPELLS file (SetDefaultSpells_5C0A0
+            // Spells.cpp:122-30): Speed Up/Morph/Shield/Rebound/
+            // Invisible/Beyond Sight/Duel. Threshold 32, half MC1's.
+            expiring[s] = m != 0
+                && matches!(s, 3 | 4 | 6 | 8 | 11 | 12 | 14)
+                && (1..32).contains(&self.g.ent[m].f26);
         }
         Mc2BookView {
             owned,
@@ -741,7 +766,9 @@ impl World {
             xp,
             xpos,
             cost,
+            cost_tier,
             armed,
+            expiring,
             castable,
             left: self.mc2_book.left,
             right: self.mc2_book.right,

@@ -420,6 +420,12 @@ pub struct LoadoutView {
     pub right: Option<u8>,
     /// 0.0 = ready, 1.0 = just fired (burst counter / count).
     pub cooldown: [f32; 24],
+    /// Retail's HUD EXPIRY-BLINK eligibility per spell (sub_23D40
+    /// :27670-71): the manifestation's +48 countdown is live inside
+    /// its last 63 ticks on a > 64-count spell — the long-runner set.
+    /// While set, retail SKIPS the whole hand panel (and the book
+    /// cell, sub_24230 :27807) on odd turns (str_93[1] = Turn & 1).
+    pub expiring: [bool; 24],
     /// Effective per-cast mana cost of each spell RIGHT NOW
     /// ([`World::spell_cast_cost`]) — the HUD availability meter divides
     /// the pool by this (sub_23D40 :27703 reads the manifestation's live
@@ -451,7 +457,10 @@ pub struct LoadoutView {
     /// player needs SOME way to see the vulture-bomb chip damage).
     pub castle_hp: Option<(i32, u32)>,
     /// The level goal: required banked % of the world total (the
-    /// HUD goal tick, :27268). 0 = none wired.
+    /// HUD goal tick, :27268). MC1 = the level footer's win pct;
+    /// MC2 = the active type-0 stage's target (retail word_0x2FED5,
+    /// cleared on completion — see `mc2_mana_goal_pct`). 0 = none
+    /// wired/active.
     pub win_pct: u16,
     /// The latched completion flag.
     pub completed: bool,
@@ -547,6 +556,10 @@ pub struct PlayerCommand {
     /// :20496-501): sets the OWN castle's life to −1 (:55846-50) —
     /// one downgrade level per press.
     pub demolish: bool,
+    /// The SUICIDE key (MC1 Shift+K :20492-93, MC2
+    /// PlayerInput.cpp:239-41 — retail in BOTH games): a bare
+    /// `life = -1` on the human wizard.
+    pub suicide: bool,
 }
 
 /// The chained human flight, handed INTO the world turn so the mover
@@ -1451,13 +1464,22 @@ fn drawable(game: GameId, class: u16, model: u16) -> bool {
     // — sprite-carrying pickups/markers, EXCEPT the terrain risers
     // (models 1/2): invisible machinery, no SetEntityIndex in their
     // creator path (mc2::riser).
-    // MC2's (10,13)/(10,14) smoke particles are sprite-carrying;
-    // their (10,59)/(10,60) emitters are invisible by construction
-    // (no sprite, never map-linked) and stay excluded.
+    // (10,13)/(10,14) smoke puffs are sprite-carrying in BOTH games
+    // (MC1: m14 mana-scatter base row 9 / m13 volcano-exhaust base
+    // row 67, ctors sub_3AAA0/sub_3AB40 — the mc1l1 conformance port;
+    // MC2: the smoke particles). Their MC2 (10,59)/(10,60) emitters
+    // are invisible by construction (no sprite, never map-linked) and
+    // stay excluded.
+    // (10,2) is the accelerate CONTRAIL puff in both games:
+    // spriteless in-world but plotted by retail's minimap as the
+    // speed tail behind a boosting wizard (MC1 sub_48710 :57258-77,
+    // MC2 DrawMinimapEntities_B GameUI.cpp:1257-63) — exported as a
+    // map-only pose (live_poses_*), like the MC1 magnet.
     // Class 15 = MC2's spell-jar tokens (fixed sprite 77).
-    // The MC2-era arms (classes 14/15, class-10 models 13/14/22/75/77)
-    // are gated on the game: an MC1 world's (10,13..) etc. are
-    // unrelated logic models and must not acquire a sprite pose.
+    // The remaining MC2-era arms (classes 14/15, class-10 models
+    // 22/75/77/78/79) are gated on the game: an MC1 world's same-
+    // numbered models are unrelated logic models and must not
+    // acquire a sprite pose.
     let mc2 = matches!(game, GameId::Mc2);
     (matches!(class, 2 | 3 | 5 | 12)
         || (mc2 && (class == 15 || (class == 14 && !matches!(model, 1 | 2)))))
@@ -1465,7 +1487,8 @@ fn drawable(game: GameId, class: u16, model: u16) -> bool {
         || (class == 10
             && (matches!(
                 model,
-                34 | 0 | 1 | 5 | 6 | 16 | 19 | 23 | 25 | 26 | 38 | 39 | 40 | 43 | 45
+                34 | 0 | 1 | 2 | 5 | 6 | 13 | 14 | 16 | 19 | 23 | 25 | 26 | 38 | 39 | 40
+                    | 43 | 45
             )
                 // MC2 effect billboards: sprite-carrying entities that
                 // must be in the allowlist or the whole effect runs
@@ -1477,7 +1500,6 @@ fn drawable(game: GameId, class: u16, model: u16) -> bool {
                 // controllers) and stay out, as does the (10,54)
                 // magnet aura (retail AddAuxiliary_50500 sets no
                 // SetEntityIndex — the visual is the streaming mana).
-                // (10,13)/(10,14) are the MC2 smoke particles.
                 // (10,78) is the MAGIC MINE and (10,79) the castle
                 // defend turret — both ctor sprite 66 (sub_50840 /
                 // sub_508E0 EF:37000). The mine was missing here for as
@@ -1487,7 +1509,7 @@ fn drawable(game: GameId, class: u16, model: u16) -> bool {
                 // dissolved. Player-reported; the sim-level goldens
                 // could not see it because they count entities, not
                 // poses.
-                || (mc2 && matches!(model, 13 | 14 | 22 | 75 | 77 | 78 | 79))
+                || (mc2 && matches!(model, 22 | 75 | 77 | 78 | 79))
                 // MC1's (10,54) mana magnet: invisible in-world (no
                 // sprite) but VISIBLE ON THE MAP as a bright white dot
                 // for its 128-tick life (player retail-verified) —
@@ -2022,6 +2044,11 @@ impl World {
         // (player retail-verified: bright white for the whole 128-tick
         // life).
         let magnet = e.class64 == 10 && e.model65 == 54;
+        // The (10,2) accelerate contrail puff: spriteless in-world —
+        // the pose exists solely for the map's SPEED TAIL behind a
+        // boosting wizard (sub_48710 :57258-77 plots model 2 in the
+        // owner's team color).
+        let contrail = e.class64 == 10 && e.model65 == 2;
         // Body segments hide from map dots + health bars (the heads
         // carry both) — MC1's state 120.
         let segment = e.class64 == 5 && e.tick70 == 120;
@@ -2049,12 +2076,21 @@ impl World {
                 }
                 (e.act_life.max(0) as f32 / denom).min(1.0)
             });
+        // The (10,13)/(10,14) smoke puffs draw through the
+        // translucent raster mode on MC1 too (player retail-verified
+        // 2026-08-21; MC2 carries the same mode 2 explicitly in its
+        // particle descriptor — see the live_poses_mc2 blend arm).
+        let blend = if e.class64 == 10 && matches!(e.model65, 13 | 14) {
+            2
+        } else {
+            0
+        };
         PoseGameBits {
             skip: false,
             segment,
             life_frac,
-            blend: 0,
-            map_only: unclaimed_house || magnet,
+            blend,
+            map_only: unclaimed_house || magnet || contrail,
         }
     }
 
@@ -2069,6 +2105,10 @@ impl World {
         // 177 + the claimer's color row (AddHouse0A_2D_38330
         // EF:28035-40).
         let unclaimed_house = e.class64 == 10 && e.model65 == 45 && e.f144 == 0;
+        // The (10,2) speed-up slipstream puff: spriteless in-world —
+        // map-only, the radar's speed tail (DrawMinimapEntities_B
+        // GameUI.cpp:1257-63 plots it in the owner's team color).
+        let contrail = e.class64 == 10 && e.model65 == 2;
         // Body segments hide from map dots + health bars — MC2's
         // chain children 0xE8/m27 branches 0xE9-0xEA (retail's own
         // map plot skips exactly 0xB4 + 0xE8..0xEA, GameUI.cpp:1220)
@@ -2137,8 +2177,9 @@ impl World {
         // DUAL-PURPOSE: also the m26 wraith's full-speed wake marker,
         // the ghost look IS the state, GRO:3779-3805/EF:19436) and
         // bit 24 → mode 3 (byte 0xF mask 0x01, the 67% death fades).
-        // MC1's engine has the same modes but no world content sets
-        // them.
+        // MC1's engine has the same modes; no MC1 content sets the
+        // FLAG bits, but the puff MODELS blend there too
+        // (live_poses_mc1's twin arm, player retail-verified).
         //
         // THE VISSULUTH WAIT-PHASE GHOST. The doomsday pyramid (5,10)
         // is a bit-23 carrier by construction — ctor `|= 0x48800001`
@@ -2172,7 +2213,7 @@ impl World {
             segment,
             life_frac,
             blend,
-            map_only: unclaimed_house,
+            map_only: unclaimed_house || contrail,
         }
     }
 
@@ -2388,6 +2429,28 @@ impl World {
                 ((self.player.mana_max / 2000) as i32).max(100)
             };
         }
+        if alive && cmd.suicide {
+            // The SUICIDE key (MC1 Shift+K :20492-93, MC2
+            // PlayerInput.cpp:239-41 — the identical bare write in
+            // both games): `life = -1` on the human wizard, NOTHING
+            // else. No mail, no killer, no knock/flash/hit sound —
+            // and immune to grace, shield and the at-castle redirect,
+            // because retail's write never enters the damage head
+            // (sub_46540). The state flip + death sound reproduce the
+            // wizard tick's own death check (:55424-29 /
+            // EF:60040-44), which the port folds into
+            // apply_player_damage and so must run inline here; the
+            // ordinary chain (fall → scatter → grave → respawn/lost)
+            // follows from Falling, forked per game downstream.
+            self.player.life = -1;
+            self.player.killer = 0;
+            self.player.state = LifeState::Falling;
+            self.player.fall_speed = 0;
+            self.g.snd_player(16);
+        }
+        // A suicided tick processes no further commands — retail's
+        // wizard tick bails at its life check before the cast arms.
+        let alive = alive && !cmd.suicide;
         if alive && cmd.demolish {
             // dw_0 == 48 exactly (:55837-39): the BOUND castle to −1
             // (`if (wizext->var_50) pool[var_50].actLife = -1` — the
@@ -3259,6 +3322,20 @@ impl World {
         // Only pane selection is genuinely pre-walk (PlayerInput).
         // Native MC2 has no pooled human (mc2_carpet_slot 0) — it
         // keeps the pre-walk placement, i.e. a human at slot 0.
+        // The MC2 SUICIDE (Shift+K, PlayerInput.cpp:239-41): the same
+        // bare `life = -1` + inline death check as the MC1 arm (which
+        // rides mc1_wizard_pass — see it for the full law). Retail's
+        // key pass runs before the entity update, so the suicided
+        // tick neither casts nor demolishes: the shadow below drops
+        // `alive` for the rest of the tick.
+        if matches!(self.game, GameId::Mc2) && alive && cmd.suicide {
+            self.player.life = -1;
+            self.player.killer = 0;
+            self.player.state = LifeState::Falling;
+            self.player.fall_speed = 0;
+            self.g.snd_player(16);
+        }
+        let alive = alive && !(matches!(self.game, GameId::Mc2) && cmd.suicide);
         if matches!(self.game, GameId::Mc2) {
             if let Some((s, t, h)) = cmd.mc2_select {
                 self.mc2_select_spell(s, t, h);
@@ -7965,12 +8042,25 @@ impl World {
         let mut owned = [false; SPELL_COUNT];
         let mut cooldown = [0f32; SPELL_COUNT];
         let mut cost = [0u32; SPELL_COUNT];
+        let mut expiring = [false; SPELL_COUNT];
         for s in 0..SPELL_COUNT {
             cost[s] = self.spell_cast_cost(s);
             let m = self.player.owned[s] as usize;
             if m != 0 {
                 owned[s] = true;
-                cooldown[s] = self.g.ent[m].f26.max(0) as f32 / self.spells()[s].count as f32;
+                let f26 = self.g.ent[m].f26;
+                let count = self.spells()[s].count;
+                cooldown[s] = f26.max(0) as f32 / count as f32;
+                // Retail's HUD expiry-blink gate (sub_23D40
+                // :27670-71): the manifestation's +48 countdown is
+                // live and inside its last 63 ticks, on a spell whose
+                // full count (+50) exceeds 64 — which selects exactly
+                // the long-runners (Accelerate/Shield/Beyond Sight/
+                // Volcano/Invisible/Rebound/Create Castle/Global
+                // Death); a count ≤ 64 never blinks. Hold-spells
+                // reload +48 every held tick, so they only enter the
+                // window after release.
+                expiring[s] = f26 > 0 && f26 < 64 && count > 64;
             }
         }
         // One castle scan feeds castle/castle_hp/balloons/bindable.
@@ -7990,6 +8080,7 @@ impl World {
             right: self.player.right.map(|s| s.0),
             cooldown,
             cost,
+            expiring,
             mana: if self.dev_spells {
                 self.player.mana_max
             } else {
@@ -8011,7 +8102,15 @@ impl World {
                 let e = &self.g.ent[c];
                 (e.act_life.max(0), e.max_life.max(1))
             }),
-            win_pct: self.win_pct,
+            // MC1 wires the footer goal via set_win_pct; MC2's type-0
+            // stage publishes the same %-of-world-mana law (retail
+            // word_0x2FED5) — the fallback keeps ONE goal-tick path
+            // for both games' rulers.
+            win_pct: if self.win_pct != 0 {
+                self.win_pct
+            } else {
+                self.mc2_mana_goal_pct()
+            },
             completed: self.completed,
             bindable,
             ring: self.mc1_ring,
@@ -8925,6 +9024,22 @@ impl World {
             self.mc2_stage_current,
             self.mc2_stages.iter().map(|s| (s.kind, s.state)).collect(),
         )
+    }
+
+    /// The MC2 type-0 "bank N% of world mana" HUD goal — retail's
+    /// `word_0x2FED5` mirror (the objective pass publishes the active
+    /// row's target% at EF:40760-61 and clears it on completion,
+    /// EF:40756; GameUI.cpp:213-17 draws the mana-ruler goal tick
+    /// only while non-zero). Derived rather than stored: the
+    /// `state == 1` filter reproduces the clear-on-completion, and
+    /// kind 0 evaluates in ANY list position (`objective_mc2`), so
+    /// there is no cursor gate. 0 = no active mana goal.
+    pub fn mc2_mana_goal_pct(&self) -> u16 {
+        self.mc2_stages
+            .iter()
+            .find(|s| s.kind == 0 && s.state == 1)
+            .map(|s| s.target as u16)
+            .unwrap_or(0)
     }
 
     /// Live world positions of every target of the CURRENT objective
@@ -20737,6 +20852,31 @@ mod tests {
 
     fn mc2_pos(tx: u16, ty: u16) -> (u16, u16) {
         ((tx << 8) | 128, (ty << 8) | 128)
+    }
+
+    /// The MC2 suicide arm rides `tick_inner`, NOT the MC1-only
+    /// wizard pass — regression guard: the first wiring consumed the
+    /// command only in `mc1_wizard_pass`, so Shift+K silently did
+    /// nothing on MC2 (player-reported 2026-08-21). Same law as MC1:
+    /// a bare write, killer-less, bypassing grace AND invincibility.
+    #[test]
+    fn mc2_suicide_command_enters_the_death_chain() {
+        let mut w = mc2_flat_world();
+        w.set_invincible(true);
+        let pose = PlayerPose::from_tiles(10.0, 105.0 / 8.0, 10.0, 0.0, 0.0, 0.0);
+        w.tick(
+            pose,
+            PlayerCommand {
+                suicide: true,
+                ..Default::default()
+            },
+        );
+        assert_ne!(
+            w.vitals().state,
+            LifeState::Alive,
+            "the suicide tick must leave Alive on an MC2 world despite \
+             invincibility and spawn grace"
+        );
     }
 
     /// **THE HUMAN'S MC2 CAST IS AN ENTITY-WALK EVENT, NOT A

@@ -28,10 +28,12 @@ struct Globals {
     //     wall cell, water animation off), 2 = the water-reflection
     //     MIRROR draw (terrain y-flipped about the sea plane)
     atlas: vec4<u32>,
-    // Camera basis (billboard/sky consumers) — unused here, declared
+    // Camera bases (billboard/sky consumers) — unused here, declared
     // to keep the buffer layout aligned with the Rust Globals struct.
     cam_right: vec4<f32>,
     cam_up: vec4<f32>,
+    bb_right: vec4<f32>,
+    bb_up: vec4<f32>,
     // xy = framebuffer size (px); z = 1 when this pass may sample the
     // mirror texture for sea reflections (0 in the mirror pass and
     // with reflections off); w = dynamic light count.
