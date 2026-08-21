@@ -35,9 +35,10 @@ pub(crate) const PLAYER_TARGET: u16 = 0xFFFF;
 /// `(0 - entBase) / 164` as a word — a CARPET.EXE link-time constant,
 /// the same in every retail instance. Measured off the recording (all
 /// 542 mc1l42 (10,23) miss rows and its 13 (10,11) crater rows), never
-/// derived. ⚠ PER BINARY: HIDDEN.EXE links its pool elsewhere and its
-/// value is unmeasured, so [`Gen::proj_explode`] emits this for base
-/// MC1 only.
+/// derived. The per-binary caution is now settled by measurement:
+/// HIDDEN.EXE links its pool at the same base and records the SAME
+/// word (mc1hwl0 t=335 (10,23) slot 589 and t=31088 slot 944 both
+/// read 64608), so the stamp is emitted for both binaries.
 pub(crate) const MC1_MISS_STAMP: u16 = 64608;
 
 /// `MGC_NO_TURN_TIE=1` restores the pre-dig wrapped-delta turn sign

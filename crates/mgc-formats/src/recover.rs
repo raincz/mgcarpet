@@ -213,6 +213,18 @@ pub struct RecoveredPair {
     /// records). MC2: the castle-entity witness (no move-byte trace
     /// there — the command rides `PlayerAction` 0x2A).
     pub demolish: bool,
+    /// MC2: the consumed target-speed COMMAND at N+1 (per-player
+    /// `cmd_speed` — mouse-proportional, not the ±16 key servo). Fed
+    /// to the mover as the pair's speed target the way the stick
+    /// lanes feed the filters.
+    pub mc2_cmd_speed: Option<i16>,
+    /// MC2: the carpet is PARKED by a modal UI (big map / spell
+    /// book — retail keeps playing but stops the carpet dead).
+    /// Witness: command 0 AND the carpet entity frozen in place at
+    /// zero speed across the pair (mc2l0 t=598: speed 80→0 in one
+    /// tick, x/y/z pinned for the whole window, yaw/pitch still
+    /// servoing the re-centred cursor).
+    pub mc2_park: bool,
 }
 
 impl RecoveredPair {
@@ -339,6 +351,14 @@ pub fn recover_pair_mc2(
             && key_held(input_end, 38)
             && (key_held(input_end, 42) || key_held(input_end, 54))
     };
+    // The modal park (big map / spell book): the game keeps running
+    // but the carpet stops dead. Witness = the consumed command at 0
+    // AND the carpet entity pinned in place at zero speed across the
+    // pair — a live zero-crossing never freezes the position too.
+    let ci = cp.play_index as usize;
+    let mc2_park = cp.cmd_speed == 0
+        && matches!((pst.ents.get(ci), st.ents.get(ci)), (Some(p), Some(c))
+            if c.speed == 0 && p.x == c.x && p.y == c.y);
     RecoveredPair {
         stick_x: recover_stick(pp.roll_acc as i16, cp.roll_acc as i16),
         stick_y: recover_stick(pp.pitch_acc as i16, cp.pitch_acc as i16),
@@ -349,6 +369,8 @@ pub fn recover_pair_mc2(
         rebind_dropped,
         respawn,
         demolish,
+        mc2_cmd_speed: Some(cp.cmd_speed),
+        mc2_park,
         ..RecoveredPair::default()
     }
 }

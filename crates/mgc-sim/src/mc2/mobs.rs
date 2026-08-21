@@ -1642,12 +1642,19 @@ impl Gen {
             // +28 mask so the shared area writer reaches the tree.
             e.f28 = 1;
         }
+        // The 2500..7500 life roll is DEAD VALUE in retail: AddTree
+        // (:33443-50) rolls it, then `CopyMaxLifeToLife_49A20` right
+        // after the map link resets life = maxLife (the pool-default
+        // 300 — mc2l0 t=3169's disposition wave records every tree at
+        // 300/300). The draw itself must still burn (the record's
+        // rand stream feeds the jitters + sprite pick).
         let d = self.mc2_rand(i);
         self.ent[i].act_life = (d % 0x1388 + 2500) as i32;
         let jx = ((self.mc2_rand(i) & 0x3F) as i32 - 32) as i16;
         let jy = ((self.mc2_rand(i) & 0x3F) as i32 - 32) as i16;
         let (nx, ny) = (x.wrapping_add(jx as u16), y.wrapping_add(jy as u16));
         self.link(i, nx, ny, z);
+        self.refill_life(i);
         let d = self.mc2_rand(i);
         self.mc2_set_sprite(i, if d & 1 != 0 { 84 } else { 83 });
         Some(i)
@@ -2078,7 +2085,16 @@ impl Gen {
     /// The instant-placement sibling (`sub_36FC0`, same arm at
     /// :27114-27137) has no ported caller yet (`sub_5C950` stage
     /// machinery — unported).
-    pub(crate) fn mc2_building_tick(&mut self, i: usize) -> bool {
+    /// `human` = (previous-tick settled pose, carpet slot) for the
+    /// `sub_377A0` completion pass — None on the load-time carousel
+    /// (an APPROX like the concurrent raise: retail would mint for a
+    /// wizard overlapping at load; the recording's seed state
+    /// already carries those).
+    pub(crate) fn mc2_building_tick(
+        &mut self,
+        i: usize,
+        human: Option<((u16, u16, i16), u16)>,
+    ) -> bool {
         let bldg = self.ent[i].f71 as usize;
         let Some(def) = self.assets.build_tab.get(bldg).copied() else {
             self.ent[i].tick70 = 52;
@@ -2144,6 +2160,53 @@ impl Gen {
             self.ent[i].z = self.ground_z(x, y) as i16;
             self.mc2_pad_edge_ring(tlx, tly, (h / 2) as u8, (w / 2) as u8, 2);
             self.mc2_pad_edge_ring(tlx, tly, (h / 2) as u8, (w / 2) as u8, 5);
+            // `sub_377A0` (:27304, the action-51 completion tail):
+            // every class-3 wizard whose box overlaps the finished
+            // building gets a (10,42) painter minted ON THE WIZARD
+            // (see `mc2_spawn_wizard_painter`). The overlap is the
+            // 2-D `CompareAxisWithShift_10750` — extents sum, no z.
+            // The chain read of the wizard's record is PRE-move for
+            // every building below the carpet slot (all of mc2l0's),
+            // so the human tests at the previous settled pose; pool
+            // class-3 records test in ascending-slot order (the
+            // chain-order approximation of `dword_38519`).
+            let (bx, by, bw, bh) = {
+                let e = &self.ent[i];
+                (e.x, e.y, e.f80 as i32, e.f82 as i32)
+            };
+            let wd = |p: u16, q: u16| (p.wrapping_sub(q) as i16 as i32).abs();
+            for w in 1..self.ent.len() {
+                let e = &self.ent[w];
+                if e.class64 != 3 || e.flags & 0x400 != 0 {
+                    continue;
+                }
+                if wd(e.x, bx) < bw + e.f80 as i32 && wd(e.y, by) < bh + e.f82 as i32 {
+                    let (dest, row, own) = (
+                        (e.dest_x, e.dest_y, e.site_z),
+                        e.f26.clamp(0, 7) as u8,
+                        e.id24,
+                    );
+                    if self
+                        .mc2_spawn_wizard_painter(dest, row, own, w as u16)
+                        .is_some()
+                    {
+                        self.ent[w].f46 = 4;
+                    }
+                }
+            }
+            if let Some((pose, slot)) = human {
+                let pw = (self.mc2_params_ext(44).0 / 2) as i32;
+                if wd(pose.0, bx) < bw + pw && wd(pose.1, by) < bh + pw {
+                    // The human's spare axis @0x9A is unwritten on
+                    // the wizard body — (0,0,0), row 0 (@0x10).
+                    self.mc2_spawn_wizard_painter(
+                        (0, 0, 0),
+                        0,
+                        crate::mc1::mobs::PLAYER_TARGET,
+                        slot,
+                    );
+                }
+            }
             return true;
         }
 

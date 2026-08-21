@@ -2368,6 +2368,42 @@ impl World {
         (at_castle, at_dolmen)
     }
 
+    /// The MC2 boost read. Retail evaluates BOTH bools against the
+    /// wizard's PRE-MOVE record: `locIsOk` (the bound-castle overlap,
+    /// `AddPlayer03_00_5E010` EF:59957-64) at handler entry, and the
+    /// dolmen latch (`byte[1] |= 0x10`, `AddDolmen02_02_65080`
+    /// EF:65086-92) from the dolmen's OWN handler — which, with the
+    /// dolmens chained below the wizard slot (mc2l0: 130-132 vs 152),
+    /// reads the pose the wizard settled LAST tick. The wizard's box
+    /// is the record's own extents (apitch/aroll 121, ayaw lift 100,
+    /// afov 100 — the mc2l0 carpet record), NOT MC1's sprite-44 box:
+    /// the fresh-pose + sprite-44 read armed the dolmen boost one
+    /// tick early (mc2l0 t=342, +1000 vs retail's +100 — retail's
+    /// dolmen pass at t=341 read pose@340, dy 1174 > 1145, outside).
+    /// A dolmen chained ABOVE the wizard slot would read the fresh
+    /// pose — unmodeled, no corpus take carries one.
+    fn mc2_regen_boost(&self) -> (bool, bool) {
+        const HW: i32 = 121; // apitch/aroll
+        const LIFT: i32 = 100; // ayaw
+        const HH: i32 = 100; // afov
+        let (px, py, pz) = self.human_pose_prev;
+        let wd = |p: u16, q: u16| (p.wrapping_sub(q) as i16 as i32).abs();
+        let overlap = |e: &Ent| {
+            wd(e.x, px) < e.f80 as i32 + HW
+                && wd(e.y, py) < e.f82 as i32 + HW
+                && ((pz as i32 + LIFT) - (e.z as i32 + e.f78 as i16 as i32)).abs()
+                    < HH + e.f84 as i32
+        };
+        let at_castle = self
+            .player_castle()
+            .is_some_and(|c| overlap(&self.g.ent[c]));
+        let at_dolmen = (1..self.g.ent.len()).any(|j| {
+            let e = &self.g.ent[j];
+            e.class64 == 2 && e.model65 == 2 && e.flags & 0x400 == 0 && overlap(e)
+        });
+        (at_castle, at_dolmen)
+    }
+
     /// The MC1/HW WIZARD PASS — retail's sub_45C90 leg at the
     /// carpet's pool slot: the per-hand cast commands (sub_46840's
     /// tail :55825-34; the demolish word :55837-39 REPLACES them) and
@@ -3265,7 +3301,7 @@ impl World {
             if !mc2_corpse {
                 let stepped = self.player.mana as i64 + self.player.mana_delta as i64;
                 self.player.mana = stepped.clamp(0, self.player.mana_max as i64) as u32;
-                let (at_castle, at_dolmen) = self.regen_boost(&ctx);
+                let (at_castle, at_dolmen) = self.mc2_regen_boost();
                 self.player.mana_delta = if at_castle || at_dolmen {
                     ((self.player.mana_max / 200) as i32).max(1000)
                 } else {
@@ -4240,7 +4276,7 @@ impl World {
         // the carpet's walk slot above (the whole dispatch body lives
         // there); MC2 keeps the post-walk call. ----
         if matches!(self.game, GameId::Mc2) {
-            let (at_castle, at_dolmen) = self.regen_boost(&ctx);
+            let (at_castle, at_dolmen) = self.mc2_regen_boost();
             self.player_mail_block(player, at_castle);
             self.player_regen_block(at_castle, at_dolmen);
         }
@@ -4443,9 +4479,14 @@ impl World {
     }
 
     /// The MC2 (10,51) 30-tick building action; a completed build
-    /// re-paints terrain and the entity list.
+    /// re-paints terrain and the entity list. The completion frame's
+    /// `sub_377A0` wizard-painter pass reads the human's PREVIOUS
+    /// settled pose (the class-3 chain read: every corpus building
+    /// slot sits below the carpet slot, so the record hasn't moved
+    /// when the building dispatches).
     fn tick_arm_mc2_building(&mut self, i: usize) {
-        if self.g.mc2_building_tick(i) {
+        let human = Some((self.human_pose_prev, self.mc2_carpet_slot));
+        if self.g.mc2_building_tick(i, human) {
             self.terrain_dirty = true;
             self.entities_dirty = true;
         }
@@ -7509,12 +7550,13 @@ impl World {
             // bit 0 on its next poll (mc1l42 t=17346 onward: retail
             // holds the five scattered jars at flags 4, the port
             // pushed them back to 5 every fourth tick).
-            if self.player.state == LifeState::Alive && self.player.owned[spell] != 0 {
-                if self.g.ent[i].flags & 1 == 0 {
-                    self.g.ent[i].flags |= 1;
-                    self.entities_dirty = true;
-                }
-                return;
+            let owned_already = self.player.owned[spell] != 0;
+            if self.player.state == LifeState::Alive
+                && owned_already
+                && self.g.ent[i].flags & 1 == 0
+            {
+                self.g.ent[i].flags |= 1;
+                self.entities_dirty = true;
             }
             // Retail's poll geometry (sub_55A40 :64798-842 →
             // sub_11950, the plain summed-extents AABB) — but read
@@ -7523,6 +7565,10 @@ impl World {
             // jar's poll sees last frame's carpet (measured on
             // mc1hwl0 jar 17: current-pose grants at t=10 where
             // retail granted at t=13; prev-pose reproduces it).
+            //
+            // An OWNED spell's jar still runs the poll: the hit
+            // arms the rivals' learn timers (:64806-15) and only
+            // the grant is skipped (:64843-44 resumes the walk).
             let (px, py, pz) = self.human_pose_prev;
             let hit = {
                 let e = &self.g.ent[i];
@@ -7534,6 +7580,9 @@ impl World {
                         < e.f84 as i32 + PLAYER_HH
             };
             if self.player.state == LifeState::Alive && hit {
+                self.rival_learn_arm(spell);
+            }
+            if self.player.state == LifeState::Alive && hit && !owned_already {
                 self.g.ent[i].flags |= 1;
                 self.g.ent[i].tick70 = (spell * 3) as u8;
                 self.player.owned[spell] = i as u16;
@@ -9431,8 +9480,24 @@ impl World {
             0x20400
         };
         self.g.rebuild_recycle(victim_mask);
+        let dis_trace = std::env::var_os("MGC_DIS_TRACE").is_some();
         for i in 1..self.table.len() {
             if self.table[i].class != 0 && self.table[i].dis_id == dis {
+                if dis_trace {
+                    let r = &self.table[i];
+                    eprintln!(
+                        "[dis t={} fire={} one_shot={}] row {} class {} model {} at ({},{}) tag {}",
+                        crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                        dis,
+                        one_shot,
+                        i,
+                        r.class,
+                        r.model,
+                        r.x,
+                        r.y,
+                        r.swi_id
+                    );
+                }
                 self.spawn_from_thing(i);
                 if one_shot {
                     self.table[i].class = 0;
@@ -13651,7 +13716,11 @@ mod tests {
 
     /// The human leg of the MC2 shrine (EF:60018) rides the shared
     /// world regen split — parked on a dolmen the mana delta is the
-    /// castle figure, afield it falls back.
+    /// castle figure, afield it falls back. The boost reads the
+    /// PREVIOUS settled pose (`mc2_regen_boost`: the dolmen's own
+    /// handler stamps the latch off the wizard's pre-move record —
+    /// mc2l0 t=341/342, the one-tick-early +1000), so the first
+    /// parked tick still regens at the slow figure.
     #[test]
     fn mc2_dolmen_shrine_boosts_the_parked_human() {
         let mut w = mc2_flat_world();
@@ -13660,10 +13729,17 @@ mod tests {
         w.tick(away(), PlayerCommand::default());
         assert_eq!(
             w.player.mana_delta,
+            ((w.player.mana_max / 2000) as i32).max(100),
+            "first parked tick: the dolmen read the pre-park pose"
+        );
+        w.tick(away(), PlayerCommand::default());
+        assert_eq!(
+            w.player.mana_delta,
             ((w.player.mana_max / 200) as i32).max(1000),
             "parked on the MC2 dolmen: castle-rate regen"
         );
         let far = PlayerPose::from_tiles(60.0, 105.0 / 8.0, 60.0, 0.0, 0.0, 0.0);
+        w.tick(far, PlayerCommand::default());
         w.tick(far, PlayerCommand::default());
         assert_eq!(
             w.player.mana_delta,
@@ -20837,6 +20913,45 @@ mod tests {
         );
     }
 
+    /// `sub_49F90`'s FIRST loop (Level.cpp:1277-80) frees every
+    /// disabled-not-yet-reaped record BEFORE the descending collect,
+    /// so a mid-tick disposition fire reuses the slot of the very
+    /// switch that fired it (mc2l0 t=3169: the consumed (11,1)@48's
+    /// slot takes the dis-2 (11,32); without the reap every payload
+    /// lands one free slot high). MC1's twin `sub_37220` (:43825)
+    /// carries NO reap — the eight certified mc1 takes pin its
+    /// allocation receipts — so the arm is gated on the movement
+    /// verb.
+    #[test]
+    fn the_dis_fire_stack_rebuild_reaps_ghosts_first_and_only_on_mc2() {
+        let mut w = mc2_flat_world();
+        let ghost = w.g.new_event().expect("ghost slot");
+        w.g.ent[ghost].class64 = 11;
+        w.g.ent[ghost].model65 = 1;
+        w.g.ent[ghost].flags |= 0x400; // disabled, not yet reaped
+        let live = w.g.new_event().expect("live slot");
+        w.g.ent[live].class64 = 11;
+        w.g.ent[live].model65 = 32;
+        w.g.mc2_rebuild_free(0);
+        assert_eq!(
+            w.g.ent[ghost].class64, 0,
+            "the ghost is freed by the rebuild"
+        );
+        assert_ne!(w.g.ent[live].class64, 0, "a live record survives");
+        assert_eq!(
+            w.g.new_event(),
+            Some(ghost),
+            "the next mint reuses the ghost's slot"
+        );
+
+        let mut w = flat_world();
+        let ghost = w.g.new_event().expect("mc1 ghost slot");
+        w.g.ent[ghost].class64 = 11;
+        w.g.ent[ghost].flags |= 0x400;
+        w.g.mc2_rebuild_free(0);
+        assert_ne!(w.g.ent[ghost].class64, 0, "MC1's rebuild carries no reap");
+    }
+
     // ---- Phase-4.3 MC2 roster probes ----------------------------------
 
     fn mc2_flat_world() -> World {
@@ -22301,7 +22416,7 @@ mod tests {
             "maxMana_0x8C_140 is dead on a building — retail never writes it"
         );
         for _ in 0..30 {
-            w.g.mc2_building_tick(b);
+            w.g.mc2_building_tick(b, None);
         }
         assert_eq!(w.g.ent[b].tick70, 52, "the 30-tick build parks the house");
         assert_eq!(
@@ -22323,7 +22438,7 @@ mod tests {
             e.tick70 = 51;
             e.act_life = 1;
         }
-        w.g.mc2_building_tick(b);
+        w.g.mc2_building_tick(b, None);
         assert_eq!(w.g.ent[b].tick70, 52);
         assert_eq!(
             w.g.ent[b].act_life,

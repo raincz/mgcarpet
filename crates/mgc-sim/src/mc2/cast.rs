@@ -1661,9 +1661,8 @@ impl World {
                     // `sub_69900`'s launch tail (EF:56050-67) — the
                     // (9,17) arm writes the same lanes
                     // (EF:55956/55966/55968), so both share it:
-                    //   `mana_0x90_144` = the TOKEN's mana (@0x90 →
-                    //     f140, a COMPARED lane; the class-9 ctor
-                    //     default 50 is overwritten — the l24 corpus
+                    //   `mana_0x90_144` = the TOKEN's mana — now the
+                    //     universal `mc2_launch` copy (the l24 corpus
                     //     records 33),
                     //   `dword_0x10_16` = 200 on the basic bolt (@0x10
                     //     → f26); the leveled arm instead squares the
@@ -1678,11 +1677,9 @@ impl World {
                     // hard-codes per handler (`sub_6D8B0(id, 1, 1)`,
                     // EF:63314/59052). The lane is not compared; the
                     // XP wiring wins.
-                    let token_mana = self.g.ent[m].f140;
                     let token_sub = self.g.ent[m].f30 as i32;
                     {
                         let e = &mut self.g.ent[i];
-                        e.f140 = token_mana;
                         e.f26 = if subtype == 1 {
                             200
                         } else {
@@ -2020,6 +2017,15 @@ impl World {
             let boosted = (e.f126 as i32 + p.speed.max(0) as i32).clamp(384, 0x2000);
             e.f126 = boosted as i16;
         }
+        // Every retail cast site copies the hand token's mana onto
+        // the spawned projectile (`v6x->mana_0x90_144 =
+        // a1x->mana_0x90_144` — the sub_693F0 fire block EF:55865
+        // and each instant handler: army EF:57745, fools EF:57817,
+        // mine EF:57992, alliance EF:58151). The lane is COMPARED
+        // (mc2l0 t=2798 slot 172: retail 20 = the fireball hand's
+        // purse; the class-9 ctor default 50 must not survive).
+        let token_mana = self.g.ent[m].f140;
+        self.g.ent[i].f140 = token_mana;
         // Back-ref for the impact XP award (`word_0x26_38` → the
         // spell entity; ours carries the spell INDEX in f40 — a
         // projectile never uses the attacker latch).

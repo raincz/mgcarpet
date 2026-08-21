@@ -336,6 +336,7 @@ fn mc1_mover_input(mb: u32, stick: (i16, i16)) -> Mc1Input {
         // Cleared at the carpet's dispatch on the death fall
         // (`World::step_player_flight`).
         no_command: false,
+        mc2_park: false,
     }
 }
 
@@ -374,6 +375,35 @@ fn anchor_mc1(
         Chain::seed_mc1(st, report.human_slot),
         report.human_slot,
         report.active,
+    ))
+}
+
+/// The MC2 twin: same contract, plus the THING table (MC2 ctors read
+/// it) and the carpet's tuning row for the chain seed.
+fn anchor_mc2(
+    world: &mut World,
+    pristine: &mgc_sim::engine::features::Planes,
+    things: &mgc_sim::engine::world::conformance::ThingTable,
+    timg: &Option<mgc_formats::mgcr::TerrainImage>,
+    st: &RetailMc2,
+    t: u64,
+) -> Result<(Chain, u16), String> {
+    world.restore_planes(pristine);
+    world.restore_thing_table(things);
+    let report = world
+        .retail_import_mc2(st)
+        .map_err(|e| format!("t={t}: import: {e}"))?;
+    if let Some((h, ty, ceil, an)) = measured_planes(timg) {
+        world
+            .install_measured_terrain(h, ty, ceil, an)
+            .map_err(|e| format!("t={t}: terrain: {e}"))?;
+    }
+    let (fl, fr) = recover::mc1_fire(st.players[st.local_player as usize].move_bits);
+    world.set_prev_fire(fl, fr);
+    let row = world.mc2_carpet_row();
+    Ok((
+        Chain::seed_mc2(st, report.human_slot, row),
+        report.human_slot,
     ))
 }
 
@@ -1621,8 +1651,32 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     // The respawn-press dating witness (mgc_formats::recover law).
     let mut witness = recover::Mc2RespawnWitness::default();
     let mut printed_import = false;
+    // `--segmented` / `--classify` state — the MC1 arm's shape exactly
+    // (see run_mc1): the re-anchor runs AFTER the tick body so the
+    // break's own diagnostics still see the diverged state, and the
+    // classify pair runs on a SCRATCH world with terrain@t-1.
+    let mut reset_at: Option<u64> = None;
+    let mut classify_world: Option<World> = None;
+    #[allow(clippy::type_complexity)]
+    let mut prev_measured: Option<(Vec<u8>, Vec<u8>, Option<Vec<u8>>, Option<Vec<u8>>)> = None;
+    let mut last_dev: Option<u64> = None;
     while let Some(r) = rec.next_tick() {
         let tick = r?;
+        // `--classify` keeps the PRE-apply planes: the pair check at
+        // boundary t must run on terrain@t-1, and after this apply
+        // the image holds t.
+        if args.classify
+            && args.segmented
+            && tick.terrain.is_some()
+            && let Some((h, ty, ceil, an)) = measured_planes(&timg)
+        {
+            prev_measured = Some((
+                h.to_vec(),
+                ty.to_vec(),
+                ceil.map(|c| c.to_vec()),
+                an.map(|a| a.to_vec()),
+            ));
+        }
         if let (Some(img), Some(block)) = (timg.as_mut(), &tick.terrain) {
             img.apply(block)
                 .map_err(|e| format!("t={}: terrain: {e}", tick.t))?;
@@ -1647,24 +1701,8 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
 
         let anchor = !matches!((&st_prev, &chain), (Some((pt, _)), Some(_)) if tick.t == pt + 1);
         if anchor {
-            world.restore_planes(&pristine);
-            world.restore_thing_table(&things);
-            let report = world
-                .retail_import_mc2(&st)
-                .map_err(|e| format!("t={}: import: {e}", tick.t))?;
-            // Measured planes AFTER the import (see the MC1 anchor).
-            if let Some((h, ty, ceil, an)) = measured_planes(&timg) {
-                world
-                    .install_measured_terrain(h, ty, ceil, an)
-                    .map_err(|e| format!("t={}: terrain: {e}", tick.t))?;
-            }
-            let (fl, fr) = recover::mc1_fire(st.players[st.local_player as usize].move_bits);
-            world.set_prev_fire(fl, fr);
-            let row = world.mc2_carpet_row();
-            chain = Some((
-                Chain::seed_mc2(&st, report.human_slot, row),
-                report.human_slot,
-            ));
+            let (ch, human_slot) = anchor_mc2(&mut world, &pristine, &things, &timg, &st, tick.t)?;
+            chain = Some((ch, human_slot));
             stats.open(
                 tick.t,
                 if stats.segs.is_empty() {
@@ -1675,15 +1713,21 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             );
             if !printed_import {
                 printed_import = true;
+                let measured = measured_planes(&timg).is_some();
                 if !args.brief {
                     println!(
-                        "   import: human slot {}, terrain {}",
-                        report.human_slot,
-                        if measured_planes(&timg).is_some() {
-                            "MEASURED"
-                        } else {
-                            "pristine"
-                        }
+                        "   import: human slot {human_slot}, terrain {}",
+                        if measured { "MEASURED" } else { "pristine" }
+                    );
+                }
+                // Same law as the MC1 arm: a reset restores terrain
+                // from the measured channel, so without one the count
+                // is a capture artifact.
+                if args.segmented && !measured && !args.brief {
+                    println!(
+                        "   ⚠ --segmented WITHOUT a measured terrain channel: every reset \
+                         restores PRISTINE planes, so the reset count is a capture artifact, \
+                         not a port score (re-record this take with terrain)"
                     );
                 }
             }
@@ -1702,7 +1746,17 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
         if !stick_ok {
             stats.stick_unrec += 1;
         }
-        let inp = mc1_mover_input(rec.move_byte, rec.stick());
+        let mut inp = mc1_mover_input(rec.move_byte, rec.stick());
+        inp.mc2_park = rec.mc2_park;
+        // The MC2 speed command is the recovered per-player cmd_speed
+        // lane (mouse-proportional), not the ±16 key servo — feed it
+        // as the pair's target the way the stick lanes feed the
+        // filters, and keep the key bits out of the integrator.
+        if let Some(v) = rec.mc2_cmd_speed {
+            ch.s.tgt_speed = v;
+            inp.speed_up = false;
+            inp.speed_down = false;
+        }
         if rec.rebind_dropped {
             stats.rebind_dropped += 1;
         }
@@ -1750,7 +1804,7 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         && stats.seg().horizon.is_none()
                         && !(pose.is_empty() && pd.clean()));
                 emit_replay_csv(&mut csv, pt, &pose, &pd)?;
-                stats.grade(tick.t, &pose, &pd, args, dump);
+                let boundary_clean = stats.grade(tick.t, &pose, &pd, args, dump);
                 if stats.seg().horizon == Some(tick.t) && stats.seg().sig.is_empty() {
                     let cm = |s: u16| {
                         obs.entities
@@ -1761,11 +1815,67 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     let sig = brief_sig(&pose, &pd, &cm);
                     stats.seg().sig = sig;
                 }
+                // ---- THE SEGMENTED DOCTRINE (the MC1 arm's twin) ----
+                if args.segmented && !boundary_clean {
+                    reset_at = Some(tick.t);
+                    // `--classify`: the pair at the cluster HEAD.
+                    // Pair DIRTY at t-1 ⇒ LOCAL (fixture candidate),
+                    // CLEAN ⇒ INHERITED (unit test / upstream dig).
+                    if args.classify && last_dev != Some(tick.t - 1) {
+                        let cw = match classify_world.as_mut() {
+                            Some(w) => w,
+                            None => {
+                                let (w, _, _) =
+                                    crate::verify_mc2::build_world_mc2(&args.baked, level)?;
+                                classify_world = Some(w);
+                                classify_world.as_mut().expect("just built")
+                            }
+                        };
+                        // Terrain@t-1: the pre-apply snapshot when
+                        // this tick carried a block, else the image
+                        // as it stands (unchanged since t-1).
+                        let cur;
+                        let measured = if tick.terrain.is_some() && prev_measured.is_some() {
+                            prev_measured.as_ref().map(|(h, ty, c, a)| {
+                                (h.as_slice(), ty.as_slice(), c.as_deref(), a.as_deref())
+                            })
+                        } else {
+                            cur = measured_planes(&timg);
+                            cur
+                        };
+                        // The previous pair's command is unknowable
+                        // here — seed its fire from the START record's
+                        // consumed byte, the anchor's own
+                        // approximation. The pair command is the
+                        // recovered one the free step just consumed.
+                        let (pfl, pfr) =
+                            recover::mc1_fire(pst.players[pst.local_player as usize].move_bits);
+                        let prev_cmd = PlayerCommand {
+                            fire_left: pfl,
+                            fire_right: pfr,
+                            ..PlayerCommand::default()
+                        };
+                        match crate::verify_mc2::exec_pair_mc2(
+                            cw, &pristine, measured, &things, &pst, &st, &obs, cmd, prev_cmd, true,
+                        ) {
+                            Ok((pdp, _, _)) => {
+                                stats.class_tags.insert(tick.t, !pdp.clean());
+                            }
+                            Err(e) => eprintln!("  classify t={}: {e}", tick.t),
+                        }
+                    }
+                    last_dev = Some(tick.t);
+                }
             } else {
                 stats.seg().ungraded += 1;
             }
         }
         stats.seg().end = tick.t;
+        if let Some(t) = reset_at.take() {
+            let (ch, human_slot) = anchor_mc2(&mut world, &pristine, &things, &timg, &st, t)?;
+            chain = Some((ch, human_slot));
+            stats.open(t, SegOpen::Deviation);
+        }
         st_prev = Some((tick.t, st));
         if let Some(limit) = args.limit {
             if stats.segs.iter().map(|s| s.stepped).sum::<u64>() >= limit {

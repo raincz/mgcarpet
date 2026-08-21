@@ -127,7 +127,7 @@ fn usage() -> ! {
                              resets in EXCESS of the gap-forced ones,\n\
                              and every reset tick names itself as a\n\
                              fixture candidate\n\
-           --classify        (--segmented, MC1) run the PAIR at every\n\
+           --classify        (--segmented) run the PAIR at every\n\
                              reset-cluster head and tag it: pair DIRTY\n\
                              at t-1 ⇒ LOCAL (fixture candidate), pair\n\
                              CLEAN ⇒ INHERITED (the one-tick law is\n\
@@ -189,7 +189,7 @@ pub struct Args {
     /// Certification is ONE segment end to end; the number that matters
     /// is resets in EXCESS of the gap-forced ones.
     pub segmented: bool,
-    /// replay --segmented (MC1): run the PAIR at every reset-cluster
+    /// replay --segmented: run the PAIR at every reset-cluster
     /// head and tag it LOCAL (pair dirty ⇒ fixture candidate) or
     /// INHERITED (pair clean ⇒ the break rides earlier state — unit
     /// test / upstream dig). The segmented-residue doctrine, automated.

@@ -901,12 +901,18 @@ impl World {
         // retail had killed (mc1l32 t=9218/11984/…: +48 snapped 7→0
         // against the port's decrement, one +100 regen and a contrail
         // puff along with it).
-        self.player.accel = st
-            .ents
-            .iter()
-            .find_map(|e| {
+        // The burst rides the LOCAL wizard's own manifestation — the
+        // derived owned register names its slot. A pool-wide scan took
+        // a RIVAL's pre-armed book token for the human's burst (HW l0
+        // pre-arms Vodor's whole book: slot 476, model 2, f48=229 at
+        // t=1) and the free run flew boosted from the seed.
+        self.player.accel = [(2usize, 1i8), (21, -1)]
+            .into_iter()
+            .find_map(|(spell, dir)| {
+                let s = wiz.owned_slots[spell] as usize;
+                let e = st.ents.get(s).filter(|_| s != 0)?;
                 (e.class64 == 12 && e.f144 == 0 && e.f48 != 0 && matches!(e.model65, 2 | 21))
-                    .then_some(if e.model65 == 2 { 1 } else { -1 })
+                    .then_some(dir)
             })
             .unwrap_or(0);
         // The v_14 kill latch rides the captured Type_160 directly:
@@ -2076,8 +2082,14 @@ impl World {
                 row.mana_max = e.max_life as i32;
             }
             // Class-10 fires carry their amount in f140 (imported
-            // from @0x2A); retail's @0x90 mana lane is dead 0.
-            if e.class64 == 10 && matches!(e.model65, 0 | 6) {
+            // from @0x2A); retail's @0x90 mana lane is dead 0. The
+            // (10,1) big explosion is the same shape — its ctor's
+            // `subSpellIndex_0x2A_42 = 400` (EF:35364) rides f140
+            // (nothing reads it; the impact stamp overwrites it with
+            // the bolt payload like retail's @0x2A copy) while
+            // retail's @0x90 stays 0 (mc2l0 t=3192, the dis-13
+            // village wave).
+            if e.class64 == 10 && matches!(e.model65, 0 | 1 | 6) {
                 row.mana = 0;
             }
             // The m27 HYDRA keeps its bolt power (@0x88) in f136

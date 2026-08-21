@@ -1,0 +1,42 @@
+{
+  "dir": "fixtures/mc2l0",
+  "pin_pose": "n1",
+  "fixtures": [
+    {
+      "t": 64,
+      "file": "the-mc2-claim-probe-walks-the-search-dat-ring-ov.mgcr",
+      "source": "mc2l0",
+      "note": "THE MC2 CLAIM PROBE WALKS THE SEARCH.DAT RING OVER THE ROUNDED CENTRE: sub_108B0 anchors the 2x2 ring at (pos+128)>>8 — the truncated-centre ±1 square window reads one cell short on grazing geometry. mc2l0 t=65: the (9,1) possession bolt's endpoint sits 2 x-cells from the (10,45) building's chain cell (building box ±2048); the ring reaches, the square missed — retail claims, parks the bolt and mints the (10,12) contact child the port lacked."
+    },
+    {
+      "t": 246,
+      "file": "the-possession-bolt-probes-once-at-its-clamped-e.mgcr",
+      "source": "mc2l0",
+      "note": "THE POSSESSION BOLT PROBES ONCE AT ITS CLAMPED ENDPOINT: clamp, commit, probe (EF:63262-88) — marching the claim probe along the chord admits mid-flight claims retail never sees, and the (10,12) contact child inherits the wrong landing. mc2l0 t=247: the contact child parks at the clamped endpoint where the port's marched claim left it mid-chord."
+    },
+    {
+      "t": 2797,
+      "file": "every-mc2-cast-site-copies-the-hand-token-s-mana.mgcr",
+      "source": "mc2l0",
+      "note": "EVERY MC2 CAST SITE COPIES THE HAND TOKEN'S MANA ONTO THE FIRED PROJECTILE: v->mana_0x90 = token->mana_0x90 at the sub_693F0 fire block (EF:55865) and each instant handler (57745/57817/57992/58151); the class-9 ctor's default 50 is dead value. mc2l0 t=2798: the fireball (9,0) records 20 — the firing hand's purse."
+    },
+    {
+      "t": 2816,
+      "file": "the-fireball-s-terrain-contact-reverts-the-move.mgcr",
+      "source": "mc2l0",
+      "note": "THE FIREBALL'S TERRAIN CONTACT REVERTS THE MOVE: the contact arm of sub_65C20 (actions 0/29, both wrappers) commits the saved PRE-move axis with the contact z read at the POST-move cell (v16x, EF:63139-40); the generic core (sub_65820 EF:62954) keeps post-move x/y — two different laws. mc2l0 t=2817: retail parks the (10,0) burst at the tick-entry axis where the port flew the full final step."
+    },
+    {
+      "t": 2834,
+      "file": "every-mc2-impact-worker-stamps-both-bearing-word.mgcr",
+      "source": "mc2l0",
+      "note": "EVERY MC2 IMPACT WORKER STAMPS BOTH BEARING WORDS: yaw AND pitch (EF:63194-95/62990-91/63316-17) — the port's effect stamp wrote yaw only and the graded pitch lane floored at 0. mc2l0 t=2835: the (10,0) burst carries pitch 23."
+    },
+    {
+      "t": 3220,
+      "file": "a-finished-building-mints-one-10-42-painter-per.mgcr",
+      "source": "mc2l0",
+      "note": "A FINISHED BUILDING MINTS ONE (10,42) PAINTER PER OVERLAPPING CLASS-3 WIZARD: sub_377A0's action-51 completion tail (:27304) — painter at the wizard's spare axis @0x9A, row = wizard @0x10, id/parent = the wizard, word46 = 4. mc2l0 t=3221: four village buildings complete on the human and mint painters @49/255/256/257 the port lacked."
+    }
+  ]
+}

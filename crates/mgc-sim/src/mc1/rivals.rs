@@ -1141,14 +1141,22 @@ impl World {
         }
     }
 
-    /// Spell learning (:64805-14 arm + sub_15EC0 :19381-443 expiry):
-    /// any ground jar of an unowned, allowed spell arms a 200-tick
-    /// countdown; at expiry the rival conjures its own manifestation.
-    /// (Arming is folded here into the countdown scan — one pool walk
-    /// per tick instead of the jar tick writing into every rival.)
+    /// Spell learning, the COUNTDOWN half (sub_15EC0 :19381-443): a
+    /// live timer decrements 1/tick and the expiry conjures the
+    /// rival's own manifestation. Arming lives on the JAR side
+    /// ([`World::rival_learn_arm`], the pickup poll).
+    ///
+    /// The countdown's CLOCK is the tick-top roster's model-0 entry:
+    /// :19394-99 walks bucket[0] and runs the dec pass once per
+    /// model-0 carpet, so with the human dead (out of the roster) the
+    /// timers freeze. The per-slot gate is `+676 == 0` alone
+    /// (:19407) — no allowed test, no known test.
     fn rival_learn_tick(&mut self, ri: usize) {
+        if self.player.state != LifeState::Alive {
+            return;
+        }
         for s in 0..SPELL_COUNT {
-            if self.rivals[ri].known[s] || !self.rivals[ri].allowed[s] {
+            if self.rivals[ri].owned[s] != 0 {
                 continue;
             }
             if self.rivals[ri].learn[s] > 1 {
@@ -1164,19 +1172,35 @@ impl World {
                     self.rivals[ri].owned[s] = m as u16;
                     self.rivals[ri].acq_push(m as u16);
                 }
+            }
+        }
+    }
+
+    /// Spell learning, the ARM half (:64806-15) — runs inside the
+    /// jar's pickup poll, ONLY on a tick the living human carpet
+    /// AABB-hits the jar (sub_55A40's roster walk returns without
+    /// reaching the arm unless the hit breaks it): every AI wizard
+    /// (model 1) on the tick-top roster that neither owns nor is
+    /// already learning the jar's spell, and whose book allows it
+    /// (+796), arms the 200-tick countdown. The old port fold — "a
+    /// matching jar exists anywhere" scanned from the rival's side
+    /// every tick — armed off jars retail never dispatched: mc1hwl0's
+    /// out-of-reach spell-6 jar armed Vodor at t=1 and the expiry
+    /// minted a (12,6) retail never saw.
+    pub(crate) fn rival_learn_arm(&mut self, spell: usize) {
+        for c in 0..self.g.wiz_chain.visible_len() {
+            let j = self.g.wiz_chain.list[c] as usize;
+            if self.g.ent[j].model65 != 1 {
                 continue;
             }
-            // Arm on a matching ground jar existing anywhere
-            // (:64805-14; jars have tick70 < MANIFEST_BASE).
-            let exists = (1..self.g.ent.len()).any(|j| {
-                let e = &self.g.ent[j];
-                e.class64 == 12
-                    && e.model65 as usize == s
-                    && e.tick70 < crate::engine::world::MANIFEST_BASE
-                    && e.flags & 0x400 == 0
-            });
-            if exists {
-                self.rivals[ri].learn[s] = 200;
+            let Some(ri) = (0..self.rivals.len())
+                .find(|&r| self.rivals[r].ent == j as u16 && !self.rivals[r].eliminated)
+            else {
+                continue;
+            };
+            let r = &mut self.rivals[ri];
+            if r.owned[spell] == 0 && r.learn[spell] == 0 && r.allowed[spell] {
+                r.learn[spell] = 200;
             }
         }
     }

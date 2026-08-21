@@ -41,6 +41,32 @@ impl Gen {
         self.mc2_set_sprite(i, 77);
         self.extents(i, 768, 1280);
         self.refill_life(i);
+        // `SetSpell_6D5E0(event, 0)` runs INSIDE the ctor (the
+        // AddSpellXX tail, L:51120→1505): tier-0 row wiring with the
+        // PARENT-LESS cost — an authored jar's `parentId_0x28` is 0,
+        // so `GetSpellManaCost` (L:1714-18) skips the spell-2 castle
+        // ladder and the +3000 arm and returns the raw tier cost.
+        // mc2l0 t=3169 slot 114: the dis-fired (15,2) scroll records
+        // maxMana 1000, mana 1000/111 = 9. (The World-side
+        // `mc2_set_spell` is the LIVE twin — its cost ladder reads
+        // the human's castle, wrong for an unowned ground jar; the
+        // dev-spells cheat arm never applies at spawn.)
+        if let Some(row) = self.assets.spells.get(model as usize) {
+            let sub = row.tiers[0];
+            let cost = sub.mana_cost;
+            let e = &mut self.ent[i];
+            e.f71 = 0;
+            e.f30 = sub.sub_spell.clamp(0, u16::MAX as i32) as u16;
+            e.f28 = sub.word_0x18.max(0) as u16;
+            e.f59 = (sub.font_type & 1 == 0) as u8;
+            e.f136 = sub.max_mana_limit;
+            e.max_life = cost.max(0) as u32;
+            e.f140 = if e.f28 != 0 {
+                cost / e.f28 as i32
+            } else {
+                cost
+            };
+        }
         Some(i)
     }
 }

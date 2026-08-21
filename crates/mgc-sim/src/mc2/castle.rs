@@ -1038,6 +1038,43 @@ impl Gen {
         }
     }
 
+    /// `sub_377A0` (EF:27751)'s per-wizard mint, the `sub_5FBD0`
+    /// body with a WIZARD as `a1x`: the painter spawns at the
+    /// wizard's SPARE AXIS `axis_0x9A_154` (the human's reads
+    /// (0,0,0) on this corpus), row = the wizard's `dword_0x10_16`
+    /// (0 for a castle-less human — BUILD00 row 0 is EMPTY, the
+    /// painter runs its 19+settle window painting nothing and dies),
+    /// id = the wizard's own id, parent = the wizard's slot, and the
+    /// WIZARD's `word_0x2E_46 = 4` (the pass-live latch — for the
+    /// out-of-pool human that write lands on the zeroed husk, dead
+    /// state like retail's own row-0 pass). mc2l0 t=3221: the
+    /// dis-13 village wave's four completing buildings each overlap
+    /// the human → painters at slots 49/255/256/257, all (0,0,0)
+    /// row 0 parent 152.
+    pub(crate) fn mc2_spawn_wizard_painter(
+        &mut self,
+        pos: (u16, u16, i16),
+        row: u8,
+        own: u16,
+        parent: u16,
+    ) -> Option<usize> {
+        let i = self.new_event()?;
+        {
+            let e = &mut self.ent[i];
+            e.class64 = 10;
+            e.model65 = 42;
+            e.tick70 = 0x2C;
+            e.max_life = 0;
+            e.f59 = 0;
+            e.f71 = row;
+            e.id24 = own;
+            e.f40 = parent;
+        }
+        self.link(i, pos.0, pos.1, pos.2);
+        self.mc2_castle_extents_ent(i, row);
+        Some(i)
+    }
+
     fn mc2_spawn_castle_painter_at(
         &mut self,
         castle: usize,

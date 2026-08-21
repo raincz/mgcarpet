@@ -604,11 +604,11 @@ break tick `t`, the pair diff `D1(t)` DIRTY means the error is LOCAL to
 through a field the obs schema does not grade — the first detector this
 project has for the `+70`/`+52` obs blind spots.
 
-`--classify` (MC1) automates exactly that doctrine: at every
+`--classify` (both games) automates exactly that doctrine: at every
 reset-CLUSTER HEAD it runs the pair `t-1 → t` on a scratch world
-(`exec_pair`, the fixture semantics — pose pair, measured terrain@t-1,
-the verify command law) and tags the cluster `[LOCAL]` or
-`[INHERITED]` in the reset list, plus a summary count. It says which
+(`exec_pair` / `exec_pair_mc2`, the fixture semantics — pose pair,
+measured terrain@t-1, the verify command law) and tags the cluster
+`[LOCAL]` or `[INHERITED]` in the reset list, plus a summary count. It says which
 branch every break is on BEFORE any code is written, and the LOCAL
 heads feed the fixture cutter directly. Cost: one extra world build
 plus one pair per cluster head.

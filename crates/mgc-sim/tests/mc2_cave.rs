@@ -492,13 +492,23 @@ fn mc2_cave_behaviors_and_goldens() {
     // alone — reverting dig_scorch to the single-cell form restores
     // this hash with the zero-depth latch change still in. Behavior
     // change toward retail by design.
+    // Re-pinned (all checkpoints) for the mc2l0 on-ramp batch
+    // (2026-08-21f) — corpus-receipted fidelity laws with hashed
+    // lanes: the universal cast-site token-mana copy (mc2_launch,
+    // EF:55865 et al — every fired projectile's f140), the impact
+    // pitch stamp (f32, EF:63194-95), the fireball terrain-contact
+    // move REVERT (sub_65C20's v16x commit), the authored-jar
+    // SetSpell tier-0 seeding (f28/f30/f59/f71/f136/f140/max_life),
+    // and the sub_377A0 completion painters. The disposition-fire
+    // ghost reap was A/B-EXCLUDED (MGC_AB_NO_REAP run reproduced
+    // these exact hashes with the reap off).
     assert_eq!(
         got,
         vec![
-            0xa484eb77bf33e16fu64,
-            0x55090d8941e36ae0,
-            0xc59acdae04fdde29,
-            0xdd42049b850f6384,
+            0x30a7039ebee444b7u64,
+            0xeb019cfa3c5ee5d8,
+            0xb3e17b8aaa6b4d89,
+            0x1198b51aca429fcc,
         ],
         "cave goldens moved — re-pin ONLY for an intended fidelity change"
     );

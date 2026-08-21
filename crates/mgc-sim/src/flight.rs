@@ -167,6 +167,12 @@ pub struct Mc1Input {
     /// exactly that: `tgt`/`act` pinned at −80 and `strafe` frozen at 36
     /// for the whole fall, with roll/pitch/yaw still moving.
     pub no_command: bool,
+    /// MC2: a modal UI (big map / spell book) has the carpet PARKED —
+    /// retail keeps playing but stops the carpet dead: speeds snap to
+    /// 0, no translation, no buoyancy, while the pose filters keep
+    /// integrating the re-centred cursor (mc2l0 t=598: speed 80→0 in
+    /// one boundary, x/y/z pinned ~200 ticks, yaw −1/tick).
+    pub mc2_park: bool,
 }
 
 /// What the move reports back to the sim boundary.
@@ -505,6 +511,16 @@ pub fn mc2_move(
     stuck: &dyn Fn((u16, u16, i16), bool) -> bool,
 ) -> Mc2Moved {
     let mut moved = Mc2Moved::default();
+
+    // The modal park (big map / spell book): the input pass zeroes
+    // BOTH speed registers before the mover runs, and the mover then
+    // runs normally — fwd 0 freezes x/y, the buoyancy sink settles z
+    // (mc2l0 t=937→938: one −16 step, then constant), and the pose
+    // filters keep integrating the re-centred cursor.
+    if inp.mc2_park {
+        st.act_speed = 0;
+        st.tgt_speed = 0;
+    }
 
     // ---- sub_5F380 (EF:60748): command integration, pre-move ----
     // Identical numbers to MC1's sub_46840 (trace §4c: the D4B8x

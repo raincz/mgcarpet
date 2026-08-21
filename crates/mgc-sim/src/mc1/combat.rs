@@ -1418,16 +1418,29 @@ impl Gen {
     /// tile-chain sweep as [`Self::victim_scan`] but under the
     /// claim whitelist ([`Self::claim_admits`]) — and with NO player
     /// probe (sub_108B0 never reaches the human wizard; you cannot
-    /// possess a wizard). Same ring-iterator geometry as
-    /// [`Self::victim_scan`], verbatim: `AddE7EE0x_10080(0, (+82 +
-    /// 255) >> 8)` over the `(pos + 128) >> 8` centre (EF:3798-3801).
+    /// possess a wizard). Ring-iterator geometry on BOTH games,
+    /// verbatim: `AddE7EE0x_10080(0, (+82 + 255) >> 8)` over the
+    /// `(pos + 128) >> 8` centre (EF:3798-3801) — NOT
+    /// [`Self::probe_window`]'s MC2 square: that square is one half
+    /// of the generic march's compensating pair, and the claim path
+    /// probes ONCE at the endpoint like retail, so the square's
+    /// truncated centre reads one cell short of the ring on grazing
+    /// geometry (mc2l0 t=65: the (9,1) bolt's endpoint sits two
+    /// x-cells from the (10,45) building's chain cell — the
+    /// 2x2-anchored ring reaches it, the ±1 square does not).
     fn claim_victim_scan(&self, i: usize) -> Option<MailTarget> {
         let (wx, wy, id) = {
             let e = &self.ent[i];
             (e.x, e.y, e.id24)
         };
         let r = (self.ent[i].f80 as i32 + 255) >> 8;
-        for t in self.probe_window(wx, wy, r) {
+        let cx = ((wx as i32 + 128) >> 8) as u8;
+        let cy = ((wy as i32 + 128) >> 8) as u8;
+        for t in self
+            .ring_cells(0, r)
+            .into_iter()
+            .map(|(dx, dy)| tile(cx.wrapping_add(dx), cy.wrapping_add(dy)))
+        {
             let mut j = self.map_entity[t] as usize;
             while j != 0 {
                 let next = self.ent[j].next20 as usize;
@@ -1559,7 +1572,7 @@ impl Gen {
                 e.f32 = pitch;
             }
         }
-        let miss_stamp = (!self.is_hidden_worlds()).then_some(MC1_MISS_STAMP);
+        let miss_stamp = Some(MC1_MISS_STAMP);
         // ⭐ RETAIL'S DESPAWN SITS INSIDE THE CHILD-ALLOCATION GUARD.
         // Every class-9 detonation arm has the shape
         // `if ((fx = sub_373F0_377B0(...))) { …score…; sub_41E80(a1); }`
@@ -2136,7 +2149,7 @@ impl Gen {
         // constant is PER BINARY; HIDDEN.EXE links its pool
         // elsewhere and has no corpus witness, so HW keeps
         // NewEvent's 0.
-        let miss_stamp = (!self.is_hidden_worlds()).then_some(MC1_MISS_STAMP);
+        let miss_stamp = Some(MC1_MISS_STAMP);
         if let Some(s) = self.spawn_effect(38, x, y, z) {
             let e = &mut self.ent[s];
             e.id24 = own;
@@ -3030,7 +3043,7 @@ impl Gen {
         // no deflection (:63435-47). +146 is the unguarded pointer
         // difference, so a scan that found nothing records the
         // link-time constant [`MC1_MISS_STAMP`] rather than 0.
-        let miss_stamp = (!self.is_hidden_worlds()).then_some(MC1_MISS_STAMP);
+        let miss_stamp = Some(MC1_MISS_STAMP);
         if let Some(fx) = self.spawn_effect(f69, disp.0, disp.1, disp.2) {
             let quartered = match hit {
                 Some(MailTarget::Pool(j)) => {
@@ -3279,7 +3292,7 @@ impl Gen {
                 // 64608 on all THIRTEEN craters; the lane is the
                 // graded obs `chase`, so leaving it at 0 was a floor
                 // under the certified run.
-                let miss_stamp = (!self.is_hidden_worlds()).then_some(MC1_MISS_STAMP);
+                let miss_stamp = Some(MC1_MISS_STAMP);
                 // ⭐ AND THE CHILD INHERITS THE BOLT'S `+44`. It is the
                 // last line of the same five-line explode block the
                 // `+146` stamp above comes from (`v20[22] = *(a1+44)`,

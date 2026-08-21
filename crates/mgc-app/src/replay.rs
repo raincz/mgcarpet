@@ -520,6 +520,8 @@ impl ReplayDriver {
             // Retail's dw_0 bit 0x80 IS the barrel-roll command.
             barrel_roll: rp.move_byte & 0x80 != 0,
             mc1_move_byte: Some(rp.move_byte as u8),
+            mc2_cmd_speed: rp.mc2_cmd_speed,
+            mc2_park: rp.mc2_park,
             ..FlightInput::default()
         };
         let gradeable = recover::capture_clean_mc2(&pst, &st);
@@ -710,6 +712,10 @@ fn flight_input_from(p: &PortInput) -> FlightInput {
         barrel_roll: p.barrel_roll,
         raw_dx: p.raw_dx,
         mc1_move_byte: p.mc1_move_byte,
+        // Retail-recovery lanes — a port take's exact input stream
+        // never carries them.
+        mc2_cmd_speed: None,
+        mc2_park: false,
     }
 }
 

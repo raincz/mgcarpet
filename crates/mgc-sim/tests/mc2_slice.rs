@@ -606,8 +606,13 @@ fn mc2_slice_behaviors_and_goldens() {
         0x7633ac8b22e56968, // post-init (GenerateEvents + dis 0)
         0xe98f413166ba5e72, // A: 64 idle ticks afield
         0xffc80a25dbeb6580, // B: the type-5 fly-to latched
-        0x361d02c11bc638c2, // C: goat awake/flee window
-        0x83830b8dd4d5dd40, // D: fireball combat over the goat
+        // C-E re-pinned for the mc2l0 on-ramp batch (2026-08-21f;
+        // attribution in mc2_cave.rs): the fireball's terrain-contact
+        // move REVERT (sub_65C20 v16x) + the universal token-mana
+        // copy + the impact pitch stamp move the combat checkpoints;
+        // the D fireball window is the first consumer.
+        0x71d2291ade3f15e3, // C: goat awake/flee window
+        0xf60ca6ccde0e6313, // D: fireball combat over the goat
         // E re-pinned for the AREA-BROADCAST TILE ROUNDING
         // (`area_write` centers on the nearest tile — sub_120B0 /
         // EF:3750; corpus pins: mc1l0 t=91 tent claim, mc2l0 t=7257
@@ -625,7 +630,7 @@ fn mc2_slice_behaviors_and_goldens() {
         // stale amount regardless; only the hashed `player_mail` word
         // moves. (It is NOT inert in MC1, which is the whole point:
         // `mail_write_single` accumulates onto it.)
-        0x89a91768c2202adb, // E: census + villager/archer provocation
+        0x6ba8da4c55c391c2, // E: census + villager/archer provocation
     ];
     // Checkpoints 4-6 re-pinned for the DISPOSITION-FIRE stack
     // rebuild (see mc2_cave.rs — sub_49F90 at sub_4A1E0's top,
@@ -664,13 +669,19 @@ fn mc2_slice_behaviors_and_goldens() {
     // the GOLDEN note): every scorch is the ring-0 three-cell disc
     // with full cell updates at any depth — terrain latches, retiles
     // and craters land on retail's cells from the first ambient fire.
+    // Re-pinned (E ONLY; post-init..D hold) for the FIREBALL
+    // TERRAIN-CONTACT REVERT (sub_65C20's v16x commit — the burst
+    // parks at the PRE-move x/y with the contact z, mc2l0 t=2817):
+    // the provocation window's fireball lands one step short of the
+    // old endpoint, so its fire/scorch — and everything downstream —
+    // genuinely moves. Real behavior toward retail, not layout.
     const OBSERVABLE: [u64; 6] = [
         0x5951c95adf7436f9,
         0x3eaed2073972a99e,
         0x832f419cb3f9716b,
         0xad0f895abf178c2b,
         0x55dc4df57cc26a90,
-        0xbb2223913b15bac0,
+        0x2914d2e5dab5b8d3,
     ];
     assert_eq!(
         obs, OBSERVABLE,

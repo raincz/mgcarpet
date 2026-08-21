@@ -202,6 +202,7 @@ impl PoseLane {
             // The pair shadow never steps a death fall (the domain
             // is gated) — the command handler always runs here.
             no_command: false,
+            mc2_park: false,
         };
         let mut s = Mc1State {
             x: e0.x,
@@ -347,13 +348,19 @@ impl PoseLane {
         let inp = Mc1Input {
             stick_x: sx,
             stick_y: sy,
-            speed_up: mb & 1 != 0,
-            speed_down: mb & 2 != 0,
+            // The speed command is the recovered cmd_speed lane (fed
+            // as tgt below, the free-run law) — the key bits stay out
+            // of the integrator.
+            speed_up: false,
+            speed_down: false,
             strafe_left: mb & 4 != 0,
             strafe_right: mb & 8 != 0,
             // The pair shadow never steps a death fall (the domain
             // is gated) — the command handler always runs here.
             no_command: false,
+            // The modal park (big map / spell book): command 0 and
+            // the carpet pinned across the pair.
+            mc2_park: p1.cmd_speed == 0 && e1.speed == 0 && e0.x == e1.x && e0.y == e1.y,
         };
         let mut s = Mc1State {
             x: e0.x,
@@ -365,7 +372,9 @@ impl PoseLane {
             aim_pitch: e0.pitch as u16 & 0x7FF,
             eff_pitch: p0.eff_pitch & 0x7FF,
             act_speed: e0.speed,
-            tgt_speed: p0.cmd_speed,
+            // The consumed speed COMMAND (the recovered cmd_speed
+            // lane at N+1 — mouse-proportional, not the key servo).
+            tgt_speed: p1.cmd_speed,
             strafe: p0.strafe,
             tick_ctr: 0,
             rand: 0,

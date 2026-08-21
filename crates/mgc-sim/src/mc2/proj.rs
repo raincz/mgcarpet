@@ -810,6 +810,11 @@ impl Gen {
             let e = &mut self.ent[s];
             e.id24 = id;
             e.f30 = yaw;
+            // Every impact worker stamps BOTH bearing words —
+            // `v->yaw; v->pitch` (sub_65C20 EF:63194-95, sub_65820
+            // EF:62990-91, CastPosses EF:63316-17); mc2l0 t=2817's
+            // (10,0) records pitch 97 = the dying bolt's.
+            e.f32 = pitch;
             e.f146 = leader;
             e.f140 = dmg as i32; // subSpellIndex rides onto the effect
         }
@@ -1143,6 +1148,29 @@ impl Gen {
         let dz = (pos.2 as i32) - (start.2 as i32);
         let dist = Self::isqrt((dx * dx + dy * dy) as u32) as i32;
         let n = ((dist + 127) / 128).max(1);
+        // Possession probes ONCE, at the committed endpoint, after
+        // the skim clamps — retail's order is clamp → commit →
+        // sub_108B0 (EF:63262-88). No march: every claim target
+        // carries a real box (buildings ±2048), so the anti-tunnel
+        // march — the documented deviation for zero-width GENERIC
+        // sprite boxes — has nothing to close here, and marching
+        // would admit mid-chord claims retail's single endpoint
+        // probe never sees. The claim scan itself walks the retail
+        // ring (see `claim_victim_scan`), not the march's square.
+        if is_possess {
+            let g = self.ground_z(pos.0, pos.1) as i16;
+            if pos.2 < g {
+                pos.2 = g;
+            }
+            if self.is_cave() {
+                let c = (self.ceiling_z(pos.0, pos.1) - self.ent[i].f84 as i32) as i16;
+                if pos.2 > c {
+                    pos.2 = c;
+                }
+            }
+            let hit = self.claim_victim_scan_at(i, pos);
+            return self.mc2_proj_land(i, ctx, start, pos, hit);
+        }
         // MUZZLE ADMISSION (fools-mana.md OPEN-7). The march is ours,
         // not retail's, and it can see something retail's single
         // end-of-step probe never can: an entity the projectile is
@@ -1168,11 +1196,7 @@ impl Gen {
                 start.1.wrapping_add((dy * k / n) as u16),
                 (start.2 as i32 + dz * k / n) as i16,
             );
-            let found = if is_possess {
-                self.claim_victim_scan_at(i, sub)
-            } else {
-                self.victim_scan_at(i, sub, ctx)
-            };
+            let found = self.victim_scan_at(i, sub, ctx);
             if admit_muzzle
                 && k < n
                 && let Some(h) = found
@@ -1186,36 +1210,29 @@ impl Gen {
                 break;
             }
         }
-        // Possession's PRE-move skim clamp (EF:63262-64) — the ONE
-        // state that follows the ground; applied before the probe
-        // like retail (clamp, commit, then sub_108B0). On caves it
-        // also GLIDES along the ceiling (clamp to ceiling − fov, no
-        // detonate — EF:63265-70); floor raise runs first, so a
-        // sealed gap leaves z below the floor and the post-move
-        // contact test fires like retail.
-        if is_possess {
-            let g = self.ground_z(pos.0, pos.1) as i16;
-            if pos.2 < g {
-                pos.2 = g;
-            }
-            if self.is_cave() {
-                let c = (self.ceiling_z(pos.0, pos.1) - self.ent[i].f84 as i32) as i16;
-                if pos.2 > c {
-                    pos.2 = c;
-                }
-            }
-        }
-        // The xtype/xsubtype narrowing is retail's, but it lives
-        // INSIDE `sub_10780` (EF:3765-68) — `sub_108B0` has no such
-        // filter (EF:3820-70, whitelist only). The basic (9,1) bolt
-        // carries `xtype = 10` from its ctor (EF:34775), so running
-        // the generic filter over a CLAIM hit would swallow worm
-        // (5,22) and building (10,45) claims retail delivers.
-        let hit = if is_possess {
-            scanned
-        } else {
-            self.mc2_proj_filter(i, scanned)
-        };
+        let hit = self.mc2_proj_filter(i, scanned);
+        self.mc2_proj_land(i, ctx, start, pos, hit);
+    }
+
+    /// The shared landing tail of the MC2 flight: rebound gate,
+    /// terrain/water contact, life countdown, impact/expiry. `hit`
+    /// arrives ALREADY filtered — the xtype/xsubtype narrowing is
+    /// retail's, but it lives INSIDE `sub_10780` (EF:3765-68);
+    /// `sub_108B0` has no such filter (EF:3820-70, whitelist only),
+    /// so the possession caller passes its claim hit through raw —
+    /// the basic (9,1) bolt carries `xtype = 10` from its ctor
+    /// (EF:34775), and running the generic filter over a CLAIM hit
+    /// would swallow worm (5,22) and building (10,45) claims retail
+    /// delivers.
+    fn mc2_proj_land(
+        &mut self,
+        i: usize,
+        ctx: &MobCtx,
+        start: (u16, u16, i16),
+        mut pos: (u16, u16, i16),
+        hit: Option<MailTarget>,
+    ) {
+        let is_possess = matches!(self.ent[i].tick70, 1 | 18);
         // The Rebound gate (EF:62939): a shielded victim throws the
         // bolt back at its shooter — no impact, it flies on reversed.
         if let Some(h) = hit
@@ -1241,9 +1258,21 @@ impl Gen {
                 None
             };
             if let Some(cz) = contact_z {
-                // Clamp z only to PLACE the burst (EF:62954/63139-40)
-                // — offensive projectiles never skim.
+                // Clamp z to PLACE the burst — offensive projectiles
+                // never skim. The GENERIC core keeps the post-move
+                // x/y under the clamped z (sub_65820 EF:62954), but
+                // the FIREBALL body (sub_65C20, actions 0/29 — both
+                // its dispatch wrappers, EF:63009/63023) commits the
+                // saved PRE-move axis instead (`v16x`, EF:63139-40):
+                // the burst REVERTS the dying move, x/y = tick entry,
+                // z = the contact read at the post-move cell (mc2l0
+                // t=2817 slot 172: retail parks at (14878,6442) 3083
+                // where the port flew the full final step).
                 pos.2 = cz;
+                if matches!(self.ent[i].tick70, 0 | 29) {
+                    pos.0 = start.0;
+                    pos.1 = start.1;
+                }
                 // Water tile, nested in the contact branch
                 // (EF:62956/63141): (10,5) splash, owner inherited,
                 // despawn — no impact effect, no XP. Model gate: the

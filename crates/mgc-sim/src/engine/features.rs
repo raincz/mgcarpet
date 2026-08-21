@@ -1735,6 +1735,27 @@ impl Gen {
     /// retail's — it must never be handed out (0 = native MC2, where
     /// the human owns no pool slot at all).
     pub(crate) fn mc2_rebuild_free(&mut self, pinned: u16) {
+        // `sub_49F90`'s FIRST loop (Level.cpp:1277-80): every pending
+        // GHOST — disabled (byte[1]&4 → our 0x400) but not yet
+        // reaped — is freed NOW (`sub_57F20`: unlink, recycle-list
+        // removal, class = 0), BEFORE the descending collect. A
+        // mid-tick disposition fire therefore reuses the slot of the
+        // very switch that fired it (mc2l0 t=3169: the consumed
+        // (11,1)@48's slot takes the dis-2 (11,32); without the reap
+        // every payload lands one free slot high — 193/194 where
+        // retail records 48/193). MC2-gated: MC1's twin `sub_37220`
+        // (:43825) carries no such reap and the eight certified mc1
+        // takes pin its allocation receipts.
+        if matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2) {
+            for s in 1..self.ent.len() {
+                if s != pinned as usize
+                    && self.ent[s].class64 != 0
+                    && self.ent[s].flags & 0x400 != 0
+                {
+                    self.free_entity(s);
+                }
+            }
+        }
         self.free = (1..self.ent.len() as u16)
             .rev()
             .filter(|&s| s != pinned && self.ent[s as usize].class64 == 0)

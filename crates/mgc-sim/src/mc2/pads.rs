@@ -185,7 +185,7 @@ impl Gen {
             e.tick70 = 51;
         }
         for _ in 0..ran {
-            self.mc2_building_tick(i);
+            self.mc2_building_tick(i, None);
         }
         for (t, height) in fence {
             self.t.height[t] = height;
@@ -576,7 +576,7 @@ mod tests {
         let mut live = flat_gen();
         let b = place_building(&mut live, 60, 60, 3, 64);
         for _ in 0..31 {
-            live.mc2_building_tick(b);
+            live.mc2_building_tick(b, None);
         }
         assert_eq!(live.ent[b].tick70, 52, "parked as the static building");
         assert_eq!(live.ent[b].site_z, 64, "build datum survives in site_z");

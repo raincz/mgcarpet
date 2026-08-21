@@ -206,6 +206,15 @@ pub struct FlightInput {
     /// the sequential-bit-test law), so a recovered retail stream
     /// needs the byte itself. Live play leaves it `None`.
     pub mc1_move_byte: Option<u8>,
+    /// REPLAY-ONLY MC2 speed command: the recovered per-player
+    /// `cmd_speed` lane (mouse-proportional). When set, it becomes
+    /// the mover's target speed verbatim and the speed key bits stay
+    /// out of the integrator. Live play leaves it `None`.
+    pub mc2_cmd_speed: Option<i16>,
+    /// REPLAY-ONLY MC2 modal park (big map / spell book open):
+    /// retail keeps playing but stops the carpet dead — speeds snap
+    /// to 0, no translation, pose filters keep integrating.
+    pub mc2_park: bool,
 }
 
 /// The faithful movers' input view: the float axes' sign mapping, or
@@ -223,13 +232,16 @@ fn mc1_input(input: &FlightInput) -> flight::Mc1Input {
     flight::Mc1Input {
         stick_x: input.stick_x.clamp(-127, 127),
         stick_y: input.stick_y.clamp(-127, 127),
-        speed_up: up,
-        speed_down: down,
+        // A replay-recovered MC2 speed command replaces the key
+        // servo whole (fed as tgt_speed by `move_mc2`'s caller).
+        speed_up: up && input.mc2_cmd_speed.is_none(),
+        speed_down: down && input.mc2_cmd_speed.is_none(),
         strafe_left: left,
         strafe_right: right,
         // Set world-side, at the carpet's dispatch — only the death
         // fall clears it (`World::step_player_flight`).
         no_command: false,
+        mc2_park: input.mc2_park,
     }
 }
 
@@ -1357,6 +1369,12 @@ impl Simulation {
         }
 
         let inp = mc1_input(input);
+        // A replay-recovered speed command IS the target (the
+        // cmd_speed lane, mouse-proportional — the key servo stays
+        // out via `mc1_input`'s bit strip).
+        if let Some(v) = input.mc2_cmd_speed {
+            self.carpet.tgt_speed = v;
+        }
         let prev = self.carpet;
         let w = self.world.as_ref().expect("checked above");
         let moved = flight::mc2_move(
