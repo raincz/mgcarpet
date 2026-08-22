@@ -10555,25 +10555,38 @@ impl World {
         }
         // The wizard scan — the human, alive, not yet holding this
         // spell (the SpellEnabled[model] gate, EF:55713).
-        let owned = self.g.mc2_spell_tokens.0 & (1 << model) != 0;
-        if self.prune_owned_jars
-            && self
-                .mc2_book
-                .ent
-                .get(model as usize)
-                .is_some_and(|&e| e != 0)
-        {
+        //
+        // THE GATE READS THE BOOK. Retail's `SpellEnabled[i]` is ONE
+        // lane: the manifestation's pool slot, doubling as the "do I
+        // own this" predicate, and `sub_5CF40` refills it on every
+        // respawn — so retail can never re-collect a jar of a spell it
+        // already holds. The port split that lane into `mc2_book.ent`
+        // (the slot) and [`Gen::mc2_spell_tokens`] (a bitmask), and the
+        // mask only ever learned about the level-start seed and
+        // in-level pickups: the central grant
+        // ([`World::mc2_adopt_manifestation`]) sets only the book, so
+        // campaign-carried and instrument-granted spells never set a
+        // bit, and the death scatter clears every bit without
+        // `mc2_remint_book` putting them back. Gating on the mask
+        // therefore let an already-owned jar be re-collected — which
+        // repoints the book at it (ORPHANING the live manifestation in
+        // a pool slot nothing frees, its `act_life` 0 so the decay
+        // clock never runs) and re-runs the quick-slot bind law,
+        // silently stomping a hand. Keying on the book is both the
+        // retail semantic and the same predicate the prune arm below
+        // already used.
+        let owned = self
+            .mc2_book
+            .ent
+            .get(model as usize)
+            .is_some_and(|&e| e != 0);
+        if self.prune_owned_jars && owned {
             // Unfaithful improvement (deliberate, P-class): an
             // owned-spell jar can never be collected — remove it
             // instead of leaving permanent clutter. Self-culling here
             // covers both the level-load sweep and the tick after the
             // player gains the spell (every jar of it despawns on its
             // next tick).
-            // The predicate keys on the XP BOOK, not the SpellEnabled
-            // mask above: the central grant (`mc2_adopt_manifestation`)
-            // sets only the book, so campaign-carried spells leave the
-            // mask at the fireball+possess seed and the mask reads
-            // "unowned" for everything actually carried.
             self.g.ent[i].flags |= 0x400;
             self.entities_dirty = true;
             return;
@@ -29310,6 +29323,116 @@ mod tests {
         );
         assert_eq!(w.g.ent[m].max_life, 100, "still the tier-0 mana cost");
         assert_eq!(w.mc2_book.sel[0], 0, "and the book never disagreed");
+    }
+
+    /// **A JAR OF A SPELL YOU ALREADY HOLD IS NEVER COLLECTED — HOWEVER
+    /// YOU CAME TO HOLD IT.**
+    ///
+    /// Retail's `SpellEnabled[i]` is ONE lane (the manifestation's pool
+    /// slot, doubling as the ownership predicate) and the collect gate
+    /// at EF:55713 reads it, so flying back over your own death scatter
+    /// picks up nothing. The port split that lane in two and gated on
+    /// the [`Gen::mc2_spell_tokens`] bitmask, which only ever learned
+    /// about the level-start seed and in-level pickups — never the
+    /// central grant ([`World::mc2_adopt_manifestation`], i.e. the
+    /// campaign carry and the playtest instruments) — and which the
+    /// death scatter wipes wholesale. Both holes let an owned jar be
+    /// re-collected, which repoints the book at it and re-runs the
+    /// quick-slot bind law.
+    ///
+    /// Non-vacuous — restore the mask gate and BOTH halves fail: the
+    /// post-respawn flyover drags the book back onto the scattered jars
+    /// and the left hand lands on the last one collected (measured:
+    /// Fireball → Lightning), while the re-minted manifestations are
+    /// orphaned in pool slots with `act_life` 0, so nothing ever frees
+    /// them — one leaked slot per spell per death.
+    ///
+    /// Runs with `prune_owned_jars` OFF: the default-ON enhancement
+    /// culls owned jars outright and hides the whole class.
+    #[test]
+    fn mc2_owned_spell_jars_are_never_re_collected() {
+        let mut w = mc2_flat_world();
+        w.player.grace = 0;
+        w.prune_owned_jars = false; // the faithful arm is the broken one
+        let (cx, cy) = mc2_pos(60, 60);
+        mc2_give_castle(&mut w, cx, cy);
+        // 0/1 come from the level-start seed (mask bit SET); these three
+        // arrive through the central grant, exactly as a campaign carry
+        // does (mask bit never set).
+        for s in [7usize, 9, 18] {
+            let (hx, hy, hz) = w.human_pose;
+            let m = w.g.mc2_spawn_spell_token(s as u8, hx, hy, hz).unwrap();
+            w.mc2_adopt_manifestation(m, s);
+        }
+        w.mc2_select_spell(0, 0, 0); // left  = Fireball
+        w.mc2_select_spell(1, 0, 1); // right = Possess
+        let owned: Vec<usize> = (0..26).filter(|&s| w.mc2_book.ent[s] != 0).collect();
+        assert_eq!(owned, vec![0, 1, 7, 9, 18]);
+        let hands = (w.mc2_book.left, w.mc2_book.right);
+
+        // A ground jar for a GRANT-path spell, no death involved: the
+        // mask never had a bit for spell 7, so this was collectible.
+        let (px, py) = mc2_pos(80, 80);
+        let jz = w.g.ground_z(px, py) as i16;
+        let stray = w.g.mc2_spawn_spell_token(7, px, py, jz).unwrap();
+        w.g.ent[stray].tick70 = 7 * 3 + 1; // the loose-pickup state
+        let held7 = w.mc2_book.ent[7];
+        let pose = PlayerPose::level(px, py, jz, 0);
+        for _ in 0..16 {
+            w.tick(pose, PlayerCommand::default());
+        }
+        assert_eq!(
+            w.mc2_book.ent[7], held7,
+            "a carried spell's jar must not be re-collected"
+        );
+        assert_eq!(
+            (w.mc2_book.left, w.mc2_book.right),
+            hands,
+            "…and must not touch the hands"
+        );
+        w.g.ent[stray].flags |= 0x400; // clear it out of the way
+
+        // Now the death half: scatter, respawn, fly back over the site.
+        let floor = jz + w.mc2_carpet_row().clearance;
+        w.player.life = -3060;
+        w.player.state = LifeState::Falling;
+        w.player.fall_speed = 0;
+        w.player.killer = 0;
+        w.tick(
+            PlayerPose::level(px, py, floor, 0),
+            PlayerCommand::default(),
+        );
+        assert_eq!(w.vitals().state, LifeState::Dead, "the fall lands");
+        let scattered: Vec<u16> = owned.iter().map(|&s| w.mc2_book.ent[s]).collect();
+        w.tick(
+            PlayerPose::level(cx, cy, 1792, 0),
+            PlayerCommand {
+                respawn: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(w.vitals().state, LifeState::Alive);
+        let fresh: Vec<u16> = owned.iter().map(|&s| w.mc2_book.ent[s]).collect();
+
+        let jar_z = w.g.ent[scattered[0] as usize].z;
+        for _ in 0..16 {
+            w.tick(
+                PlayerPose::level(px, py, jar_z, 0),
+                PlayerCommand::default(),
+            );
+        }
+        for (n, (&s, &m)) in owned.iter().zip(&fresh).enumerate() {
+            assert_eq!(
+                w.mc2_book.ent[s], m,
+                "spell {s} re-collected its own death jar (slot {})",
+                scattered[n]
+            );
+        }
+        assert_eq!(
+            (w.mc2_book.left, w.mc2_book.right),
+            hands,
+            "the death scatter must not re-bind a hand"
+        );
     }
 
     /// **A DEBIT STAMPED BELOW THE CARPET LANDS IN ITS OWN FRAME —

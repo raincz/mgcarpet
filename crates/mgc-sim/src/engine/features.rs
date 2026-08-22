@@ -894,6 +894,17 @@ pub(crate) struct Gen {
     /// model 0..25 (retail: `SpellEnabled[model]` on the wizard,
     /// sub_68FF0 EF:55726) — banked for the Phase-4.2 spell system
     /// like the scrolls. Hash-transparent at zero.
+    ///
+    /// NOT THE OWNERSHIP PREDICATE — do not gate a pickup on it.
+    /// Retail's `SpellEnabled[]` is one lane (slot AND ownership); this
+    /// mask is only half of the port's split, and it learns about the
+    /// level-start seed and in-level pickups ONLY: the central grant
+    /// (`World::mc2_adopt_manifestation`) sets just the book, so
+    /// campaign-carried and instrument-granted spells never light a
+    /// bit, and the death scatter clears every bit while the respawn
+    /// re-mint restores none. `World::mc2_book`'s `ent` is the lane
+    /// that always tracks ownership — `mc2_spell_token_tick` gates on
+    /// that, and `mc2_owned_spell_jars_are_never_re_collected` pins it.
     pub(crate) mc2_spell_tokens: Mc2Quiet<3>,
     /// MC2 spell-XP mail (owner id, spell index): projectile impacts
     /// award from inside the pool tick (`sub_6D8B0` call sites,
