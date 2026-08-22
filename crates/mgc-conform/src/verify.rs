@@ -220,6 +220,11 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     // other state, so the ±1-tick dating caveat costs
                     // nothing on a live wizard.
                     respawn: rec.respawn,
+                    // A recorded retail cheat mutates the world, so
+                    // the pair it fires on cannot conform without it
+                    // (`engine::world::cheats`) — 23 of mc1l0-test's
+                    // pairs are exactly that and nothing else.
+                    cheat: rec.cheat,
                     ..pcmd
                 }
             };

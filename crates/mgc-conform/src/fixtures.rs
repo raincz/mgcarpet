@@ -229,6 +229,7 @@ fn for_each_pair(
                     equip_left: rec.equip_left.map(mgc_sim::mc1::spells::SpellId),
                     equip_right: rec.equip_right.map(mgc_sim::mc1::spells::SpellId),
                     demolish: rec.demolish,
+                    cheat: rec.cheat,
                     ..pcmd
                 }
             };
@@ -368,13 +369,14 @@ fn for_each_pair_mc2(
                 // equip — local to the pair, never the edge chain.
                 let pair_cmd = {
                     let mut c = cmd;
-                    c.mc2_select = mgc_formats::recover::recover_pair_mc2(
+                    let rec = mgc_formats::recover::recover_pair_mc2(
                         &pst,
                         &st,
                         false,
                         tick.input.as_ref(),
-                    )
-                    .mc2_select;
+                    );
+                    c.mc2_select = rec.mc2_select;
+                    c.cheat = rec.cheat;
                     c
                 };
                 let (pd, _, _) = crate::verify_mc2::exec_pair_mc2(

@@ -177,6 +177,38 @@ control commands on the wire — the "consumed command per player per
 tick" unit is retail's own canon, and this channel is deliberately
 shaped like it.
 
+**Cheats: the witness is the toast, not the key.** Both engines expose
+a cheat menu on control opcode 30 (`0x1E`, `param1` = sub-code 1..7 on
+MC1, 1..10 on MC2; ALT+F-key in both). It is the one recorded verb
+that MUTATES the world instead of steering it, so a free-running
+consumer must apply it or diverge permanently from that tick. It
+cannot be read off the control slot — retail memsets the 10-byte
+command in the same event pass (remc1 :49044), before any capture
+window opens, and opcode 30 appears **zero** times in either cheat
+take. The raw key channel does see the F-key but carries the ±1-tick
+caveat above and cannot separate a held key from a repeat.
+
+The handler's OWN on-screen message settles both: it names the cheat
+and it re-arms a lifetime counter that otherwise only counts down, and
+it lands in the per-player block INSIDE the state closure (MC1 text at
+wizard `+28 + 68·i`, counter at `+64`; MC2 text at block `+0x1C`,
+counter at `+0x4D`). A cheat fired iff the counter INCREASED across
+the pair and the text matches a handler string — repeats are dated by
+the counter alone, since the text does not change between them.
+Measured: mc1l0-test 23/23 fires and mc2l0-test 103/103, each matching
+a key press edge 1:1, zero misses and zero false positives
+(`mgc_formats::recover::Cheat`).
+
+PHASE is per-game and both arms are corpus-dated
+(`engine::world::cheats`): MC1's handler runs in `DrawAndEventsInGame`'s
+command pass AHEAD of the tick function whose stub holds the capture
+window, so its writes are visible at `t=N` UN-TICKED — the port applies
+it at the TAIL of the pair tick. MC2's rides `PlayerEvents` INSIDE the
+frame the recorder samples the tail of, so its mints do tick that
+frame — the port applies it at the tick TOP, beside the MC2 respawn.
+Port takes carry the sub-code in `PortInput.cheat`, so a `--replay
+--record` transcode of a cheated take still reproduces itself.
+
 ### `obs` — the shared observable projection
 
 The decoded, human-greppable view: RNG word, wizards/players, control
@@ -481,11 +513,13 @@ remains the path for any unpatched exe.
     inline input recovery (the shared laws in
     `mgc_formats::recover` — the consumed move/fire byte fed to the
     movers verbatim via `FlightInput::mc1_move_byte`, the inverted
-    stick filter, hand equips/rebinds, the respawn witness), world
-    seeded by `retail_import_*` at the first closure, gaps re-anchor
-    fresh segments. PURE replay: divergence is graded at every
-    capture-clean boundary (the pose channel's lane set) and
-    reported, never corrected.
+    stick filter, hand equips/rebinds, the respawn witness, the cheat
+    toast), world seeded by `retail_import_*` at the first closure,
+    gaps re-anchor fresh segments. PURE replay: divergence is graded
+    at every capture-clean boundary (the pose channel's lane set) and
+    reported, never corrected. A recorded cheat with no port handler
+    is REPORTED as such — it guarantees divergence from that tick, and
+    an unexplained wall is worse than a named one.
   - **Port recordings** (`source:"port"`, `input:"exact"`): pins the
     header's sim closure (tier tags applied; a foreign
     `snapshot_version` is a refusal, not a warning), restores the

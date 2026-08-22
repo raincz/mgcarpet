@@ -612,11 +612,12 @@ impl World {
         } else {
             cost
         };
-        if self.dev_spells {
+        if self.dev_spells || self.mc2_free_spells {
             // Retail's OWN cheat flag (`OptionsSettingFlag_24 & 0x20`,
-            // L:1531-35): no castle-upkeep gate, 1 mana per tick —
-            // the dev-spells instrument mirrors it so upkeep spells
-            // (Cave-In's 100k castle-pool gate) stay castable.
+            // L:1531-35): no castle-upkeep gate, 1 mana per tick.
+            // `mc2_free_spells` IS that flag, replayed off a recorded
+            // cheat; the dev-spells instrument mirrors it so upkeep
+            // spells (Cave-In's 100k castle-pool gate) stay castable.
             let e = &mut self.g.ent[m];
             e.f136 = 0;
             e.f140 = 1;
@@ -642,9 +643,17 @@ impl World {
         // CAVE gate: Cave-In (25) never notifies or banks on a
         // surface level. The LEVEL derive stays unconditional.
         let v5 = owned && (self.g.is_cave() || spell != 25);
-        // Castle XP clamp (EF:43885-86; `setting_byte2_23` guard OPEN
-        // — single-player campaign always clamps).
-        if self.mc2_book.xp_vol[2] > 7 {
+        // Castle XP clamp (EF:43885-86). The `setting_byte2_23 >= 0`
+        // guard is CLOSED (2026-08-22, mc2l0-test): that word is
+        // retail's tester flag, so the clamp is exactly what a normal
+        // campaign does and a cheat-enabled session does NOT. Measured:
+        // under the cheat menu the castle's volatile XP runs free to
+        // 7900 and `levels[2]` reaches 2 on the very first spell-XP
+        // press — clamping there would peg the castle at tier 0/1 and
+        // silently break every cheated take's castle ladder.
+        // `cheat_mode` is the flag, inferred from a cheat having fired
+        // (engine::world::cheats).
+        if !self.cheat_mode && self.mc2_book.xp_vol[2] > 7 {
             self.mc2_book.xp_vol[2] = 7;
         }
         let xp = self.mc2_book.xp_vol[spell] + self.mc2_book.xp_bank[spell];
@@ -911,7 +920,7 @@ impl World {
 
     fn mc2_dev_grant(&mut self, spell: usize) {
         let (px, py, pz) = self.human_pose;
-        if let Some(m) = self.g.mc2_spawn_spell_token(spell as u8, px, py, pz) {
+        if let Some(m) = self.mc2_new_spell_token(spell as u8, px, py, pz) {
             self.mc2_adopt_manifestation(m, spell);
         }
     }
@@ -2202,7 +2211,7 @@ impl World {
                 continue;
             }
             let (px, py, pz) = self.human_pose;
-            if let Some(m) = self.g.mc2_spawn_spell_token(s as u8, px, py, pz) {
+            if let Some(m) = self.mc2_new_spell_token(s as u8, px, py, pz) {
                 self.mc2_adopt_manifestation(m, s);
                 self.g.mc2_spell_tokens.0 |= 1 << s;
             }

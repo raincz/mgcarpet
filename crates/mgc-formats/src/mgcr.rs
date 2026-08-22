@@ -346,6 +346,16 @@ mod m1 {
     pub const WIZARD_STRIDE: usize = 2_049;
     pub const WIZARD_COUNT: usize = 8;
     pub const WIZ_PLAYINDEX: usize = 10;
+    /// `messages_13351_28[]` — the wizard's 8 on-screen message slots
+    /// (`Type_str_28`, 68 bytes: 64-byte text, `periods_13415` u16 at
+    /// +64, `drawType_13417` u16 at +66). ⚠ Retail addresses these
+    /// DOUBLE-indexed — `str_13323[local].messages[acting]` — so a
+    /// player's own message lands in the slot of its own index; the
+    /// decoder reads wizard `i`'s slot `i` accordingly.
+    pub const WIZ_MSGS: usize = 28;
+    pub const MSG_STRIDE: usize = 68;
+    pub const MSG_TEXT_LEN: usize = 64;
+    pub const MSG_TICKS: usize = 64;
     pub const T160: usize = 1_103; // Type_160 within the wizard record
     pub const T160_HAND_L: usize = 940;
     pub const T160_HAND_R: usize = 944;
@@ -594,6 +604,13 @@ mod m2 {
     pub const PP_PLAYINDEX: usize = 0xA;
     pub const PP_TURN: usize = 0x12;
     pub const PP_NAME: usize = 0x39F;
+    /// `CurrentNotificationText_0x01c` — the on-screen message text,
+    /// and its lifetime counter `word_0x04d` (reset to 100 by
+    /// `ShowMessage_52D70`, GameUI.cpp:4638; 200 for a level-up, 20
+    /// for the change-spell toast) which ticks DOWN every frame.
+    pub const PP_NOTIFY_TEXT: usize = 0x1C;
+    pub const PP_NOTIFY_TEXT_LEN: usize = 48;
+    pub const PP_NOTIFY_TICKS: usize = 0x4D;
     /// WRONG LANE, kept for recorder lockstep: the real
     /// `CastleEntityIndex_0x3A_58` sits at `PP_FLIGHT + 58` = 1056
     /// (verified on mc2l4 — +1056 tracks the live (3,2) slots 297/304
@@ -1076,6 +1093,72 @@ pub struct RetailWizardMc1 {
     pub castle_alert: u8, // +391
     pub player_alert: u8, // +392
     pub balloon_alert: u8, // +393
+    /// This wizard's own on-screen message slot ([`m1::WIZ_MSGS`]):
+    /// the NUL-trimmed text and its lifetime counter. Presentation
+    /// state — EXCEPT that retail's cheat handler writes its own name
+    /// here, which makes it the only in-closure witness that a cheat
+    /// fired (the 10-byte control command carrying opcode 30 is
+    /// memset before the capture window opens, :49044). See
+    /// [`crate::recover::Cheat`].
+    pub notify: Notify,
+}
+
+/// A wizard/player on-screen message: the text and the countdown that
+/// ages it out. A countdown that went UP across a pair means the slot
+/// was re-armed — i.e. a message FIRED on that tick, even when the
+/// text is identical to the last one (retail re-arms to a fixed
+/// per-message-kind value: 100 cheat, 200 level-up, 20 spell-select).
+///
+/// The text is kept as raw NUL-padded bytes so the whole retail
+/// closure stays `Copy`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Notify {
+    raw: [u8; Notify::CAP],
+    pub ticks: u16,
+}
+
+impl Default for Notify {
+    fn default() -> Self {
+        Notify {
+            raw: [0; Notify::CAP],
+            ticks: 0,
+        }
+    }
+}
+
+impl Notify {
+    /// The larger of the two engines' text fields (MC1 64, MC2 48).
+    pub const CAP: usize = 64;
+
+    /// Read `len` bytes of NUL-terminated retail text at `o`. A short
+    /// or torn image yields an empty message rather than a panic.
+    fn read(d: &[u8], o: usize, len: usize, ticks: u16) -> Notify {
+        let mut raw = [0u8; Notify::CAP];
+        let src = d.get(o..o + len.min(Notify::CAP)).unwrap_or(&[]);
+        raw[..src.len()].copy_from_slice(src);
+        Notify { raw, ticks }
+    }
+
+    /// Build one directly — for tests and for any consumer
+    /// synthesizing a message slot.
+    pub fn from_parts(raw: [u8; Notify::CAP], ticks: u16) -> Notify {
+        Notify { raw, ticks }
+    }
+
+    /// The message text up to its NUL. Empty when the slot is clear or
+    /// holds non-UTF-8 (retail writes plain ASCII).
+    pub fn text(&self) -> &str {
+        let end = self.raw.iter().position(|&b| b == 0).unwrap_or(Notify::CAP);
+        std::str::from_utf8(&self.raw[..end]).unwrap_or("")
+    }
+
+    /// True when `self` was re-armed relative to `prev` — the fire
+    /// edge. The counter decrements once per tick, so a snapshot taken
+    /// after the firing tick reads one BELOW the reset value; any
+    /// increase is a fresh `ShowMessage`.
+    pub fn fired_since(&self, prev: &Notify) -> bool {
+        self.ticks > prev.ticks
+    }
 }
 
 /// The typed MC1 retail closure the conformance importer consumes.
@@ -1244,6 +1327,12 @@ fn decode_retail_wizard_mc1(d: &[u8], i: u16) -> RetailWizardMc1 {
         castle_alert: u8_(d, t + 391),
         player_alert: u8_(d, t + 392),
         balloon_alert: u8_(d, t + 393),
+        notify: {
+            // The DOUBLE index (see `m1::WIZ_MSGS`): wizard i's own
+            // messages land in its own slot i.
+            let m = w + m1::WIZ_MSGS + i as usize * m1::MSG_STRIDE;
+            Notify::read(d, m, m1::MSG_TEXT_LEN, u16_(d, m + m1::MSG_TICKS))
+        },
     }
 }
 
@@ -1477,6 +1566,10 @@ pub struct RetailPlayerMc2 {
     pub weave: i8,
     pub avoid: i8,
     pub avoid_exit: i8,
+    /// This player's on-screen message (`CurrentNotificationText_0x01c`
+    /// plus its counter) — the in-closure cheat witness; see the MC1
+    /// twin [`RetailWizardMc1::notify`] and [`crate::recover::Cheat`].
+    pub notify: Notify,
 }
 
 /// The typed MC2 retail closure the conformance importer consumes.
@@ -1688,6 +1781,12 @@ fn decode_retail_player_mc2(d: &[u8], i: u16) -> RetailPlayerMc2 {
         weave: i8_(d, t + 1117),
         avoid: i8_(d, t + 1118),
         avoid_exit: i8_(d, t + 1119),
+        notify: Notify::read(
+            d,
+            b + m2::PP_NOTIFY_TEXT,
+            m2::PP_NOTIFY_TEXT_LEN,
+            u16_(d, b + m2::PP_NOTIFY_TICKS),
+        ),
     }
 }
 
@@ -2130,6 +2229,12 @@ pub struct PortInput {
     /// session that omitted it lost the player's own suicide.
     #[serde(default, skip_serializing_if = "is_false")]
     pub suicide: bool,
+    /// A retail CHEAT sub-code ([`crate::recover::Cheat::code`]), for
+    /// transcoding a cheated retail take (`--replay --record`). The
+    /// cheat mutates the world, so a transcode that dropped it would
+    /// produce an input-only take that cannot reproduce its own source.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cheat: Option<u8>,
 }
 
 /// The `.mgcr` WRITER (the port recorder's sink; the retail twin is

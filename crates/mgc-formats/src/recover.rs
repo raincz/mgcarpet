@@ -24,7 +24,140 @@
 //!   the press with the recentre witness ([`Mc2RespawnWitness`]), MC1
 //!   has no latch and keeps the ±1-tick caveat (docs/RECORDING.md).
 
-use crate::mgcr::{ObsMc1, RetailMc1, RetailMc2};
+use crate::mgcr::{Notify, ObsMc1, RetailMc1, RetailMc2};
+
+/// A retail CHEAT fired by the recorded player — control opcode 30
+/// (`0x1E`), `param1` = the discriminant below. Both engines bind the
+/// same keys: ALT held + F1..F7 on MC1 (remc1 :20018-46 / :20423-61),
+/// ALT + F1..F10 on MC2 (PlayerInput.cpp:95-160); the enable gate is
+/// MC1's `-cheat N` command line and MC2's tester flag
+/// (`setting_byte2_23 < 0`) or the wizard name "chronicle".
+///
+/// ## Why the toast, and not the keys
+///
+/// The opcode itself is UNRECOVERABLE from a capture: retail memsets
+/// the 10-byte control command at the end of the same event pass
+/// (remc1 :49044) and the recorder's settled window opens after that,
+/// so opcode 30 appears zero times in any take. The raw key channel
+/// does see the F-key, but it carries the documented ±1-tick
+/// attribution caveat and cannot tell a held key from a repeat.
+///
+/// The handler's OWN on-screen message can do both: it names the cheat
+/// and it re-arms a lifetime counter that otherwise only counts down,
+/// and it lands in the per-player block INSIDE the captured closure.
+/// Measured over the two cheat takes: mc1l0-test 23/23 fires and
+/// mc2l0-test 103/103, each matching a key press edge 1:1 with zero
+/// misses and zero false positives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Cheat {
+    /// 1 — grant every spell not already held, as a real pool
+    /// manifestation each (MC1 class 12 ×24, MC2 class 15 ×26).
+    AllSpells,
+    /// 2 — spawn a (10,39) sphere holding 100000 mana, and top the
+    /// caster's own mana up to its maximum.
+    MoreMana,
+    /// 3/4/5 — mass kill by model: rival players / castles / balloons.
+    DestroyPlayers,
+    DestroyCastles,
+    DestroyBalloons,
+    /// 6 — restore the caster to full life.
+    Heal,
+    /// 7 — kill every creature on the map.
+    KillCreatures,
+    /// 8 (MC2) — +100 volatile XP on all 26 spells, then re-derive
+    /// every tier. THE TIER UNLOCK: [`Cheat::AllSpells`] grants spells
+    /// at level 0 only, so a take that exercises tier 1/2 needs this.
+    SpellXp,
+    /// 9 (MC2) — toggle free spell usage (the built manifestation
+    /// takes `mana = 1, manaRegen = 0`).
+    FreeSpell,
+    /// 10 (MC2) — toggle invincibility.
+    Invincible,
+}
+
+impl Cheat {
+    /// The retail sub-code (`param1` of control opcode 30).
+    pub fn code(self) -> u8 {
+        match self {
+            Cheat::AllSpells => 1,
+            Cheat::MoreMana => 2,
+            Cheat::DestroyPlayers => 3,
+            Cheat::DestroyCastles => 4,
+            Cheat::DestroyBalloons => 5,
+            Cheat::Heal => 6,
+            Cheat::KillCreatures => 7,
+            Cheat::SpellXp => 8,
+            Cheat::FreeSpell => 9,
+            Cheat::Invincible => 10,
+        }
+    }
+
+    /// Parse a sub-code back (the `.mgcr` port-input lane).
+    pub fn from_code(code: u8) -> Option<Cheat> {
+        Some(match code {
+            1 => Cheat::AllSpells,
+            2 => Cheat::MoreMana,
+            3 => Cheat::DestroyPlayers,
+            4 => Cheat::DestroyCastles,
+            5 => Cheat::DestroyBalloons,
+            6 => Cheat::Heal,
+            7 => Cheat::KillCreatures,
+            8 => Cheat::SpellXp,
+            9 => Cheat::FreeSpell,
+            10 => Cheat::Invincible,
+            _ => return None,
+        })
+    }
+
+    /// A short label for reports.
+    pub fn name(self) -> &'static str {
+        match self {
+            Cheat::AllSpells => "all-spells",
+            Cheat::MoreMana => "more-mana",
+            Cheat::DestroyPlayers => "destroy-players",
+            Cheat::DestroyCastles => "destroy-castles",
+            Cheat::DestroyBalloons => "destroy-balloons",
+            Cheat::Heal => "heal",
+            Cheat::KillCreatures => "kill-creatures",
+            Cheat::SpellXp => "spell-xp",
+            Cheat::FreeSpell => "free-spell",
+            Cheat::Invincible => "invincible",
+        }
+    }
+}
+
+/// The handlers' message strings, verbatim (remc1 :48904-49009, remc2
+/// EF:37817-91). The ON/OFF toggles share a prefix — matching the
+/// prefix keeps the TOGGLE semantic (the recording tells us it
+/// flipped, not which way, and retail's own state is the flip).
+const CHEAT_TOASTS: &[(&str, Cheat)] = &[
+    (".. CHEAT: access all spells", Cheat::AllSpells),
+    (".. CHEAT: more mana", Cheat::MoreMana),
+    (".. CHEAT: destroy all players", Cheat::DestroyPlayers),
+    (".. CHEAT: destroy all castles", Cheat::DestroyCastles),
+    (".. CHEAT: destroy all balloons", Cheat::DestroyBalloons),
+    (".. CHEAT: heal", Cheat::Heal),
+    (".. CHEAT: Kill all creatures", Cheat::KillCreatures),
+    (".. CHEAT: More Spell Experience Points", Cheat::SpellXp),
+    (".. CHEAT: Free Spell Usage", Cheat::FreeSpell),
+    (".. CHEAT: Invincability", Cheat::Invincible),
+];
+
+/// The cheat fired across one recorded pair, from the caster's own
+/// message slot: the counter must have been RE-ARMED (it only counts
+/// down otherwise) and the text must name a cheat. Repeats of the
+/// same cheat are distinguished by the counter alone — the text does
+/// not change between them.
+pub fn cheat_fired(prev: &Notify, cur: &Notify) -> Option<Cheat> {
+    if !cur.fired_since(prev) {
+        return None;
+    }
+    let text = cur.text();
+    CHEAT_TOASTS
+        .iter()
+        .find(|(s, _)| text.starts_with(s))
+        .map(|&(_, c)| c)
+}
 
 /// Invert the stick filter across one recorded tick: find a stick
 /// value whose increment `(2·stick − acc)/4` (trunc toward zero, the
@@ -225,6 +358,11 @@ pub struct RecoveredPair {
     /// tick, x/y/z pinned for the whole window, yaw/pitch still
     /// servoing the re-centred cursor).
     pub mc2_park: bool,
+    /// A retail cheat the recorded player fired on this pair — the
+    /// one input verb that MUTATES the world rather than steering it,
+    /// so a free-running consumer has to apply it or diverge
+    /// permanently from that tick ([`Cheat`]).
+    pub cheat: Option<Cheat>,
 }
 
 impl RecoveredPair {
@@ -292,6 +430,7 @@ pub fn recover_pair_mc1(
         equip_right: equip(pw.hand_right, cw.hand_right),
         respawn: respawn_key(input_end),
         demolish,
+        cheat: cheat_fired(&pw.notify, &cw.notify),
         ..RecoveredPair::default()
     }
 }
@@ -371,6 +510,7 @@ pub fn recover_pair_mc2(
         demolish,
         mc2_cmd_speed: Some(cp.cmd_speed),
         mc2_park,
+        cheat: cheat_fired(&pp.notify, &cp.notify),
         ..RecoveredPair::default()
     }
 }
@@ -446,4 +586,64 @@ pub fn capture_clean_mc2(pst: &RetailMc2, st: &RetailMc2) -> bool {
         }
     }
     d1 > 0 && d1 >= d0 && d1 >= d2
+}
+
+#[cfg(test)]
+mod cheat_tests {
+    use super::*;
+
+    fn notify(text: &str, ticks: u16) -> Notify {
+        let mut raw = [0u8; Notify::CAP];
+        raw[..text.len()].copy_from_slice(text.as_bytes());
+        Notify::from_parts(raw, ticks)
+    }
+
+    /// The counter is what dates a cheat, not the text: retail re-arms
+    /// it to 100 and it ticks DOWN, so a snapshot taken after the
+    /// firing tick reads 99. Any INCREASE is a fresh `ShowMessage`.
+    #[test]
+    fn a_repeat_of_the_same_cheat_is_a_fresh_fire() {
+        let a = notify(".. CHEAT: more mana", 96);
+        let b = notify(".. CHEAT: more mana", 99);
+        assert_eq!(cheat_fired(&a, &b), Some(Cheat::MoreMana));
+        // …and the ordinary count-down in between is not.
+        let c = notify(".. CHEAT: more mana", 98);
+        assert_eq!(cheat_fired(&b, &c), None);
+    }
+
+    /// Non-cheat toasts share the lane (level-up re-arms to 200, the
+    /// spell-select toast to 20) and must never be mistaken for one.
+    #[test]
+    fn ordinary_toasts_are_not_cheats() {
+        let a = notify("", 0);
+        assert_eq!(cheat_fired(&a, &notify("Lightning Tower", 19)), None);
+        assert_eq!(
+            cheat_fired(&a, &notify("has been banished from the realm.", 99)),
+            None
+        );
+    }
+
+    /// The ON/OFF toggles share a prefix — the recording says it
+    /// flipped, and retail's own flag is the direction.
+    #[test]
+    fn toggle_cheats_match_on_the_shared_prefix() {
+        let a = notify("", 0);
+        for s in [
+            ".. CHEAT: Free Spell Usage ON",
+            ".. CHEAT: Free Spell Usage OFF",
+        ] {
+            assert_eq!(cheat_fired(&a, &notify(s, 99)), Some(Cheat::FreeSpell));
+        }
+    }
+
+    /// Every handler string in both engines resolves, and the sub-code
+    /// round-trips (the `.mgcr` port-input lane depends on it).
+    #[test]
+    fn every_toast_maps_and_every_code_round_trips() {
+        let a = notify("", 0);
+        for &(text, want) in CHEAT_TOASTS {
+            assert_eq!(cheat_fired(&a, &notify(text, 99)), Some(want), "{text}");
+            assert_eq!(Cheat::from_code(want.code()), Some(want), "{text}");
+        }
+    }
 }

@@ -452,7 +452,7 @@ impl World {
             let e = &self.g.ent[r.ent as usize];
             (e.x, e.y, e.z)
         };
-        let m = self.g.mc2_spawn_spell_token(spell as u8, x, y, z)?;
+        let m = self.mc2_new_spell_token(spell as u8, x, y, z)?;
         {
             let e = &mut self.g.ent[m];
             e.tick70 = (spell as u8).wrapping_mul(3); // owned state
@@ -3059,7 +3059,7 @@ impl World {
                     let e = &self.g.ent[i];
                     (e.x, e.y, e.z)
                 };
-                if let Some(m) = self.g.mc2_spawn_spell_token(s as u8, x, y, zz) {
+                if let Some(m) = self.mc2_new_spell_token(s as u8, x, y, zz) {
                     {
                         let e = &mut self.g.ent[m];
                         e.tick70 = (s as u8).wrapping_mul(3);

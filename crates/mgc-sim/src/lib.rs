@@ -189,6 +189,10 @@ pub struct FlightInput {
     /// retail (a direct life write in the key handler), so captures
     /// never carry it; live input only.
     pub suicide: bool,
+    /// A retail CHEAT (control opcode 30 — ALT+F-key in both games),
+    /// recovered from a recording's own cheat toast. Replay-only: the
+    /// port binds no cheat keys, so live input never sets this.
+    pub cheat: Option<mgc_formats::recover::Cheat>,
     /// MC2's barrel roll trigger — both strafe keys pressed the same
     /// tick from neutral (the app's edge detect mirrors retail's
     /// prev-frame strafe byte, PlayerInput.cpp:2080-97 → command bit
@@ -936,6 +940,7 @@ impl Simulation {
             respawn: input.respawn,
             demolish: input.demolish,
             suicide: input.suicide,
+            cheat: input.cheat,
         };
         // Faithful MC1/HW on a live world: the pre-move channels are
         // sampled at the tick head (the conform replay driver's phase

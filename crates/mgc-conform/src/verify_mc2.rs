@@ -231,9 +231,13 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             // family, mc2l3 t=108: the (70,312) panel click's flip).
             let pair_cmd = {
                 let mut c = pair_cmd;
-                c.mc2_select =
-                    mgc_formats::recover::recover_pair_mc2(&pst, &st, false, tick.input.as_ref())
-                        .mc2_select;
+                let rec =
+                    mgc_formats::recover::recover_pair_mc2(&pst, &st, false, tick.input.as_ref());
+                c.mc2_select = rec.mc2_select;
+                // A recorded retail cheat mutates the world, so the
+                // pair it fires on cannot conform without it
+                // (`engine::world::cheats`).
+                c.cheat = rec.cheat;
                 c
             };
             if args.start.is_some_and(|s| pt < s) {

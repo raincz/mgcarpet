@@ -96,6 +96,7 @@ const ROLL: FlightInput = FlightInput {
     mc1_move_byte: None,
     mc2_cmd_speed: None,
     mc2_park: false,
+    cheat: None,
 };
 
 /// The command tumbles the MC2 view through inverted and settles back

@@ -73,6 +73,7 @@ use crate::verbs::{
 };
 use mgc_formats::{Thing, ThingKind};
 
+pub mod cheats;
 pub mod conformance;
 
 /// The player's life ceiling: the human wizard ctor's maxLife 10000
@@ -560,6 +561,12 @@ pub struct PlayerCommand {
     /// PlayerInput.cpp:239-41 — retail in BOTH games): a bare
     /// `life = -1` on the human wizard.
     pub suicide: bool,
+    /// A retail CHEAT (control opcode 30 — ALT+F-key in both games),
+    /// replayed off a recording. Unlike every other verb here this one
+    /// MUTATES the world rather than steering it, so it is applied in
+    /// the tick itself, at retail's own phase (see
+    /// [`World::apply_cheat`] and `engine::world::cheats`).
+    pub cheat: Option<mgc_formats::recover::Cheat>,
 }
 
 /// The chained human flight, handed INTO the world turn so the mover
@@ -899,6 +906,17 @@ pub struct World {
     completed: bool,
     /// Dev/playtest "all spells + infinite mana" switch (G-class).
     pub(crate) dev_spells: bool,
+    /// A recorded RETAIL cheat has fired in this world
+    /// (`engine::world::cheats`). Stands in for retail's tester flag
+    /// `setting_byte2_23 < 0`, which enables the cheat menu AND
+    /// relaxes a couple of ordinary gates but lives OUTSIDE the
+    /// captured struct — a cheat firing at all proves it is set.
+    pub(crate) cheat_mode: bool,
+    /// MC2 `OptionsSettingFlag_24 & 0x20`, retail's own "free spell
+    /// usage" cheat (sub-code 9): a manifestation built while this is
+    /// on takes `manaRegen = 0, mana = 1`. Toggled by the recorded
+    /// cheat; read in `mc2_set_spell` alongside [`Self::dev_spells`].
+    pub(crate) mc2_free_spells: bool,
     /// Unfaithful improvement (deliberate, P-class): remove any spell
     /// jar the local player already owns. Retail leaves such jars in the
     /// world forever (placed jars carry life 0), but they can never be
@@ -1759,6 +1777,8 @@ impl World {
             win_streak: 0,
             completed: false,
             dev_spells: false,
+            cheat_mode: false,
+            mc2_free_spells: false,
             prune_owned_jars: false,
             strict_retail: false,
             measured_terrain: false,
@@ -3202,6 +3222,21 @@ impl World {
             self.mc2_player_respawn();
         }
 
+        // The MC2 arm of the replayed cheat sits HERE, with the
+        // respawn above and for the same reason: `PlayerEvents` holds
+        // the MC2 cheat menu (EF:37784) and runs ahead of the frame
+        // function, so its mints allocate before even the one
+        // unconditional draw below — and, unlike MC1's, they are then
+        // dispatched by the very entity pass they were made in. (MC1
+        // is the mirror image and lands at the tick TAIL; the two
+        // engines' frame layouts differ and both are measured — see
+        // the tail comment.)
+        if matches!(self.game, GameId::Mc2)
+            && let Some(c) = cmd.cheat
+        {
+            self.apply_cheat(c);
+        }
+
         // One global LCG draw per tick, before any handler — MC1
         // (:52223) and MC2 alike (remc2 frame-function top,
         // EF:39947, ahead of the disable sweep and the chain
@@ -4624,6 +4659,41 @@ impl World {
         self.player.accel_held = false;
         self.accel_veto = (false, false);
         wt_check!("tick tail (player mail/mortality/timers/ending)");
+
+        // ⭐ A REPLAYED RETAIL CHEAT LANDS AT THE VERY END OF THE TICK.
+        // `DrawAndEventsInGame_34530` (:41669-90) calls the command
+        // pass `sub_3C9D0_3CD10` — which HOLDS the cheat menu (:48836)
+        // — and only then the tick function `sub_41780_41AC0`. The
+        // recorder's window is inside the tick function's pacing stub,
+        // BEFORE its body, so a snapshot labelled `t=N` sits between
+        // frame N's command pass and frame N's tick body: the cheat's
+        // writes are already visible at N, and nothing has ticked them
+        // yet. Running it at the tail of the port's pair tick
+        // (`N-1 → N`) puts it in that same gap.
+        //
+        // Three independent mc1l0-test measurements agree, and no
+        // other placement satisfies all three:
+        // - the 24 manifestations minted at t=121 are seeded
+        //   `slot + rand` off 4,162,254,050, the ADVANCED global LCG
+        //   (rng@121) — so the mint is after this tick's draw;
+        // - the t=151 cheat sphere holds the caster's own z (2080)
+        //   through t=151 and only starts rising at t=152 — so it is
+        //   not dispatched by the tick it appears in;
+        // - the wizard's ceiling stays 1000 across t=151 and jumps to
+        //   101,000 at t=152 — so the claimed-mana census (which runs
+        //   BEFORE the entity walk, :52327) has already passed.
+        // The same gap is why the derived owned register must stay
+        // stale — see `cheats::mc1_cheat_all_spells`.
+        //
+        // MC2 is the mirror image and was applied at the tick TOP
+        // instead: there the cheat rides `PlayerEvents`, which is
+        // INSIDE the frame the recorder samples the tail of, so its
+        // mints do tick that frame.
+        if !matches!(self.game, GameId::Mc2)
+            && let Some(c) = cmd.cheat
+        {
+            self.apply_cheat(c);
+        }
     }
 
     // ---- tick() per-class dispatch arm bodies (S1a code motion) ----
@@ -5531,7 +5601,7 @@ impl World {
             if self.mc2_book.ent[s] == 0 {
                 continue;
             }
-            match self.g.mc2_spawn_spell_token(s as u8, at.0, at.1, at.2) {
+            match self.mc2_new_spell_token(s as u8, at.0, at.1, at.2) {
                 Some(m) => {
                     let e = &mut self.g.ent[m];
                     e.id24 = PLAYER_TARGET; // parentId @0x28
@@ -6024,6 +6094,11 @@ impl World {
             win_streak,
             completed,
             dev_spells,
+            // Retail cheat replay — hashed only once armed (below), so
+            // every ordinary world hashes exactly as it did before the
+            // seam existed.
+            cheat_mode,
+            mc2_free_spells,
             prune_owned_jars: _,
             strict_retail: _,
             measured_terrain: _,
@@ -6122,6 +6197,16 @@ impl World {
         if *mc1_ring != [0; 24] {
             h.write_u8(0xB5);
             mc1_ring.hash(&mut h);
+        }
+        // The retail cheat-replay flags (tag 0x1E, retail's own cheat
+        // opcode) — transparent until a recorded cheat arms one, so no
+        // ordinary world's golden moves. They ARE sim state once
+        // armed: `cheat_mode` opens the castle XP clamp and
+        // `mc2_free_spells` rewrites every manifestation built after
+        // it (engine::world::cheats).
+        if *cheat_mode || *mc2_free_spells {
+            h.write_u8(0x1E);
+            (cheat_mode, mc2_free_spells).hash(&mut h);
         }
         // The MC2 rival column (Phase 4.3b): hash-gated on presence
         // — every pre-rivals golden stands.
@@ -8785,6 +8870,17 @@ impl World {
         (m != 0).then(|| self.g.ent[m].max_life)
     }
 
+    /// Test/debug hook: a spell manifestation's two MANA lanes as the
+    /// sub-spell build left them — `(manaRegen_0x88, mana_0x90)`, the
+    /// upkeep and the per-shot charge. These are what retail's
+    /// free-spell cheat rewrites to `(0, 1)` (L:1530-35), and neither
+    /// shows in [`Self::mc2_book_view`], whose `cost` is the live
+    /// SPELLS-table derive rather than the built entity.
+    pub fn debug_spell_mana_lanes(&self, spell: usize) -> Option<(i32, i32)> {
+        let m = *self.mc2_book.ent.get(spell)? as usize;
+        (m != 0).then(|| (self.g.ent[m].f136, self.g.ent[m].f140))
+    }
+
     /// Test/debug hook: raise the player's mana ceiling (and clamp the
     /// pool into it). Lets tests observe large mana credits/debits that
     /// the default 1000 ceiling would otherwise cap.
@@ -10143,7 +10239,7 @@ impl World {
                 // Class-15 spell tokens — THE SPELL JARS (one shared
                 // ctor for all 26 spells, mc2::tokens). The swi_id
                 // state bump lands in the post-init below.
-                (15, 0..=25) => self.g.mc2_spawn_spell_token(r.model as u8, x, y, z),
+                (15, 0..=25) => self.mc2_new_spell_token(r.model as u8, x, y, z),
                 _ => None,
             },
         };
@@ -10737,7 +10833,7 @@ impl World {
             self.entities_dirty = true;
             if t == model.wrapping_mul(3).wrapping_add(2) {
                 // The self-replenishing state drops a replacement.
-                if let Some(n) = self.g.mc2_spawn_spell_token(model, tx, ty, tz) {
+                if let Some(n) = self.mc2_new_spell_token(model, tx, ty, tz) {
                     self.g.ent[n].tick70 = model.wrapping_mul(3).wrapping_add(2);
                 }
             }
@@ -13070,6 +13166,14 @@ impl World {
             completed,
             dev_spells,
             prune_owned_jars,
+            // The retail cheat flags live in retail's CONFIG block
+            // (`x_D41A0_BYTEARRAY_4_struct` +24/+23), NOT in the struct
+            // its own in-level save writes — so leaving them out of the
+            // snapshot is retail's own save boundary, not an omission.
+            // A replay re-establishes them from the recorded cheat
+            // stream anyway (engine::world::cheats).
+            cheat_mode: _,
+            mc2_free_spells: _,
             // Conformance-import mode, never true in a playable world
             // — a saved game has no business carrying it.
             strict_retail: _,

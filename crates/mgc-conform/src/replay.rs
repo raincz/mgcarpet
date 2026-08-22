@@ -211,6 +211,19 @@ fn step_mc1(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand
 /// The MC2 twin (`Simulation::move_mc2` + step tail): row refresh,
 /// signed Accelerate restore, debuff drain, the mover with the cave
 /// closures, cave accel-cancel, end-pose seizure.
+/// Book a recorded cheat for the tick and count it. The application
+/// itself happens inside the tick at retail's phase (`World::tick`);
+/// a cheat this build has no handler for is REPORTED, since it
+/// guarantees divergence from that tick on.
+fn book_cheat(world: &World, cheat: Option<recover::Cheat>, stats: &mut RStats) {
+    let Some(c) = cheat else { return };
+    if world.cheat_supported(c) {
+        *stats.cheats.entry(c.name()).or_default() += 1;
+    } else {
+        *stats.cheats_unimpl.entry(c.name()).or_default() += 1;
+    }
+}
+
 fn step_mc2(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand) {
     let falling = world.player_falling();
     let dead = world.player_dead();
@@ -457,6 +470,12 @@ struct RStats {
     respawns: u64,
     equips: u64,
     rebind_dropped: u64,
+    /// Recorded retail cheats replayed into the world, by name, and
+    /// the ones this build has no handler for — an UNAPPLIED cheat is
+    /// a guaranteed divergence from that tick on, so it is reported
+    /// rather than swallowed.
+    cheats: BTreeMap<&'static str, u64>,
+    cheats_unimpl: BTreeMap<&'static str, u64>,
     /// `--classify` verdict per classified reset-cluster head:
     /// true = LOCAL (the pair at t-1 is itself dirty ⇒ fixture
     /// candidate), false = INHERITED (the pair is clean ⇒ the break
@@ -695,6 +714,22 @@ impl RStats {
                 String::new()
             }
         );
+        if !self.cheats.is_empty() || !self.cheats_unimpl.is_empty() {
+            let fmt = |m: &BTreeMap<&'static str, u64>| {
+                m.iter()
+                    .map(|(k, v)| format!("{v}x {k}"))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            let _ = writeln!(out, "   retail cheats replayed: {}", fmt(&self.cheats));
+            if !self.cheats_unimpl.is_empty() {
+                let _ = writeln!(
+                    out,
+                    "   ⚠ cheats with NO port handler (divergence from that tick on): {}",
+                    fmt(&self.cheats_unimpl)
+                );
+            }
+        }
         out
     }
 
@@ -1051,6 +1086,7 @@ fn run_mc1(
             equip_right: rec.equip_right.map(SpellId),
             respawn: rec.respawn,
             demolish: rec.demolish,
+            cheat: rec.cheat,
             ..PlayerCommand::default()
         };
         // The dw==48 strafe-freeze emulation (law in RecoveredPair):
@@ -1084,6 +1120,7 @@ fn run_mc1(
             {
                 world.arm_walk_probe(n);
             }
+            book_cheat(&world, rec.cheat, &mut stats);
             step_mc1(&mut world, ch, inp, cmd);
             if let Some(spec) = port_dump
                 && tick.t >= spec.t
@@ -1802,6 +1839,7 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             mc2_select: rec.mc2_select,
             respawn: rec.respawn,
             demolish: rec.demolish,
+            cheat: rec.cheat,
             ..PlayerCommand::default()
         };
 
@@ -1812,6 +1850,7 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 &mut stats, &mut csv,
             )?;
         } else {
+            book_cheat(&world, rec.cheat, &mut stats);
             step_mc2(&mut world, ch, inp, cmd);
             stats.seg().stepped += 1;
             if capture_clean_mc2(&pst, &st) {

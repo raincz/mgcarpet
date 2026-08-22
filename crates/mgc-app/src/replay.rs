@@ -563,6 +563,7 @@ impl ReplayDriver {
             equip_left: rp.equip_left.map(SpellId),
             equip_right: rp.equip_right.map(SpellId),
             respawn: rp.respawn,
+            cheat: rp.cheat,
             demolish: rp.demolish,
             mc1_move_byte: Some(rp.move_byte as u8),
             ..FlightInput::default()
@@ -635,6 +636,7 @@ impl ReplayDriver {
             mc2_select: rp.mc2_select,
             respawn: rp.respawn,
             demolish: rp.demolish,
+            cheat: rp.cheat,
             // Retail's dw_0 bit 0x80 IS the barrel-roll command.
             barrel_roll: rp.move_byte & 0x80 != 0,
             mc1_move_byte: Some(rp.move_byte as u8),
@@ -873,6 +875,7 @@ fn port_input_from(i: &FlightInput) -> PortInput {
         mc2_cmd_speed: i.mc2_cmd_speed,
         mc2_park: i.mc2_park,
         suicide: i.suicide,
+        cheat: i.cheat.map(|c| c.code()),
     }
 }
 
@@ -906,6 +909,7 @@ fn flight_input_from(p: &PortInput) -> FlightInput {
         mc1_move_byte: p.mc1_move_byte,
         mc2_cmd_speed: p.mc2_cmd_speed,
         mc2_park: p.mc2_park,
+        cheat: p.cheat.and_then(mgc_formats::recover::Cheat::from_code),
     }
 }
 
@@ -1158,8 +1162,10 @@ mod tests {
             mc1_move_byte: Some(0x2A),
             mc2_cmd_speed: Some(-1234),
             mc2_park: true,
+            cheat: Some(mgc_formats::recover::Cheat::SpellXp),
         };
         let got = flight_input_from(&port_input_from(&want));
+        assert_eq!(got.cheat, want.cheat, "retail cheat lane");
         assert_eq!(got.mc2_cmd_speed, want.mc2_cmd_speed, "MC2 cruise lane");
         assert_eq!(got.mc2_park, want.mc2_park, "MC2 park lane");
         assert_eq!(got.suicide, want.suicide, "Shift+K");
