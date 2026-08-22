@@ -5456,6 +5456,25 @@ impl World {
     /// book entry — retail's own silent loss (EF:59402). The HANDS are
     /// untouched: `SpellIndexLeft/Right` survive death, and mc2l3
     /// keeps hand_left 0 / hand_right 1 straight across both deaths.
+    ///
+    /// THE PENDING-TIER CLEAR (`f44 = 0`) is load-bearing, and the
+    /// reason is a port-side field overload, not a retail line. For a
+    /// class-15 manifestation f44 is `word_0x2C_44` — SetSpell's
+    /// DEFERRED tier+1, drained by `sub_6D880`
+    /// ([`World::mc2_cast_expire`]) at cast-window expiry. Retail's
+    /// MC2 `NewEvent_4A050` (Events.cpp:569) seeds
+    /// `subSpellIndex_0x2A_42 = 100` and leaves `word_0x2C_44` at the
+    /// memset's 0, but the port's shared [`Gen::new_event`] carries
+    /// MC1's `var_u16_29839_44 = 100` into f44 — right for the
+    /// (10,57) mana-sphere family (where f44 IS subSpellIndex, see
+    /// `mc2_cast_fools_mana`), wrong here. Every other owned-
+    /// manifestation site already zeroes it
+    /// ([`World::mc2_adopt_manifestation`], the two rival mints); this
+    /// one did not, so the first post-respawn cast to expire drained
+    /// 100 into `SetSpell(m, 99)` and — clamped only to the SPELLS
+    /// row's tier count, never to the EARNED level — silently pinned
+    /// every hand spell at its top tier while the pane and the HUD
+    /// numeral kept reading `sel`.
     fn mc2_remint_book(&mut self, at: (u16, u16, i16)) {
         for s in 0..crate::mc2::rivals::MC2_SPELLS {
             if self.mc2_book.ent[s] == 0 {
@@ -5466,6 +5485,7 @@ impl World {
                     let e = &mut self.g.ent[m];
                     e.id24 = PLAYER_TARGET; // parentId @0x28
                     e.flags |= 1; // byte[0] |= 1 — the in-book bit
+                    e.f44 = 0; // word_0x2C_44 — no pending tier
                     self.mc2_book.ent[s] = m as u16;
                     self.mc2_set_spell(m, self.mc2_book.sel[s]);
                 }
@@ -29187,6 +29207,109 @@ mod tests {
             (hl, hr),
             "hands survive"
         );
+    }
+
+    /// **THE RESPAWN RE-MINT CARRIES NO PENDING TIER — A HAND SPELL
+    /// DOES NOT SILENTLY CLIMB TO ITS TOP TIER AFTER A DEATH.**
+    ///
+    /// For a class-15 manifestation `f44` is `word_0x2C_44`, SetSpell's
+    /// DEFERRED tier+1, drained at cast-window expiry by `sub_6D880`
+    /// ([`World::mc2_cast_expire`]) with NO earned-level check — the
+    /// clamp in [`World::mc2_set_spell`] is the SPELLS row's tier count
+    /// alone. Retail's MC2 `NewEvent_4A050` (Events.cpp:569) leaves that
+    /// word at the memset's 0 (its 100 goes to `subSpellIndex_0x2A_42`),
+    /// but the port's shared [`Gen::new_event`] carries MC1's
+    /// `var_u16_29839_44 = 100` into f44, and `sub_5CF40`
+    /// ([`World::mc2_remint_book`]) — alone among the owned-
+    /// manifestation sites — did not clear it. The first post-respawn
+    /// cast to expire then drained 100 into `SetSpell(m, 99)` and pinned
+    /// every re-minted spell at its highest tier, unearned, while the
+    /// pane and the HUD numeral went on reading `sel`.
+    ///
+    /// Non-vacuous: drop the `f44 = 0` in `mc2_remint_book` and the
+    /// post-expiry tier reads 2 against a level-0 book.
+    #[test]
+    fn mc2_respawn_re_mint_leaves_no_pending_tier() {
+        let mut w = mc2_flat_world();
+        w.player.grace = 0;
+        let (cx, cy) = mc2_pos(60, 60);
+        mc2_give_castle(&mut w, cx, cy);
+        // The `mc2_cast_column_laws` synthetic table: fireball = THREE
+        // tiers, costs 100/250/2500, duration 5. Three tiers is what
+        // gives the stale `f44 = 100` somewhere to climb to.
+        let mut bytes = vec![0u8; 26 * 80];
+        for (t, cost) in [100i32, 250, 2500].iter().enumerate() {
+            let b = 2 + 26 * t;
+            bytes[b..b + 4].copy_from_slice(&250i32.to_le_bytes());
+            bytes[b + 4..b + 8].copy_from_slice(&cost.to_le_bytes());
+            bytes[b + 22] = 5; // word_0x18 duration
+        }
+        bytes[0] = 3; // byte_0 = tier count
+        w.g.assets.spells = crate::mc2::spells::parse(&bytes).unwrap();
+        // Level 0, tier 0 in the left hand: nothing has been EARNED, so
+        // any later tier is unambiguously beyond the ladder.
+        w.mc2_select_spell(0, 0, 0);
+        assert_eq!(w.mc2_book.levels[0], 0, "no XP → no tier earned");
+        assert_eq!(w.mc2_book.sel[0], 0);
+
+        // Die, land, and take the Space reset.
+        let (px, py) = mc2_pos(80, 80);
+        let floor = w.g.ground_z(px, py) as i16 + w.mc2_carpet_row().clearance;
+        w.player.life = -3060;
+        w.player.state = LifeState::Falling;
+        w.player.fall_speed = 0;
+        w.player.killer = 0;
+        w.tick(
+            PlayerPose::level(px, py, floor, 0),
+            PlayerCommand::default(),
+        );
+        assert_eq!(w.vitals().state, LifeState::Dead, "the fall lands");
+        let pose = PlayerPose::level(cx, cy, 1792, 0);
+        w.tick(
+            pose,
+            PlayerCommand {
+                respawn: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(w.vitals().state, LifeState::Alive);
+
+        // Every re-minted manifestation comes up with a CLEAN pending
+        // word — the `sub_5CF40` half of the law.
+        for s in 0..26usize {
+            let m = w.mc2_book.ent[s] as usize;
+            if m == 0 {
+                continue;
+            }
+            assert_eq!(
+                w.g.ent[m].f44, 0,
+                "spell {s} re-minted with a pending tier queued"
+            );
+        }
+        let m = w.mc2_book.ent[0] as usize;
+        assert_eq!(w.g.ent[m].f71, 0, "re-minted at the selected tier");
+
+        // …and the drain at cast-window expiry is the half that USED to
+        // bite: arm the left hand, run the window out, and the live tier
+        // must still be the selected one.
+        w.tick(
+            pose,
+            PlayerCommand {
+                fire_left: true,
+                ..Default::default()
+            },
+        );
+        assert!(w.g.ent[m].f26 > 0, "the cast armed");
+        for _ in 0..8 {
+            w.tick(pose, PlayerCommand::default());
+        }
+        assert_eq!(w.g.ent[m].f26, 0, "the cast window ran out");
+        assert_eq!(
+            w.g.ent[m].f71, 0,
+            "expiry must not promote an unearned tier"
+        );
+        assert_eq!(w.g.ent[m].max_life, 100, "still the tier-0 mana cost");
+        assert_eq!(w.mc2_book.sel[0], 0, "and the book never disagreed");
     }
 
     /// **A DEBIT STAMPED BELOW THE CARPET LANDS IN ITS OWN FRAME —
