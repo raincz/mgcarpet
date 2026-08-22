@@ -2176,6 +2176,8 @@ impl App {
                             level,
                             thrust,
                             altitude,
+                            cfg.sim.parameters.entity_pool_size.map(|n| n as usize),
+                            cfg.sim.parameters.awake_range,
                         )
                     })
             };
@@ -9673,8 +9675,23 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
         cfg.gameplay.cheat.invincible = false;
         cfg.dev.plausible_spellbook = false;
         cfg.gameplay.enhancement.prune_owned_jars = false;
-        cfg.sim.parameters.entity_pool_size = None;
-        cfg.sim.parameters.awake_range = None;
+        // The offline chassis params come FROM THE TAKE, not from this
+        // run's CLI/config — the take's embedded start snapshot opens
+        // its identity block with `chassis.pool_slots` and
+        // `chassis.awake_gate_sq`, so a world built at any other size
+        // is refused ("snapshot is for a different world"). Discarding
+        // them here is what made a `--pool-slots N` take unreplayable
+        // even by the very command that recorded it. A retail take
+        // carries no port closure and pins the faithful defaults;
+        // a port take from before these keys existed reads None, which
+        // is the same faithful default it was recorded under.
+        cfg.sim.parameters.entity_pool_size = file
+            .sim_pool_slots
+            .filter(|_| file.source == replay::ReplaySource::Port)
+            .map(|n| n as u32);
+        cfg.sim.parameters.awake_range = file
+            .sim_awake_range
+            .filter(|_| file.source == replay::ReplaySource::Port);
         // The retail-bug patches pin to the take's recorded policy:
         // retail-source and post-policy port takes run the retail
         // arms; a pre-option port take replays under the legacy
@@ -9706,14 +9723,16 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
         cfg.gameplay.patches = config::GameplayPatches::retail_all();
         println!("record: retail-bug patches run their RETAIL arms for this session");
     }
-    // Re-derive the offline pool params after the replay pin.
+    // Re-derive the offline pool params after the replay pin — which
+    // SET them from the take rather than clearing them, so the world is
+    // built at the recorded size and the start snapshot applies.
     let pool_slots = if replay_boot.is_some() {
-        None
+        cfg.sim.parameters.entity_pool_size.map(|n| n as usize)
     } else {
         pool_slots
     };
     let awake_range = if replay_boot.is_some() {
-        None
+        cfg.sim.parameters.awake_range
     } else {
         awake_range
     };

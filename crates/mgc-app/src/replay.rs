@@ -52,6 +52,13 @@ pub struct ReplayFile {
     /// The recorded retail-bug patch policy tag (see
     /// [`ReplayFile::patch_policy`]); absent on pre-option takes.
     pub sim_patches: Option<String>,
+    /// The OFFLINE chassis overrides the take was recorded with
+    /// (`None` = the faithful default, and also what a pre-key take
+    /// reads as). The replay must build its world with these BEFORE
+    /// applying `snapshot` — they are what `snap_check_identity`
+    /// refuses on.
+    pub sim_pool_slots: Option<usize>,
+    pub sim_awake_range: Option<u32>,
     pub snapshot: Option<Vec<u8>>,
 }
 
@@ -105,6 +112,7 @@ impl ReplayFile {
             .and_then(|v| v.as_str())
             .map(mgcr::b64_decode)
             .transpose()?;
+        let n = |key: &str| sim.and_then(|s| s.get(key)).and_then(|v| v.as_u64());
         Ok(ReplayFile {
             game: rec.header.game.clone(),
             level,
@@ -113,6 +121,8 @@ impl ReplayFile {
             sim_thrust: s("thrust_model"),
             sim_altitude: s("altitude_model"),
             sim_patches: s("patches"),
+            sim_pool_slots: n("entity_pool_size").map(|v| v as usize),
+            sim_awake_range: n("awake_range").map(|v| v as u32),
             snapshot,
             rec,
         })
@@ -605,6 +615,16 @@ pub struct PortRecorder {
 }
 
 impl PortRecorder {
+    /// `pool_slots`/`awake_range` are the OFFLINE chassis overrides the
+    /// session was launched with (`None` = the faithful default). They
+    /// have to ride the header because they are decided BEFORE the
+    /// world exists: the replay must build its world at the recorded
+    /// size, and only then apply `start_mgcs_b64`. They are implicit in
+    /// the snapshot too — `Gen::snap_check_identity` opens on
+    /// `chassis.pool_slots` and `chassis.awake_gate_sq` — but that is
+    /// the REFUSAL, reached far too late to configure anything, which
+    /// is exactly how a take made with `--pool-slots N` became
+    /// unreplayable ("snapshot is for a different world").
     pub fn begin(
         path: &Path,
         sim: &Simulation,
@@ -612,8 +632,10 @@ impl PortRecorder {
         level: u32,
         thrust: ThrustModel,
         altitude: AltitudeModel,
+        pool_slots: Option<usize>,
+        awake_range: Option<u32>,
     ) -> Result<PortRecorder, String> {
-        let header = serde_json::json!({
+        let mut header = serde_json::json!({
             "format": 1,
             "game": game,
             "level": level,
@@ -642,6 +664,16 @@ impl PortRecorder {
                 "start_mgcs_b64": mgcr::b64_encode(&sim.snapshot()),
             },
         });
+        // Written only when overridden, so a faithful take keeps the
+        // exact header shape it had before these keys existed.
+        if let Some(sim) = header["sim"].as_object_mut() {
+            if let Some(n) = pool_slots {
+                sim.insert("entity_pool_size".into(), serde_json::json!(n));
+            }
+            if let Some(n) = awake_range {
+                sim.insert("awake_range".into(), serde_json::json!(n));
+            }
+        }
         Ok(PortRecorder {
             w: RecordingWriter::create(path, &header)?,
             path: path.to_owned(),
@@ -776,8 +808,17 @@ mod tests {
         let mut a = Simulation::with_terrain(Vec::new());
         a.thrust_model = ThrustModel::Mc1;
         a.altitude_model = AltitudeModel::Faithful;
-        let mut rec =
-            PortRecorder::begin(&path, &a, "mc1", 0, a.thrust_model, a.altitude_model).unwrap();
+        let mut rec = PortRecorder::begin(
+            &path,
+            &a,
+            "mc1",
+            0,
+            a.thrust_model,
+            a.altitude_model,
+            None,
+            None,
+        )
+        .unwrap();
         for t in 0..200u64 {
             let input = FlightInput {
                 thrust: if t % 50 < 25 { 1.0 } else { 0.0 },
@@ -812,5 +853,58 @@ mod tests {
         assert_eq!(d.graded, 200);
         assert_eq!(a.state_hash(), b.state_hash());
         let _ = std::fs::remove_file(&path);
+    }
+
+    /// **A TAKE CARRIES THE OFFLINE CHASSIS OVERRIDES IT WAS RECORDED
+    /// WITH.**
+    ///
+    /// `--pool-slots` / `--awake-range` are decided before the world is
+    /// built, and the take's `start_mgcs_b64` pins them:
+    /// `Gen::snap_check_identity` opens on `chassis.pool_slots` and
+    /// `chassis.awake_gate_sq`. They were absent from the header and
+    /// the replay boot cleared them outright, so a take recorded with
+    /// either flag could not be replayed by ANY invocation — not even
+    /// the one that recorded it — dying on "snapshot is for a different
+    /// world (chassis.pool_slots differs)" long after the point where
+    /// the value could still have been used.
+    ///
+    /// The faithful case must keep reading `None`: that is what every
+    /// pre-key take reads as, and the key is omitted entirely rather
+    /// than written null, so a default take's header shape is
+    /// unchanged.
+    #[test]
+    fn port_header_carries_the_offline_chassis_params() {
+        let mk = |name: &str, pool: Option<usize>, awake: Option<u32>| {
+            let path = std::env::temp_dir().join(name);
+            let a = Simulation::with_terrain(Vec::new());
+            let rec = PortRecorder::begin(
+                &path,
+                &a,
+                "mc1",
+                0,
+                a.thrust_model,
+                a.altitude_model,
+                pool,
+                awake,
+            )
+            .unwrap();
+            rec.finish().2.unwrap();
+            let f = ReplayFile::open(&path).unwrap();
+            let got = (f.sim_pool_slots, f.sim_awake_range);
+            let _ = std::fs::remove_file(&path);
+            got
+        };
+        assert_eq!(
+            mk("mgcapp-chassis-set.mgcr", Some(4000), Some(0)),
+            (Some(4000), Some(0)),
+            "the overrides must survive the round trip"
+        );
+        // `Some(0)` is a REAL awake_range (always awake), so it must not
+        // collapse into the same reading as "not overridden".
+        assert_eq!(
+            mk("mgcapp-chassis-default.mgcr", None, None),
+            (None, None),
+            "a faithful take pins nothing"
+        );
     }
 }

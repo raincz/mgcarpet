@@ -82,7 +82,12 @@ force-apply) a mismatched environment:
   *"fixed per run; replay headers must record them once replays
   exist"*; DEVIATIONS.md "enhanced flight": *"Selected once at the sim
   boundary; replays record it"*).
-- `snapshot_version`, pool sizes (the pool size feeds the hash).
+- `snapshot_version`, pool sizes (the pool size feeds the hash) —
+  `entity_pool_size` and `awake_range`, present only when the take was
+  recorded with the override. Chassis geometry is decided BEFORE the
+  world exists, so the replay has to read them from the header; by the
+  time the start snapshot's identity block would catch a mismatch it
+  can only refuse.
 - `patches` — the retail-bug patch policy (`gameplay · patches`,
   DEVIATIONS.md "Patch options"). `--record` forces every patch to its
   RETAIL arm for the whole session and stamps `"patches": "retail"`;
@@ -505,6 +510,17 @@ remains the path for any unpatched exe.
   `mgc_formats::mgcr::RecordingWriter` (zstd JSONL, `.jsonl` stays
   plain). Recording ends with the session (level switch or exit
   finalizes the stream).
+  The header also carries the OFFLINE chassis overrides the session
+  ran with — `entity_pool_size` and `awake_range`, written only when
+  overridden — and `--replay` builds its world from those rather than
+  from the replaying run's own CLI/config. They cannot be recovered
+  any later: the start snapshot's identity block opens on
+  `chassis.pool_slots` / `chassis.awake_gate_sq`, so a world built at
+  any other size REFUSES the snapshot ("snapshot is for a different
+  world"), which is what made a `--pool-slots N` take unreplayable by
+  every invocation including the one that recorded it. A take from
+  before these keys reads as "not overridden", i.e. the faithful
+  default it was recorded under.
 - **Puppet playback** (any recording, retail included): drive the
   recorded poses through the renderer with **no sim** — watch the
   actual retail run inside the port. Presentation styling is free
