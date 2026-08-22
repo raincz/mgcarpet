@@ -1338,6 +1338,380 @@ impl World {
         ])
     }
 
+    /// The port's free/recycle stacks for the MC2 dump tail — MC2 pops
+    /// FREE first and sacrifices a recycle victim only when it is dry
+    /// (`NewEvent_4A050`; the opposite of MC1's order). Both
+    /// bottom-to-top, next pop LAST.
+    pub fn free_stacks_mc2(&self) -> (&[u16], &[u16]) {
+        (&self.g.free, &self.g.mc2_recycle.stack)
+    }
+
+    /// The port's record at `slot` as RETAIL-convention MC2 lanes —
+    /// [`Self::port_ent_lanes_mc1`]'s twin, the port half of the MC2
+    /// `dump-state --port` side-by-side. Same lane names and order as
+    /// [`retail_ent_lanes_mc2`]; `None` = the port does not model the
+    /// lane FOR THIS RECORD'S CLASS. The translation mirrors
+    /// `import_ent_mc2` exactly, so the per-class dual homes route the
+    /// same way (the scratch quartet, the class-15 cast machine, the
+    /// m27/m23/(14,2) `@0x2C` tenants, the (10,79) defender-piece
+    /// layout, the castle's `@0x2E` build sub-state, ...). Fusions the
+    /// import cannot be inverted through print on their best-known
+    /// lane: `f1a`/`owner28` split per the `obs_project_mc2` owner
+    /// families, `rand` prints the port's low 16 bits (retail's u16
+    /// stream — the low bits of one shared LCG), and the raw `flags`
+    /// dword prints `—` (compare the bit sub-lanes instead).
+    ///
+    /// `from_probe = true` reads the mid-walk snapshot armed by
+    /// [`Self::arm_walk_probe`] — the walk loop is game-shared, so
+    /// `--at-slot` works on MC2 unchanged.
+    pub fn port_ent_lanes_mc2(
+        &self,
+        slot: u16,
+        human_slot: u16,
+        from_probe: bool,
+    ) -> Option<Vec<(&'static str, Option<i64>)>> {
+        let pool = if from_probe {
+            self.walk_probe.as_ref()?
+        } else {
+            &self.g.ent
+        };
+        let e = pool.get(slot as usize)?;
+        let untr = |v: u16| -> i64 {
+            if v == PLAYER_TARGET {
+                human_slot as i64
+            } else {
+                v as i64
+            }
+        };
+        let (c, m) = (e.class64, e.model65);
+        let castle = c == 3 && m == 2;
+        let piece = c == 10 && m == 79;
+        let sphere = c == 10 && matches!(m, 39 | 57);
+        let m27 = c == 5 && m == 27;
+        let pyramid = c == 5 && m == 10;
+        // The class-9 F_MC2PROJ stamp overwrites both bit 3 and bit 29
+        // (proj.rs) — those two retail bits are unrecoverable there.
+        let proj9 = c == 9 && m != 13;
+        // The `ramp2c` set — the three `word_0x2C_44` tenants whose
+        // f44 holds @0x2C, displacing @0x2A.
+        let ramp2c = m27 || (c == 5 && m == 23) || (c == 14 && m == 2);
+        // The doomsday-release life latch: sv2 (relocated to site_z)
+        // 16/17 puts the @0x2E latch in f26 even on the @0x10 models.
+        let doom_latch = matches!(e.site_z, 16 | 17);
+        // The owner-fusion split, `obs_project_mc2`'s families: the
+        // three translated-owner classes recover retail's `@0x28` from
+        // the fused id24; the pyramid keeps its SPIN ANGLE there.
+        let translated = (c == 15 && e.id24 != slot)
+            || (c == 10 && m == 42 && e.id24 != slot)
+            || (c == 5
+                && matches!(m, 0 | 19 | 21 | 25)
+                && self
+                    .g
+                    .ent
+                    .get(untr(e.id24) as usize)
+                    .is_some_and(|p| p.class64 == 5 && p.model65 == 10));
+        let bit = |k: u32| Some((e.flags >> k & 1) as i64);
+        let some = |v: i64| Some(v);
+        let held = self.mc2_sv_held.iter().find(|h| h.ent == slot);
+        Some(vec![
+            ("next0", None),
+            (
+                "max_life",
+                if c == 15 {
+                    None
+                } else {
+                    some(e.max_life as i64)
+                },
+            ),
+            ("life", some(e.act_life as i64)),
+            ("flags", None),
+            (
+                "flags.b0_walk1",
+                if c == 3 && m == 3 { bit(0) } else { None },
+            ),
+            ("flags.b0_done2", bit(1)),
+            ("flags.b0_link4", bit(2)),
+            ("flags.b0_coll8", if proj9 { None } else { bit(3) }),
+            ("flags.b0_x20", bit(5)),
+            ("flags.b0_chase40", if sphere { bit(6) } else { None }),
+            ("flags.b1_reap4", bit(10)),
+            ("flags.b1_x8", bit(26)),
+            ("flags.b1_decay20", if sphere { bit(13) } else { None }),
+            ("flags.b2_kill1", bit(16)),
+            ("flags.b2_x4", bit(27)),
+            ("flags.b2_x10", bit(28)),
+            ("flags.b2_x20", if proj9 { None } else { bit(29) }),
+            (
+                "scratch10",
+                if piece {
+                    some(e.f44 as i64)
+                } else if c == 5 && matches!(m, 0 | 19 | 27) && !doom_latch || pyramid {
+                    some(e.f26 as i64)
+                } else if c == 5 {
+                    None
+                } else if c == 15 {
+                    if e.tick70 == 78 {
+                        some(e.f26 as i64)
+                    } else {
+                        None
+                    }
+                } else {
+                    some(e.f26 as i64)
+                },
+            ),
+            ("rand", some((e.rand & 0xFFFF) as i64)),
+            ("next16", some(e.next20 as i64)),
+            ("prev18", some(e.prev22 as i64)),
+            (
+                "f1a",
+                if pyramid {
+                    some(untr(e.id24))
+                } else if translated && c != 5 {
+                    None // @0x1A unrecoverable behind the @0x28 fusion
+                } else {
+                    some(untr(e.id24))
+                },
+            ),
+            (
+                "yaw",
+                if c == 15 {
+                    some(0) // f30 holds @0x2A there; retail yaw dead 0
+                } else {
+                    some(if piece { e.f34 } else { e.f30 } as i16 as i64)
+                },
+            ),
+            (
+                "pitch",
+                some(if piece { e.f36 } else { e.f32 } as i16 as i64),
+            ),
+            (
+                "roll",
+                if piece {
+                    None
+                } else {
+                    some(e.f34 as i16 as i64)
+                },
+            ),
+            ("f22", if m27 { some(e.f36 as i16 as i64) } else { None }),
+            (
+                "f24",
+                if c == 15 && e.tick70 == 78 {
+                    None // f38 holds the jar arc's wraith slot instead
+                } else {
+                    some(untr(e.f38))
+                },
+            ),
+            ("f26", some(untr(e.f40))),
+            (
+                "owner28",
+                some(if pyramid {
+                    e.f36 as i64
+                } else if translated {
+                    untr(e.id24)
+                } else {
+                    0
+                }),
+            ),
+            (
+                "f2a",
+                if c == 15 {
+                    some(e.f30 as i64)
+                } else if c == 10 && matches!(m, 0 | 6) {
+                    some(e.f140 as i64)
+                } else if ramp2c || piece || (c == 10 && m == 16) {
+                    None
+                } else {
+                    some(e.f44 as i64)
+                },
+            ),
+            (
+                "f2c",
+                if ramp2c || c == 15 || (c == 10 && matches!(m, 0 | 6 | 16)) {
+                    some(e.f44 as i16 as i64)
+                } else if sphere {
+                    some(e.f46 as i64)
+                } else if piece {
+                    some(e.f30 as i16 as i64)
+                } else {
+                    None
+                },
+            ),
+            (
+                "f2e",
+                if castle {
+                    some(e.f59 as i64)
+                } else if c == 15 {
+                    some(e.f26 as i64)
+                } else if c == 5 {
+                    if matches!(m, 0 | 19 | 27) && !doom_latch || pyramid {
+                        None // f26 holds @0x10 there; @0x2E is dead
+                    } else {
+                        some(e.f26 as i64)
+                    }
+                } else if sphere || (c == 10 && m == 45) {
+                    None // f46 repurposed (z-vel from @0x2C / @0x3D link)
+                } else {
+                    some(e.f46 as i64)
+                },
+            ),
+            (
+                "f30",
+                if c == 15 {
+                    some(e.f28 as i64)
+                } else if pyramid || m27 {
+                    None
+                } else {
+                    some(e.f50 as i64)
+                },
+            ),
+            ("f32", some(untr(e.f52))),
+            (
+                "f34",
+                if c == 15 || piece {
+                    None // f54 holds @0x36 there; @0x34 unrecoverable
+                } else {
+                    some(untr(e.f54))
+                },
+            ),
+            (
+                "f36",
+                if c == 15 || piece {
+                    some(e.f54 as i64)
+                } else if matches!(c, 2 | 10) {
+                    None // f56 holds @0x38 there
+                } else {
+                    some(e.f56 as i64)
+                },
+            ),
+            (
+                "b38",
+                if matches!(c, 2 | 10) {
+                    some(e.f56 as i64)
+                } else if c == 15 {
+                    None // f28 holds @0x30 there; @0x38 is write-only
+                } else {
+                    some(e.f28 as i64)
+                },
+            ),
+            ("b39", some(e.f58 as i64 & 0xFF)),
+            (
+                "b3a",
+                if castle || c == 15 {
+                    None // f59 holds @0x2E / @0x3B there
+                } else {
+                    some(e.f59 as i64)
+                },
+            ),
+            (
+                "b3b",
+                if m27 {
+                    some(e.f50 as u8 as i64)
+                } else if c == 15 {
+                    some(e.f59 as i64)
+                } else {
+                    None
+                },
+            ),
+            ("b3c", None),
+            (
+                "b3d",
+                if piece {
+                    some(e.f69 as i64)
+                } else if c == 5 || (c == 10 && m == 45) {
+                    some(e.f46 as u8 as i64)
+                } else {
+                    None
+                },
+            ),
+            ("phase3e", some(e.f63 as i64)),
+            ("class3f", some(e.class64 as i64)),
+            ("model40", some(e.model65 as i64)),
+            ("b41", some(e.f66 as i64)),
+            ("b42", if piece { None } else { some(e.f67 as i64) }),
+            ("b43", some(if piece { e.f67 } else { e.f68 } as i64)),
+            ("b44", some(if piece { e.f68 } else { e.f69 } as i64)),
+            ("action45", some(e.tick70 as i64)),
+            ("b46", some(e.f71 as i64)),
+            ("b47", None),
+            ("sv1", some(held.map_or(0, |h| h.slot as i64))),
+            (
+                "sv2",
+                if c == 5 {
+                    some(e.site_z as u8 as i64)
+                } else {
+                    None
+                },
+            ),
+            (
+                "sv_timer",
+                if pyramid {
+                    some(e.f50 as i64)
+                } else {
+                    held.map(|h| h.timer as i64)
+                },
+            ),
+            ("x", some(e.x as i64)),
+            ("y", some(e.y as i64)),
+            ("z", some(e.z as i64)),
+            ("ayaw", some(e.f78 as i16 as i64)),
+            ("apitch", some(e.f80 as i16 as i64)),
+            ("aroll", some(e.f82 as i16 as i64)),
+            ("afov", some(e.f84 as i16 as i64)),
+            ("f5a", some(e.type86 as i16 as i64)),
+            ("b5c", some(e.frame88 as i64)),
+            ("b5d", some(e.frames89 as i64)),
+            ("mail0.amt", some(e.mail[0].0 as i64)),
+            ("mail0.src", some(untr(e.mail[0].1))),
+            ("mail1.amt", some(e.mail[1].0 as i64)),
+            ("mail1.src", some(untr(e.mail[1].1))),
+            ("mail2.amt", some(e.mail[2].0 as i64)),
+            ("mail2.src", some(untr(e.mail[2].1))),
+            ("mail3.amt", some(e.mail[3].0 as i64)),
+            ("mail3.src", some(untr(e.mail[3].1))),
+            ("mail4.amt", some(e.mail[4].0 as i64)),
+            ("mail4.src", some(untr(e.mail[4].1))),
+            ("mail5.amt", some(e.mail[5].0 as i64)),
+            ("mail5.src", some(untr(e.mail[5].1))),
+            ("speed", some(e.f126 as i64)),
+            ("min_speed", some(e.f128 as i64)),
+            ("max_speed", some(e.f130 as i64)),
+            (
+                "d88",
+                if m27 || c == 15 {
+                    some(e.f136 as i64)
+                } else {
+                    None
+                },
+            ),
+            (
+                "mana_max",
+                if m27 {
+                    None // f136 holds the bolt power (@0x88); @0x8C dead
+                } else if c == 15 {
+                    some(e.max_life as i64)
+                } else {
+                    some(e.f136 as i64)
+                },
+            ),
+            (
+                "mana",
+                if c == 10 && matches!(m, 0 | 1 | 6) {
+                    some(0) // f140 holds the @0x2A amount; @0x90 dead
+                } else {
+                    some(e.f140 as i64)
+                },
+            ),
+            ("player_ent", some(untr(e.f144))),
+            ("target96", some(untr(e.f146))),
+            ("f98", None),
+            ("dest_x", some(e.dest_x as i64)),
+            ("dest_y", some(e.dest_y as i64)),
+            ("dest_z", if c == 5 { None } else { some(e.site_z as i64) }),
+            ("ptr_a0", None),
+            ("ptr_a4", None),
+        ])
+    }
+
     pub fn obs_project_mc1(&self, pin: &PinnedMc1) -> ObsMc1 {
         let untr = |v: u16| if v == PLAYER_TARGET { pin.slot } else { v };
         let mut entities: Vec<EntObsMc1> = Vec::new();
@@ -2400,7 +2774,12 @@ fn mc2_applied_mana_delta(
 /// byte2&4 blocked → bit 27; byte2&0x10 no-corpse → bit 28;
 /// byte2&0x20 forced-claim → bit 29. Unmapped retail bits drop (the
 /// obs channel does not carry flags; only behavior reads them).
-fn import_ent_mc2(r: &RetailEntMc2, slot: u16, row156: u8, tr: &dyn Fn(u16) -> u16) -> Ent {
+pub(crate) fn import_ent_mc2(
+    r: &RetailEntMc2,
+    slot: u16,
+    row156: u8,
+    tr: &dyn Fn(u16) -> u16,
+) -> Ent {
     let (b0, b1, b2) = (
         r.flags & 0xFF,
         (r.flags >> 8) & 0xFF,
@@ -2936,6 +3315,118 @@ pub fn retail_ent_lanes_mc1(r: &RetailEntMc1) -> Vec<(&'static str, i64)> {
         ("dest_x", r.dest_x as i64),
         ("dest_y", r.dest_y as i64),
         ("site_z", r.site_z as i64),
+    ]
+}
+
+/// EVERY field of a recorded MC2 pool record as named lanes, in the
+/// retail struct's own order — [`retail_ent_lanes_mc1`]'s twin, the
+/// shared vocabulary of the MC2 `explain` changelog and the
+/// recording-side half of `dump-state --port`. Same contract: lane
+/// names and order are shared with [`World::port_ent_lanes_mc2`], the
+/// port half joins BY NAME. Conventions:
+/// - the `int8_t` byte lanes (`b38`..`b47`, `sv1`/`sv2`, the anim
+///   bytes) print as the UNSIGNED byte — the import's canonical form
+///   (the `b39` −6 sentinel law), matching what the port holds;
+/// - `flags` prints raw, then the TRANSLATED bits (the exact set
+///   `import_ent_mc2` carries) as 0/1 sub-lanes named by retail byte
+///   (`b0`..`b2`) — the raw lane's port half is `—` because the two
+///   flag words share no whole-dword representation;
+/// - the guest pointers print raw (`ptr_a0` moving = the behavior
+///   row changed), port half `—`.
+pub fn retail_ent_lanes_mc2(r: &RetailEntMc2) -> Vec<(&'static str, i64)> {
+    let bit = |k: u32| (r.flags >> k & 1) as i64;
+    vec![
+        ("next0", r.next0 as i64),
+        ("max_life", r.max_life as i64),
+        ("life", r.life as i64),
+        ("flags", r.flags as i64),
+        ("flags.b0_walk1", bit(0)),
+        ("flags.b0_done2", bit(1)),
+        ("flags.b0_link4", bit(2)),
+        ("flags.b0_coll8", bit(3)),
+        ("flags.b0_x20", bit(5)),
+        ("flags.b0_chase40", bit(6)),
+        ("flags.b1_reap4", bit(10)),
+        ("flags.b1_x8", bit(11)),
+        ("flags.b1_decay20", bit(13)),
+        ("flags.b2_kill1", bit(16)),
+        ("flags.b2_x4", bit(18)),
+        ("flags.b2_x10", bit(20)),
+        ("flags.b2_x20", bit(21)),
+        ("scratch10", r.scratch10 as i64),
+        ("rand", r.rand as i64),
+        ("next16", r.next16 as i64),
+        ("prev18", r.prev18 as i64),
+        ("f1a", r.f1a as i64),
+        ("yaw", r.yaw as i64),
+        ("pitch", r.pitch as i64),
+        ("roll", r.roll as i64),
+        ("f22", r.f22 as i64),
+        ("f24", r.f24 as i64),
+        ("f26", r.f26 as i64),
+        ("owner28", r.owner28 as i64),
+        ("f2a", r.f2a as i64),
+        ("f2c", r.f2c as i64),
+        ("f2e", r.f2e as i64),
+        ("f30", r.f30 as i64),
+        ("f32", r.f32 as i64),
+        ("f34", r.f34 as i64),
+        ("f36", r.f36 as i64),
+        ("b38", r.b38 as u8 as i64),
+        ("b39", r.b39 as u8 as i64),
+        ("b3a", r.b3a as u8 as i64),
+        ("b3b", r.b3b as u8 as i64),
+        ("b3c", r.b3c as u8 as i64),
+        ("b3d", r.b3d as u8 as i64),
+        ("phase3e", r.phase3e as i64),
+        ("class3f", r.class3f as i64),
+        ("model40", r.model40 as i64),
+        ("b41", r.b41 as u8 as i64),
+        ("b42", r.b42 as u8 as i64),
+        ("b43", r.b43 as u8 as i64),
+        ("b44", r.b44 as u8 as i64),
+        ("action45", r.action45 as i64),
+        ("b46", r.b46 as u8 as i64),
+        ("b47", r.b47 as u8 as i64),
+        ("sv1", r.sv1 as u8 as i64),
+        ("sv2", r.sv2 as u8 as i64),
+        ("sv_timer", r.sv_timer as i64),
+        ("x", r.x as i64),
+        ("y", r.y as i64),
+        ("z", r.z as i64),
+        ("ayaw", r.ayaw as i64),
+        ("apitch", r.apitch as i64),
+        ("aroll", r.aroll as i64),
+        ("afov", r.afov as i64),
+        ("f5a", r.f5a as i64),
+        ("b5c", r.b5c as u8 as i64),
+        ("b5d", r.b5d as u8 as i64),
+        ("mail0.amt", r.mail[0].0 as i64),
+        ("mail0.src", r.mail[0].1 as i64),
+        ("mail1.amt", r.mail[1].0 as i64),
+        ("mail1.src", r.mail[1].1 as i64),
+        ("mail2.amt", r.mail[2].0 as i64),
+        ("mail2.src", r.mail[2].1 as i64),
+        ("mail3.amt", r.mail[3].0 as i64),
+        ("mail3.src", r.mail[3].1 as i64),
+        ("mail4.amt", r.mail[4].0 as i64),
+        ("mail4.src", r.mail[4].1 as i64),
+        ("mail5.amt", r.mail[5].0 as i64),
+        ("mail5.src", r.mail[5].1 as i64),
+        ("speed", r.speed as i64),
+        ("min_speed", r.min_speed as i64),
+        ("max_speed", r.max_speed as i64),
+        ("d88", r.d88 as i64),
+        ("mana_max", r.mana_max as i64),
+        ("mana", r.mana as i64),
+        ("player_ent", r.player_ent as i64),
+        ("target96", r.target96 as i64),
+        ("f98", r.f98 as i64),
+        ("dest_x", r.dest_x as i64),
+        ("dest_y", r.dest_y as i64),
+        ("dest_z", r.dest_z as i64),
+        ("ptr_a0", r.ptr_a0 as i64),
+        ("ptr_a4", r.ptr_a4 as i64),
     ]
 }
 

@@ -21627,6 +21627,176 @@ mod tests {
         ((tx << 8) | 128, (ty << 8) | 128)
     }
 
+    /// The MC2 `dump-state --port` join contract: `port_ent_lanes_mc2`
+    /// is the exact per-class INVERSE of `import_ent_mc2` — for a
+    /// representative census of class shapes, importing a retail
+    /// record and reading the lanes back reproduces retail's value on
+    /// every lane the port models, and BOTH tables carry the same
+    /// lane names in the same order (a drifted name prints `?` in the
+    /// dump — loud, but only if the tables stay aligned). The link
+    /// bit stays clear here (the caller relinks via `Gen::link`), and
+    /// the class-15 `yaw` lane pins the obs re-zero (f30 holds the
+    /// @0x2A payload there — reading it back as yaw was a real bug
+    /// this test's first draft caught).
+    #[test]
+    fn the_mc2_port_lane_table_inverts_the_import() {
+        use super::conformance::{import_ent_mc2, retail_ent_lanes_mc2};
+        use mgc_formats::mgcr::RetailEntMc2;
+        let mut w = mc2_flat_world();
+        let human = 900u16;
+        let tr = |v: u16| {
+            if v == human {
+                crate::mc1::mobs::PLAYER_TARGET
+            } else {
+                v
+            }
+        };
+        let base = RetailEntMc2 {
+            max_life: 800,
+            life: 600,
+            // b0: done2 + coll8; b1: reap4 + x8; b2: kill1 (NO link
+            // bit — the bare import leaves it for Gen::link).
+            flags: 0x2 | 0x8 | 0x400 | 0x800 | 0x1_0000,
+            scratch10: 42,
+            rand: 0x1234,
+            f1a: 123,
+            yaw: 100,
+            pitch: -50,
+            roll: 200,
+            f24: 17,
+            f26: 45,
+            f2a: 500,
+            f30: 77,
+            f32: 9,
+            f34: 11,
+            f36: 222,
+            b38: 12,
+            b39: -6,
+            b3a: 3,
+            b3d: -1,
+            phase3e: 7,
+            b41: -1,
+            b42: -1,
+            b43: 4,
+            b44: 2,
+            action45: 3,
+            b46: 1,
+            sv2: 5,
+            x: 2600,
+            y: 4900,
+            z: 150,
+            ayaw: -8192,
+            apitch: 1664,
+            afov: 16384,
+            f5a: 177,
+            b5c: 2,
+            b5d: 8,
+            mail: [(250, 44), (0, 0), (0, 0), (0, 0), (0, 0), (0, 0)],
+            speed: -32,
+            min_speed: 0,
+            max_speed: 64,
+            mana_max: 800,
+            mana: 300,
+            target96: 88,
+            dest_x: 1000,
+            dest_y: 2000,
+            dest_z: 0,
+            ..Default::default()
+        };
+        let census: Vec<RetailEntMc2> = vec![
+            // Uniform creature: the @0x10 scratch home + sv2 site.
+            RetailEntMc2 {
+                class3f: 5,
+                model40: 19,
+                ..base
+            },
+            // Class-15 manifestation: the cast.rs field map (yaw and
+            // max_life dead 0, mana_max carries the cast cost).
+            RetailEntMc2 {
+                class3f: 15,
+                model40: 0,
+                max_life: 0,
+                yaw: 0,
+                f2e: 9,
+                f2c: 2,
+                d88: 50,
+                mana_max: 10000,
+                ..base
+            },
+            // Castle: @0x2E build sub-state → f59.
+            RetailEntMc2 {
+                class3f: 3,
+                model40: 2,
+                f2e: 4,
+                action45: 5,
+                ..base
+            },
+            // Defender piece: the eleven-field fresh layout.
+            RetailEntMc2 {
+                class3f: 10,
+                model40: 79,
+                f2c: 3,
+                sv_timer: 6,
+                sv2: 0,
+                ..base
+            },
+            // Balloon: the ceiling-walk latch (b0 & 1).
+            RetailEntMc2 {
+                class3f: 3,
+                model40: 3,
+                flags: base.flags | 1,
+                sv2: 0,
+                ..base
+            },
+            // Mana sphere: z-vel from @0x2C + the two mover latches.
+            RetailEntMc2 {
+                class3f: 10,
+                model40: 39,
+                f2c: -30,
+                flags: base.flags | 0x40 | 0x2000,
+                sv2: 0,
+                mana: 900,
+                ..base
+            },
+            // MC2-native projectile: the F_MC2PROJ stamp eats bit 3
+            // and bit 29 (both lanes go `—`).
+            RetailEntMc2 {
+                class3f: 9,
+                model40: 1,
+                sv2: 0,
+                ..base
+            },
+            // Ground fire: amount in @0x2A → f140, @0x90 dead.
+            RetailEntMc2 {
+                class3f: 10,
+                model40: 0,
+                mana: 0,
+                sv2: 0,
+                ..base
+            },
+        ];
+        let slot = 123u16;
+        for r in census {
+            w.g.ent[slot as usize] = import_ent_mc2(&r, slot, 0, &tr);
+            let retail = retail_ent_lanes_mc2(&r);
+            let port = w
+                .port_ent_lanes_mc2(slot, human, false)
+                .expect("slot in range");
+            let rn: Vec<&str> = retail.iter().map(|(n, _)| *n).collect();
+            let pn: Vec<&str> = port.iter().map(|(n, _)| *n).collect();
+            assert_eq!(rn, pn, "lane-name contract ({},{})", r.class3f, r.model40);
+            for ((name, rv), (_, pv)) in retail.iter().zip(&port) {
+                if let Some(pv) = pv {
+                    assert_eq!(
+                        pv, rv,
+                        "lane {name} round-trip ({},{})",
+                        r.class3f, r.model40
+                    );
+                }
+            }
+        }
+    }
+
     /// The MC2 suicide arm rides `tick_inner`, NOT the MC1-only
     /// wizard pass — regression guard: the first wiring consumed the
     /// command only in `mc1_wizard_pass`, so Shift+K silently did

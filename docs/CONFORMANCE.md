@@ -710,26 +710,38 @@ instrument could print: "what does the PORT's record hold at tick T"
 and "what changed in RETAIL across the break" (a divergence report
 shows what DIFFERS, never what CHANGED — the cause of a break is
 routinely state both sides share, which structurally cannot appear in
-the diff). Three instruments close that gap; all three are MC1/HW for
-now.
+the diff). Three instruments close that gap; all three run on BOTH
+families (the MC2 twins joined through `retail_ent_lanes_mc2` /
+`World::port_ent_lanes_mc2` landed 2026-08-22f).
 
 **`dump-state <take> <t> <slot>… --port` — the port-side state dump.**
 Free-runs the world to `t` (the replay driver underneath; `--start
 <t0>` anchors late, so `--start t-1` is the PAIR-IMPORT view) and
 prints every lane of the requested slots side by side with retail's
 record, `≠`-marked, joined BY LANE NAME through the shared table
-(`conformance::retail_ent_lanes_mc1` / `World::port_ent_lanes_mc1`).
+(`conformance::retail_ent_lanes_mc1` / `World::port_ent_lanes_mc1`,
+or the `_mc2` twins — the driver dispatches on the take's family).
 ALL fields print, graded and ungraded alike; `—` = a lane the port
-does not model (`f61`/`f62`, wizard `f132`, `f148`, bare `f48`).
+does not model (MC1: `f61`/`f62`, wizard `f132`, `f148`, bare `f48`;
+MC2: per-CLASS, mirroring `import_ent_mc2`'s dual homes — a `—` on
+one record can be a live lane on the next).
 Representation merges are translated back into retail conventions
 (the `PLAYER_TARGET` untranslation, `f58` as the unsigned byte, the
 class-12 owner re-homed to `f42`, the castle transform sub-state on
 the `f48` lane — where retail's pure-wait `4` legitimately reads as
-port `1`). The free-stack tails print alongside.
+port `1`). MC2 conventions: byte lanes print as the canonical
+unsigned byte, `rand` compares the LOW 16 bits (retail's u16 stream),
+the raw `flags` lane is always `—` — compare the translated-bit
+sub-lanes (`flags.b0_done2`…`flags.b2_x20`) under it — and the
+`f1a`/`owner28` pair is split back out of the fused `id24` per the
+`obs_project_mc2` owner families. The free-stack tails print
+alongside (MC2 adds the recycle stack — free-first pop order).
 `--at-slot <n>` samples MID-WALK: the pool is snapshotted as the tick
 INTO `t` reaches slot `n`, before `n` dispatches — "what did slot 71
 hold when slot 388 ran", the question that was twice a hand-written
-`eprintln!` + rebuild. The retail column stays the boundary state
+`eprintln!` + rebuild. The walk loop is game-shared, so this works on
+MC2 unchanged (the mid-walk pose-phase family's native instrument).
+The retail column stays the boundary state
 (retail has no mid-walk sample); the header says so.
 
 **`explain <take> <t> [<slot>…]` — retail's OWN t-1 → t changelog.**
@@ -745,7 +757,17 @@ exactly the fact three probes and a rebuild cycle were once spent
 recovering. Named slots always print in full, plus every record they
 point at (`+146`, `+52`/`+54`, `+144`, `+42`, `+38`/`+40`, the six
 mail sources) — the pointer chase, automated. Needs adjacent state
-records (a gap refuses honestly).
+records (a gap refuses honestly). The MC2 arm mirrors all of it:
+transitions on `class3f`/life-sign/`action45`/`owner28`/identity/
+collapse-mark, pointees through `@0x1A`/`@0x28`/`@0x24`/`@0x26`/
+`@0x32`/`@0x34`/`@0x96`/`@0x94` + BOTH tile-chain words (`@0x16`/
+`@0x18` — the recorded-order law's lanes) + mail sources, per-player
+deltas (scalars, the nine spell/AI arrays, and the toast — the
+in-closure cheat witness). ⚠ the MC2 DRAW COUNT walks the LOW-16
+chain: MC2 mixes widths on the global rand (some draws write only
+the u16 half — measured mc2l3 t=9→10, 8,336 low16 draws with no u32
+walk reaching the endpoint), so a pure-u32 tick prints `draws=N` and
+a mixed tick `draws=N, low16 …` (mod-65,536 ambiguous near the cap).
 
 **`MGC_WRITE_TRACE=<slot>[:<field>]` — handler attribution, the 80 %
 write barrier** (`World::tick_inner`). Snapshots the watched `Ent`

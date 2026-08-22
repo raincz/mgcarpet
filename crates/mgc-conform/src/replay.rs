@@ -58,7 +58,7 @@ pub(crate) fn replay(path: &std::path::Path, args: &Args) -> i32 {
     };
     let res = match family {
         mgc_formats::mgcr::Family::Mc1 => run_mc1(path, args, None),
-        mgc_formats::mgcr::Family::Mc2 => run_mc2(path, args),
+        mgc_formats::mgcr::Family::Mc2 => run_mc2(path, args, None),
     };
     match res {
         Ok(clean) => {
@@ -1660,7 +1660,11 @@ fn pose_only_pair_mc1(
 
 // --------------------------------------------------------------- MC2 run
 
-fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
+fn run_mc2(
+    path: &std::path::Path,
+    args: &Args,
+    port_dump: Option<&PortDump>,
+) -> Result<bool, String> {
     let mut rec = Recording::open(path)?;
     let level = rec.header.level.ok_or("recording has no level number")?;
     if !args.brief {
@@ -1798,6 +1802,16 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 }
             }
             dump_state(&world, tick.t)?;
+            // A `--port` dump landing ON an anchor: the port state IS
+            // the retail import — still printed (identity modulo
+            // representation is itself a useful calibration), with
+            // the caveat named.
+            if let Some(spec) = port_dump
+                && tick.t >= spec.t
+            {
+                render_port_dump_mc2(&world, &st, human_slot, spec, tick.t, true);
+                return Ok(true);
+            }
             st_prev = Some((tick.t, st));
             continue;
         }
@@ -1850,8 +1864,22 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 &mut stats, &mut csv,
             )?;
         } else {
+            // `--port --at-slot <n>`: arm the mid-walk pool snapshot
+            // for the tick INTO the dump boundary.
+            if let Some(spec) = port_dump
+                && tick.t == spec.t
+                && let Some(n) = spec.at_slot
+            {
+                world.arm_walk_probe(n);
+            }
             book_cheat(&world, rec.cheat, &mut stats);
             step_mc2(&mut world, ch, inp, cmd);
+            if let Some(spec) = port_dump
+                && tick.t >= spec.t
+            {
+                render_port_dump_mc2(&world, &st, slot, spec, tick.t, false);
+                return Ok(true);
+            }
             stats.seg().stepped += 1;
             if capture_clean_mc2(&pst, &st) {
                 let pose = pose_lanes_mc2(&ch.s, &st.ents[slot as usize], cp);
@@ -1953,6 +1981,13 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 break;
             }
         }
+    }
+    if let Some(spec) = port_dump {
+        return Err(format!(
+            "dump-state --port: t={} never reached (last boundary {})",
+            spec.t,
+            stats.segs.last().map_or(0, |s| s.end)
+        ));
     }
     let mode = if args.pose_only { "pose-only" } else { "world" };
     if args.brief {
@@ -2071,19 +2106,17 @@ pub(crate) struct PortDump {
     pub(crate) at_slot: Option<u16>,
 }
 
-/// Entry from `mgc-conform dump-state <file> <t> <slot>… --port`.
-pub(crate) fn port_dump_mc1(path: &std::path::Path, t: u64, slots: &[u16], args: &Args) -> i32 {
-    match Recording::open(path).and_then(|r| r.header.family()) {
-        Ok(mgc_formats::mgcr::Family::Mc1) => {}
-        Ok(mgc_formats::mgcr::Family::Mc2) => {
-            eprintln!("dump-state --port is MC1/HW-only for now");
-            return 2;
-        }
+/// Entry from `mgc-conform dump-state <file> <t> <slot>… --port` —
+/// dispatches on the take's family (the MC2 arm is `run_mc2`'s twin
+/// hook; the walk loop is game-shared, so `--at-slot` carries over).
+pub(crate) fn port_dump(path: &std::path::Path, t: u64, slots: &[u16], args: &Args) -> i32 {
+    let family = match Recording::open(path).and_then(|r| r.header.family()) {
+        Ok(f) => f,
         Err(e) => {
             eprintln!("{}: {e}", path.display());
             return 2;
         }
-    }
+    };
     if args.pose_only {
         eprintln!("dump-state --port drives the full world (drop --pose-only)");
         return 2;
@@ -2093,7 +2126,11 @@ pub(crate) fn port_dump_mc1(path: &std::path::Path, t: u64, slots: &[u16], args:
         slots: slots.to_vec(),
         at_slot: args.at_slot,
     };
-    match run_mc1(path, args, Some(&spec)) {
+    let run = match family {
+        mgc_formats::mgcr::Family::Mc1 => run_mc1(path, args, Some(&spec)),
+        mgc_formats::mgcr::Family::Mc2 => run_mc2(path, args, Some(&spec)),
+    };
+    match run {
         Ok(_) => 0,
         Err(e) => {
             eprintln!("{}: {e}", path.display());
@@ -2201,6 +2238,123 @@ fn render_port_dump(
         &want[want.len().saturating_sub(8)..],
         got.len(),
         &got[got.len().saturating_sub(8)..],
+    );
+}
+
+/// The MC2 side-by-side — [`render_port_dump`]'s twin joined through
+/// [`retail_ent_lanes_mc2`]/[`World::port_ent_lanes_mc2`]. Same
+/// conventions: `≠`-marked, `—` = the port does not model the lane
+/// for this record's class, `?` = a table mismatch (extend BOTH).
+/// The raw `flags` lane always prints `—` — compare the translated
+/// bit sub-lanes below it.
+fn render_port_dump_mc2(
+    world: &World,
+    st: &RetailMc2,
+    human_slot: u16,
+    spec: &PortDump,
+    t: u64,
+    at_anchor: bool,
+) {
+    use mgc_sim::engine::world::conformance::retail_ent_lanes_mc2;
+    println!(
+        "== dump-state --port t={t}{}",
+        if t != spec.t {
+            format!(
+                " (requested t={} has no graded boundary — nearest after)",
+                spec.t
+            )
+        } else {
+            String::new()
+        }
+    );
+    if at_anchor {
+        println!(
+            "   ⚠ t is an ANCHOR (seed/gap/--start): the port state IS the retail \
+             import — expect identity modulo representation"
+        );
+    }
+    let mut from_probe = false;
+    if let Some(n) = spec.at_slot {
+        if at_anchor {
+            println!("   ⚠ --at-slot {n} ignored: no tick ran into an anchor");
+        } else if world.walk_probe_hit() {
+            from_probe = true;
+            println!(
+                "   pool sampled MID-WALK as slot {n} was reached (the retail column \
+                 stays the BOUNDARY state at t={t} — retail has no mid-walk sample)"
+            );
+        } else {
+            println!(
+                "   ⚠ the walk never reached slot {n} this tick — showing the \
+                 POST-TICK pool instead"
+            );
+        }
+    }
+    for &slot in &spec.slots {
+        let Some(re) = st.ents.get(slot as usize) else {
+            println!("  slot {slot}: out of range");
+            continue;
+        };
+        if slot == human_slot {
+            println!(
+                "  ⚠ slot {slot} is the HUMAN CARPET: the port carries it out-of-pool, \
+                 so the port column below is the reserved hole, not the player"
+            );
+        }
+        let retail = retail_ent_lanes_mc2(re);
+        let port: BTreeMap<&'static str, Option<i64>> = world
+            .port_ent_lanes_mc2(slot, human_slot, from_probe)
+            .map(|v| v.into_iter().collect())
+            .unwrap_or_default();
+        println!(
+            "  slot {slot}: retail ({},{}) action={} life={}  {:24} {:>12} {:>12}",
+            re.class3f, re.model40, re.action45, re.life, "lane", "retail", "port"
+        );
+        for (name, rv) in retail {
+            match port.get(name) {
+                Some(Some(pv)) => {
+                    println!(
+                        "    {:24} {:>12} {:>12}{}",
+                        name,
+                        rv,
+                        pv,
+                        if *pv != rv { "  ≠" } else { "" }
+                    );
+                }
+                Some(None) => println!("    {:24} {:>12} {:>12}", name, rv, "—"),
+                None => println!("    {:24} {:>12} {:>12}", name, rv, "?"),
+            }
+        }
+    }
+    // The allocator context — free FIRST, recycle when dry (the MC2
+    // pop order), next pop LAST, the human slot filtered like the
+    // importer does.
+    let want_free: Vec<u16> = st
+        .free_stack
+        .iter()
+        .copied()
+        .filter(|&s| (s as usize) < st.ents.len() && s != human_slot)
+        .collect();
+    let want_rec: Vec<u16> = st
+        .recycle_stack
+        .iter()
+        .copied()
+        .filter(|&s| (s as usize) < st.ents.len() && s != human_slot)
+        .collect();
+    let (got_free, got_rec) = world.free_stacks_mc2();
+    println!(
+        "  free stack: retail len {} tail {:?}  port len {} tail {:?}",
+        want_free.len(),
+        &want_free[want_free.len().saturating_sub(8)..],
+        got_free.len(),
+        &got_free[got_free.len().saturating_sub(8)..],
+    );
+    println!(
+        "  recycle stack: retail len {} tail {:?}  port len {} tail {:?}",
+        want_rec.len(),
+        &want_rec[want_rec.len().saturating_sub(8)..],
+        got_rec.len(),
+        &got_rec[got_rec.len().saturating_sub(8)..],
     );
 }
 

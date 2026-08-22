@@ -42,7 +42,7 @@ fn usage() -> ! {
                                           gaps re-anchor a fresh segment\n\
            dump-state <file.mgcr> <t> <slot>…   print raw retail fields of\n\
                                           the given slots at tick t\n\
-             --port          MC1: free-run the PORT to t (anchor at the\n\
+             --port          free-run the PORT to t (anchor at the\n\
                              take's seed, or --start <t0>; --start t-1 =\n\
                              the pair-import view) and print every lane\n\
                              side by side with retail's, ≠-marked — the\n\
@@ -382,7 +382,7 @@ fn dump_state(args: &Args) -> i32 {
         usage();
     }
     // `--port`: the PORT-side dump — free-run the world to t (see
-    // replay::port_dump_mc1) and print every lane of the requested
+    // replay::port_dump) and print every lane of the requested
     // slots side by side with retail's, ≠-marked. The whole point is
     // that every other instrument COMPARES projections or reads the
     // recording; this one says what the port itself holds.
@@ -392,7 +392,7 @@ fn dump_state(args: &Args) -> i32 {
             return 2;
         }
         let slots: Vec<u16> = slots.iter().map(|&s| s as u16).collect();
-        return replay::port_dump_mc1(path, t, &slots, args);
+        return replay::port_dump(path, t, &slots, args);
     }
     let mut rec = match Recording::open(path) {
         Ok(r) => r,
