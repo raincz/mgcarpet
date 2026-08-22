@@ -1080,8 +1080,17 @@ fn level_005_golden_state_hashes() {
         // wake phase and the freed-source knock arm first bite in the
         // C window and compound through combat/aftermath.
         0x65911f0d01d3d01d, // C
-        0xcb00a12fcb061278, // D
-        0x325841fe2feb9fe0, // E
+        // ⭐ D/E re-pinned for THE OWNED-JAR HIDE BECOMING UNCONDITIONAL
+        // (2026-08-25g player ruling — `World::owned_spell_jar`). The
+        // STATE hashes hold byte-for-byte: this is a painter test, no
+        // sim state moved. D is where `set_dev_spells(true)` arms, and
+        // ARMING ALL SPELLS IS EXACTLY THE RETAIL WITNESS THE RULING
+        // RESTS ON — measured here: level 5 draws 2 class-12 jars
+        // through A..C and 0 from D on, because the player now owns
+        // both spells. E inherits it. Post-init..C hold, which is the
+        // evidence that the hide bites only where ownership begins.
+        0xe0f8e2d0d1281196, // D
+        0x912abdee3182fa06, // E
     ];
     assert_eq!(
         obs, OBSERVABLE,

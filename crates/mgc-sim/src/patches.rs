@@ -21,13 +21,29 @@
 /// Per-patch switches; `true` = the patched (bug-fixed) arm.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct WorldPatches {
-    /// Create Castle pricing (all 3 games). Patched = live-law: the
-    /// cost re-derives from the OWN castle every query (homeless →
-    /// ctor 1000). Retail = the stale stamp: the manifestation's
-    /// cached cost is rewritten at castle init/level-up and NEVER on
-    /// castle death (sub_47C60/sub_47DD0; MC2 sub_60780), so a
-    /// homeless recast costs the last stamped ladder price — the
-    /// player-certified FIRST-CASTLE LOCKOUT.
+    /// **MC1/HW's FIRST-CASTLE LOCKOUT — an unpatched retail BUG.**
+    /// Patched = live-law: the cost re-derives from the OWN castle
+    /// every query (homeless → ctor 1000). Retail = the stale stamp:
+    /// the manifestation's cached cost is rewritten at castle
+    /// init/level-up and NEVER on castle death (sub_47C60/sub_47DD0),
+    /// so after ANY castle loss the rebuild is priced at
+    /// `CASTLE_CAP[0]` = **5,000** against a **1,000** starting purse
+    /// — unaffordable until collection pushes the census ceiling past
+    /// it. Player-certified on retail; the lockout may be a deliberate
+    /// period challenge, so the FIX is the opt-in (player-ruled
+    /// 2026-08-08, DEFAULT RETAIL).
+    ///
+    /// ⚠⚠ **THIS IS AN MC1/HW CONCERN.** MC2 does NOT have the
+    /// lockout: its destroy path re-stamps the token at the level-0
+    /// rung (**1,000**) before the record frees, so an MC2 castle
+    /// destroyed by an enemy is immediately rebuildable. MC2 charges
+    /// for teardown through the DESIGNED +3,000 surcharge instead,
+    /// which only a VOLUNTARY demolish latches — that is deliberate
+    /// behaviour, it does NOT ride this switch, and it is faithful
+    /// under BOTH arms (mc2/cast.rs). The one MC2 thing left here is a
+    /// narrow corner: the castle-less RELEASE re-sync in mc2/cast.rs,
+    /// a release edge with no castle and no intervening ladder stamp.
+    /// Do not extend this toggle to cover MC2 design.
     pub castle_recast_cost: bool,
     /// Class-12 jars re-snap to their tile's ground every tick.
     /// Retail's reshape walk skips class 12 (:51729): terrain shaped

@@ -1118,3 +1118,36 @@ fn mc2_duel_locks_drains_and_breaks() {
         "out of range ends the duel (EF:59947)"
     );
 }
+
+/// The carpet art family is a SWITCH, not a base+offset
+/// (`AddPlayer_4A920`, EF:43732-59): color-art 0 — the human's slot,
+/// and the one the replay ghost draws — takes sprite-param row 44,
+/// and only 1..7 run 273..279. Row 272 is the `(10,38)` storm cloud
+/// (sprite 202), so "272 + k" extrapolated onto k=0 put a fat
+/// translucent ball where the wizard belongs.
+#[test]
+fn the_human_carpet_takes_row_44_not_the_storm_cloud() {
+    use mgc_sim::mc2::{carpet_sprite_row, sprite_params::SPRITE_PARAMS};
+
+    assert_eq!(carpet_sprite_row(0), 44, "human = the case-0 arm");
+    for slot in 1..8u8 {
+        let row = carpet_sprite_row(slot);
+        assert!(
+            (273..=279).contains(&row),
+            "rival slot {slot} stays in the 273..279 band, got {row}"
+        );
+    }
+    // Row 272 is the storm cloud, and no carpet may resolve to it.
+    assert_eq!(SPRITE_PARAMS[272].word_0, 202);
+    // The human's row heads the 8-view carpet family at sprite 0.
+    assert_eq!(SPRITE_PARAMS[carpet_sprite_row(0) as usize].word_0, 0);
+    // All eight wizards wear a DISTINCT pre-colored carpet band.
+    let heads: Vec<u16> = (0..8u8)
+        .map(|s| SPRITE_PARAMS[carpet_sprite_row(s) as usize].word_0)
+        .collect();
+    let mut sorted = heads.clone();
+    sorted.sort_unstable();
+    sorted.dedup();
+    assert_eq!(sorted.len(), 8, "eight distinct carpet families: {heads:?}");
+    assert!(!heads.contains(&202), "no wizard wears the storm cloud");
+}

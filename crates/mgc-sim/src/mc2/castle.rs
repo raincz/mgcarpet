@@ -31,8 +31,57 @@ use crate::engine::features::{Gen, tile};
 
 /// `sub_60810` (EF:61695): capacity by level. Differs from MC1 at
 /// every level >= 1; the level-7 sentinel is 300M (MC1: 30M).
+///
+/// ⚠ MC2 keeps CAPACITY and PRICE apart — this is capacity only, and
+/// the price is [`MC2_CASTLE_COST`] below. MC1 fuses the two into the
+/// single `Gen::CASTLE_CAP` ladder, which is why that array must never
+/// be reused on an MC2 path.
 pub(crate) const MC2_CASTLE_CAP: [i32; 8] =
     [5000, 8500, 18000, 38800, 78600, 158200, 317400, 300_000_000];
+
+/// **MC2 ONLY** — the Create-Castle PRICE by the OWN castle's level,
+/// `GetSpellManaCost_6D710`'s switch (Level.cpp:1729-55). Distinct
+/// from [`MC2_CASTLE_CAP`] (capacity) and from MC1's fused
+/// `Gen::CASTLE_CAP`.
+///
+/// Versus MC1's ladder, rungs 1..=6 are IDENTICAL — that is shared
+/// design, not a shared table — and the two ends differ:
+/// * **rung 0: 1,000 here vs MC1's 5,000.** This is the load-bearing
+///   divergence. MC1 stamps its 5,000 on EVERY castle teardown against
+///   a 1,000 starting purse, which is the accidental FIRST-CASTLE
+///   LOCKOUT (an unpatched retail bug — see `castle_recast_cost` in
+///   docs/DEVIATIONS.md). MC2 re-prices a destroyed castle at this
+///   1,000 and is immediately rebuildable; it charges instead through
+///   the DELIBERATE +3,000 surcharge, which only a VOLUNTARY demolish
+///   can latch. Same felt penalty, opposite provenance: MC2 taxes the
+///   destruction you chose, MC1 taxes the destruction that happened
+///   to you.
+/// * **rung 7: 300,000,000 vs MC1's 30,000,000.** MC2 did not FIX
+///   anything here — it only raised the number. In MC1 that value is
+///   simultaneously the castle's enforced capacity ceiling and a
+///   deliberately unaffordable price (player-certified on retail
+///   2026-08-24: a cheated pool above 30M is EXPELLED, so the cap
+///   really works). MC2 splits capacity from price but sets BOTH
+///   rung-7 values to 300M. The degenerate part is the MISSING LEVEL
+///   CAP behind the number, which both engines share: reach the rung
+///   and the level-8 cast FIRES but strands the castle in its
+///   transform sub-state forever — no castle, and no out-of-range
+///   geometry, because `sub_11A10` restores the extents on every
+///   failure path. Reaching it also overflows the downgrade haircut
+///   (i32, 10 x 300M wraps negative). See docs/DEVIATIONS.md.
+///
+/// The per-tier multiplier (x320>>8, x384>>8) applies to this ladder
+/// and NOT to MC1's — MC1 has no tier multiply at all.
+pub(crate) const MC2_CASTLE_COST: [i64; 8] = [
+    1000,
+    10000,
+    20000,
+    40000,
+    80000,
+    160000,
+    320000,
+    300_000_000,
+];
 
 /// `sub_60810` (EF:61707-61728): max life by level, PRE-scale.
 /// Level 0 = 0 (the ladder skips the life write — the footprint
@@ -90,6 +139,36 @@ impl Gen {
         // word_0x30_48): armed 30 by the flood/quake grab
         // (mc2::flood), 5 by the destroy handler. Holds at 1 while
         // the grab bit is still set — the flood releases it.
+        //
+        // ⚠⚠⚠ THE SHAKE COUNTDOWN **IS** AN EARLY RETURN, AND THIS
+        // COMMENT USED TO SAY THE OPPOSITE. It read "the shake
+        // countdown is an `else if`, NOT an early return … followed by
+        // a COMMON TAIL that always runs", and re-read
+        // `EndOfCastleProjectile_5F8F0` (EF:61055-61100) says
+        // otherwise, plainly: the ground refresh at :61091, the
+        // `playerEntityIndex = id` echo at :61093 and the ENTIRE
+        // even-phase block (eject, extents, aim lift, `sub_5FF50`,
+        // absorb) all sit INSIDE the `else` of `if (word_0x30_48)`.
+        // The countdown arm is exactly three statements —
+        // `word_0x30_48--`, `sub_5F890(a1x, 1)`, and its OWN ground
+        // refresh — and the `== 1` release arm is three more with no
+        // ground refresh at all.
+        //
+        // The old note admitted its own exposure: "No corpus pair
+        // covers it today … so this lands on the decompile alone."
+        // mc2l3 covers it now. t=15904 the player self-destructs the
+        // castle: the destroy handler arms `word_0x30_48 = 5` and
+        // `maxMana_0x8C_140` reprices 78600 → 38800, which leaves
+        // `mana_0x90_144` = 38816 SIXTEEN OVER CAP for the whole
+        // countdown. Retail ejects nothing on any of those ticks —
+        // 38816 stands unchanged from 15904 to 15910 across two even
+        // phases (200 and 202) — because `sub_5FD00` is not reached.
+        // The port ran the tail and spilled a 16-mana (10,39) into
+        // slot 180 at t=15906, a slot retail leaves on the free
+        // stack (`extra(10,39)slot180x1`).
+        //
+        // ⭐ Session 36's law, on the port's own prose: the *because*
+        // clause is the part nobody re-reads.
         if self.ent[i].f50 != 0 {
             if self.ent[i].f50 == 1 {
                 if self.ent[i].flags & super::flood::F_QUAKE_GRAB == 0 {
@@ -97,16 +176,19 @@ impl Gen {
                     self.ent[i].f59 = 3; // → the repaint-painter arm
                     self.ent[i].f50 = 0;
                 }
+                // ⚠ NO ground refresh on the release arm (:61067-71).
             } else {
                 self.ent[i].f50 -= 1;
-                // sub_5F890(a1x, 1): HUD build-ghost sync (no-op: no
-                // ported widget).
+                // sub_5F890(a1x, 1): the CREATE-CASTLE UPGRADE-LOCK
+                // PIN (EF:61076) — see docs/DEVIATIONS.md; the port
+                // supplies it as a derived predicate.
                 let (x, y) = (self.ent[i].x, self.ent[i].y);
                 self.ent[i].z = self.ground_z(x, y) as i16;
             }
             return;
         }
-        // (B) normal standing tick.
+        // (B) normal standing tick — everything below is retail's
+        // `else`, so the countdown suppresses ALL of it.
         match self.mc2_castle_intake(i) {
             2 => {
                 self.ent[i].tick70 = 6;
@@ -164,7 +246,58 @@ impl Gen {
             // ── abort/pass-done → steady ──
             2 => {
                 self.ent[i].tick70 = 4;
-                // sub_5F890(a1x, 0): ghost reset (no-op).
+                // ⭐⭐ `sub_5F890(a1x, 0)` IS NOT A NO-OP ON THE CASTLE.
+                // Its `a2 == 0` arm releases the owner's castle-spell
+                // manifestation AND then calls `sub_6D880(a1x)`
+                // (EF:61047) — and `a1x` there is THE CASTLE, not the
+                // manifestation the same function just wrote
+                // `word_0x2E_46 = 0` on. `sub_6D880` (EF:58215-24) is
+                // `if (@0x2C) { SetSpell_6D5E0(a1x, @0x2C - 1); @0x2C
+                // = 0; }`.
+                //
+                // ⚠⚠ THE SAME WORD MEANS TWO THINGS BY CLASS. On a
+                // class-15 manifestation @0x2C is a DEFERRED SPELL
+                // TIER (port home `f44`, see `mc2_set_spell_at`); on a
+                // (3,2) castle it is the GUARD-RESPAWN COOLDOWN (port
+                // home `f46`, read/written only by
+                // `mc2_castle_roster`). So a spell-selection helper
+                // clears the guard cooldown as a side effect, and
+                // EVERY build or upgrade that settles back to standing
+                // re-arms the guard spawn instead of resuming the
+                // 16-pass ladder it froze at.
+                //
+                // `SetSpell_6D5E0` cannot touch anything else here:
+                // case 2 is only entered with `word_0x2E_46 == 2`, so
+                // it takes its `if (entity->word_0x2E_46)` branch
+                // (Level.cpp:1510-12) and merely re-writes @0x2C,
+                // which `sub_6D880` clears on the next line. Net
+                // effect on the record is exactly `@0x2C := 0` — and
+                // identical when it was already 0, so the write is
+                // unconditional here.
+                //
+                // ⚠ NOT owner-scoped. `SpellsEnabled_0x333[2]` is
+                // materialized by `sub_5CF40` (EF:59374) from the
+                // wizard spawn `sub_5C950`, which runs for EVERY
+                // player — including AI, at EF:60276 under an explicit
+                // `IsAiPlayer` guard. A RIVAL castle clears its
+                // cooldown on settle too.
+                //
+                // Measured, galore castle 266 (retail's own bytes):
+                // `f2c` holds 16→13 across the level-3 standing pass,
+                // FREEZES at 13 through all 19 transform ticks (that
+                // half was already faithful — `BeginOfCastleCreation`
+                // never calls `sub_5FF50`), then drops 13 → 0 in the
+                // SINGLE boundary that completes the upgrade
+                // (t=1128→1129, `f2e` 2 → 0, action 5 → 4), and the
+                // next even standing pass mints guard #2 and latches
+                // 16. Four for four across the 3→4, 4→5, 5→6 and 6→7
+                // rungs (t=1129, 1156, 1183, 1210).
+                //
+                // Keep this BEFORE `f59 = 0`: retail's order is
+                // `actionIndex = 4; sub_5F890(locEvent, 0);
+                // word_0x2E_46 = 0;` (EF:61149-52), and that order is
+                // what keeps `SetSpell_6D5E0` off its ELSE branch.
+                self.ent[i].f46 = 0;
                 self.ent[i].f59 = 0;
             }
             // ── spawn a repaint painter ──
@@ -203,12 +336,16 @@ impl Gen {
     /// The ejector runs UNCONDITIONALLY (EF:61228) — a level-0
     /// death inside the downgrade still spills the whole bank as
     /// owned (10,39) spheres (the eject's f26==0 arm); roster at
-    /// level 0 is a no-op and the state writes are inert on a dead
-    /// entity, matching retail's straight-line body. Ordering nuance
-    /// (deliberate): our downgrade death arm front-loads the balloon
-    /// conversion where retail leaves it to the roster call, so
-    /// balloon-spheres draw before the bank-spheres (same mana,
-    /// different LCG interleave).
+    /// level 0 is NOT a no-op — its `v1 < 3` tail (EF:61436-45) is
+    /// where the FLEET dissolves — and the state writes are inert on
+    /// a dead entity, matching retail's straight-line body.
+    /// ⭐⭐ THE ORDER IS LOAD-BEARING: `sub_5FD00` mints the bank
+    /// spheres and `sub_5FF50` mints the balloon spheres, so a
+    /// balloon's sphere is the LAST pop of the burst. mc2l3 t=585
+    /// (castle 252 dies 1 → 0 holding 6300 = 6 × 1050, fleet cargo
+    /// 1200): retail pops 228,248,129,215,135,126 for the bank and
+    /// 127 for the balloon. Front-loading the conversion into
+    /// `mc2_castle_downgrade` rotated all seven by one.
     fn mc2_castle_destroy(&mut self, i: usize, patches: crate::patches::WorldPatches) {
         if !self.free.is_empty() {
             self.mc2_castle_downgrade(i, patches);
@@ -256,8 +393,20 @@ impl Gen {
         // Retail clears the channel only INSIDE the id match
         // (EF:61754-58) — a non-matching value sticks forever
         // (faithful quirk; never authored in practice).
+        // ⚠ THE AMOUNT IS NOT CLEARED. `sub_609E0` (EF:61753-58)
+        // writes `str_0x5E_94.word_0x80_128 = 0` and nothing else —
+        // channel 5's AMOUNT word `dword_0x7C_124` (mail stride 6: ch0
+        // = @0x5E/@0x62, ch5 = @0x7C/@0x80) is never read and never
+        // cleared, so the (10,43) token's `10` stands as PERMANENT
+        // residue on the castle. Do NOT confuse it with
+        // `dword_0x5E_94`, which is CH0's amount and which this same
+        // function does read (EF:61740) and clear (EF:61748). This is
+        // the law the certified MC1 arm already carries
+        // (features.rs:5042-51). Receipts: mc2l0 free run t=7610 slot
+        // 235 retail mail5.amt 10 / port 0; galore t=1054/1079/1107;
+        // mc2l4 t=238..272 across 2 slots.
         if self.ent[i].mail[5].1 == self.ent[i].id24 && self.ent[i].mail[5].1 != 0 {
-            self.ent[i].mail[5] = (0, 0);
+            self.ent[i].mail[5].1 = 0;
             if self.ent[i].f26 < 7 {
                 self.ent[i].flags |= F_UPGRADE_ARMED;
             }
@@ -338,20 +487,31 @@ impl Gen {
             self.mc2_castle_stages(i);
         }
         if self.ent[i].f26 <= 0 {
-            // Castle death (EF:61645-61665): free the pieces, drop
-            // the balloons' castle (they dissolve in the next owner
-            // pass — here: outright, like MC1's release), despawn.
+            // Castle death (`sub_605E0`'s level-0 arm,
+            // EF:61645-61666): free the pieces, then despawn.
+            // ⛔ NO FLEET CONVERSION HERE. That arm re-syncs the
+            // owner's castle-spell manifestation (`sub_5F890`), clears
+            // `CastleEntityIndex_0x3A_58` and calls
+            // `DisableEntityDrawing04_57F10` — it never touches a
+            // balloon. The fleet dissolves in `sub_5FF50`'s `v1 < 3`
+            // TAIL (EF:61436-45), which `sub_5FCA0` runs AFTER
+            // `sub_5FD00`, so retail mints the bank spheres FIRST and
+            // the balloon sphere LAST. `mc2_castle_roster` runs that
+            // identical dissolve at quota 0 (`mc2_castle_quota(0) ==
+            // (0, 0)` ⇒ every collected balloon is over-quota).
+            //
+            // Front-loading it here rotated the whole burst by one
+            // free-stack pop: mc2l3 t=585, pop order
+            // 228,248,129,215,135,126,127 — the balloon's sphere
+            // landed on 228 (retail's FIRST bank sphere) and all six
+            // bank scatters slid one slot down the order, port[p_k] ==
+            // retail[p_{k-1}] exactly.
+            //
+            // ⭐ MC1 ALREADY CARRIES THIS LAW: the identical MC1
+            // deviation was retired 2026-08-12 (DEVIATIONS.md:121) and
+            // `features.rs::castle_downgrade` leaves the fleet to its
+            // wrapper tail. MC2 was the laggard column.
             self.mc2_castle_free_stages(i);
-            let own = self.ent[i].id24;
-            for j in 1..self.ent.len() {
-                if self.ent[j].class64 == 3
-                    && self.ent[j].model65 == 3
-                    && self.ent[j].id24 == own
-                    && self.ent[j].flags & 0x400 == 0
-                {
-                    self.mc2_balloon_to_sphere(j);
-                }
-            }
             self.ent[i].flags |= 0x400;
         }
     }
@@ -363,22 +523,45 @@ impl Gen {
     /// (the human ALWAYS — EF:43720; an AI wizard's comes from the
     /// map header's `WizardMapSettings.Life_0x3612F` via the rival
     /// spawn, EF:43768 — resolved per owner color below);
-    /// research[lvl] = `array_0x24E_590[lvl]`, filled by the
-    /// castle-research child from SPELLS.DAT (4.2) — zero today =
-    /// identity, a fresh retail castle's exact state. Level 0
-    /// skips the life write. A negative (overkill) life carries as
-    /// debt capped at half the new max.
+    /// research[lvl] = `array_0x24E_590[lvl]`, the HP-FACTOR channel
+    /// of the castle research table — SPELLS row 2's
+    /// `subSpellIndex_2` for the tier the castle spell was CAST at,
+    /// `{0, 0, 1}` for tiers I/II/III. Level 0 skips the life write.
+    /// A negative (overkill) life carries as debt capped at half the
+    /// new max.
+    ///
+    /// ⭐⭐ A TIER-III CASTLE HAS DOUBLE HP AT EVERY RUNG. research 1
+    /// makes the factor `(256 * ((1<<8) + 256)) >> 8 = 512` = 2.0×,
+    /// so level 1 lands on 40000 instead of 20000 — and 40000 is also
+    /// the ctor's flat birth value (`spawn_castle`, mc1/combat.rs), so
+    /// on a tier-III cast the birth value merely SURVIVES the first
+    /// dispatch instead of being halved. The two 40000s are equal by
+    /// coincidence, from unrelated sources; do not collapse them.
+    /// ⚠ The `.1` HP-FACTOR channel was already being STAMPED by
+    /// `mc2_research_stamp` and had NO reader anywhere — a half-landed
+    /// law. Measured mc2l0-spells-galore t=1029→1030 (ball mana
+    /// 49 = 5000/101 = row-2 tier-III cost) against mc2l0 t=7225 /
+    /// mc2l1 t=2070 / mc2l30 t=235 / mc2l3 t=245, all tier-I casts
+    /// (ball mana 9 = 1000/101), all 20000.
     pub(crate) fn mc2_castle_ladder(&mut self, i: usize) {
         let lvl = self.ent[i].f26.clamp(0, 7) as usize;
-        // The owner's Life scalar × research 0 → Life/256 identity
-        // for the human, the authored 16.8 factor for a rival.
+        // The owner's Life scalar, then the research rung on top of
+        // it — retail's `number1` (EF:61704) in one expression:
+        // `(Life * ((research[lvl] << 8) + 256)) >> 8`. Life is 256
+        // (1.0× in 16.8) for the human ALWAYS (EF:43720); a rival's is
+        // the map header's authored `Life_0x3612F` (EF:43768).
         let own = self.ent[i].id24;
         let slot = self
             .rival_ents
             .iter()
             .position(|&e| e != 0 && e == own)
             .unwrap_or(0);
-        let factor = self.mc2_life_scale.0[slot] as i64;
+        let life = self.mc2_life_scale.0[slot] as i64;
+        let research = self.mc2_castle_hp_factor(own, lvl as u8) as i64;
+        // Two-stage, with the intermediate truncation retail has: the
+        // `>> 8` lands BEFORE the base multiply (EF:61710
+        // `20000 * number1 >> 8`).
+        let factor = (life * ((research << 8) + 256)) >> 8;
         let hp = ((MC2_CASTLE_HP[lvl] as i64 * factor) >> 8) as u32;
         if hp != 0 {
             let debt = if self.ent[i].act_life < 0 {
@@ -671,7 +854,28 @@ impl Gen {
             let mut pos = (cx, cy, cz);
             Self::polar_step(&mut pos, yaw, 0, dist);
             self.move_relink(b, pos.0, pos.1, pos.2);
-            self.ball_resize(b);
+            // ⛔ NO RE-RESIZE HERE — this call was INVENTED in the MC2
+            // copy. `sub_5FD00` (EF:61296-61320) writes mana@0x90,
+            // playerEntityIndex@0x94 and the scatter position, then
+            // STOPS; the only sprite/rotation stamp on an ejected
+            // sphere is the ctor's own (`CreateManaSphere512_50080`
+            // EF:36595), which runs while mana is still 512 and
+            // `NewEvent_4A050`'s memset has zeroed the owner — size
+            // class 1, family 52 ⇒ sprite 53, quad 28. The certified
+            // MC1 twin `Gen::castle_eject` (features.rs:5219) and the
+            // MC2 sibling `mc2_mana_spheres` (mc2/mobs.rs:936) both
+            // omit it. A sphere only grows to 105+7 ⇒ quad 112 when
+            // its OWN tick re-derives, which this frame reaches only
+            // for slots ABOVE the castle's: galore t=1053, the castle
+            // at slot 266 ejects 32 (the `clamp(1,32)` ceiling) — 21
+            // at slots ≤265 end at quad 28, 11 at ≥274 at 112 (305
+            // and 314 were recycled records already holding 112, and
+            // retail's `!=` guard skips them entirely — the cleanest
+            // in-corpus proof of that guard). ⚠ NOT cosmetic:
+            // `ball_resize` also writes f80/f82, the collision
+            // half-extents `ent_overlap` reads, so re-adding it both
+            // inflates the merge box and MASKS `ball_tick`'s own
+            // resize through its `type86 != ty` guard.
             let taken = self.ent[b].f140;
             spill -= taken;
             self.ent[i].f140 -= taken;
@@ -700,6 +904,34 @@ impl Gen {
     /// The standing tick's sphere absorption (EF:61101-61116): ONE
     /// owned (10,39) sphere overlapping the castle per (even) tick,
     /// iff below capacity — the whole sphere lands.
+    ///
+    /// ⭐⭐ AND THE GATE IS EXACTLY THREE TESTS — `model == 39`,
+    /// `playerEntityIndex == id` and `CompareAxisWithShift_10750`
+    /// (EF:61108-10). **THERE IS NO REAP TEST.** A sphere a balloon
+    /// swallowed EARLIER in the same tick still carries its class,
+    /// model, owner and position, so the castle — whose standing tick
+    /// runs `sub_5FF50`'s fleet pass FIRST — re-absorbs the very
+    /// sphere its own balloon just disabled, and the mana is counted
+    /// TWICE. Soft kill is not a free (the same law the ball chain and
+    /// the collector tether already carry).
+    ///
+    /// This was a REGISTERED open item for eight days — "retail would
+    /// RE-ABSORB a ball flagged earlier in the tick, double-counting
+    /// its mana; no corpus row demands it yet and it is the riskier of
+    /// the two, so it was deliberately left out." galore t=1304 is the
+    /// row: the human's castle 266 takes retail's full 2601 from
+    /// sphere 367 — the sphere balloon 237 ate that same tick, cargo
+    /// 0 → 2601 on BOTH sides — where the port's `0x400` gate skipped
+    /// it and left the castle 1522 short. Worth +2,587 ticks.
+    ///
+    /// ⭐ The MC1 twin `Gen::castle_absorb` (features.rs) had already
+    /// reached the same predicate ("no class test and no `0x400`
+    /// test") — MC2 was the laggard column AGAIN. It also walks the
+    /// TICK-TOP BALL CHAIN rather than the pool, which is what decides
+    /// WHICH ball a castle drinks when two overlap (mc1l5 t=2499).
+    /// ⚠ BANKED: retail's MC2 walk is the `dword_38523` linked list
+    /// (EF:61104-15), not this ascending pool scan — same shape, and
+    /// no corpus row separates them yet.
     fn mc2_castle_absorb(&mut self, i: usize) {
         if self.ent[i].f140 >= self.ent[i].f136 {
             return;
@@ -708,7 +940,6 @@ impl Gen {
         for j in 1..self.ent.len() {
             if self.ent[j].class64 == 10
                 && self.ent[j].model65 == 39
-                && self.ent[j].flags & 0x400 == 0
                 && self.ent[j].f144 == own
                 && self.mc2_overlap_xy(i, j)
             {
@@ -726,53 +957,81 @@ impl Gen {
     /// dissolve into mana spheres carrying their cargo
     /// (`TransformEntityToManaSphere`), over-quota members too (a
     /// downgraded castle sheds fleet). Guard respawn: one per pass,
-    /// 16-tick cooldown (f44 — retail word_0x2C_44), placed in the
+    /// 16-PASS (= 32-tick) cooldown in `f46` — retail
+    /// `word_0x2C_44` @0x2C, NOT `f44`, which on a (3,2) carries
+    /// `subSpellIndex_0x2A` and which `Gen::new_event` seeds to 100 on
+    /// every record. Level 3 is the first rung of `mc2_castle_quota`
+    /// with a nonzero guard count — the first BUILD00 row that is a
+    /// crenellated curtain WALL with an access ramp instead of a tower
+    /// pad — so this block is the whole reason a take's FIRST (5,15)
+    /// exists. Placed in the
     /// courtyard at (x+128, y+640) facing 512.
     pub(crate) fn mc2_castle_roster(&mut self, i: usize) {
         let own = self.ent[i].id24;
         let lvl = self.ent[i].f26;
         let (bq, gq) = mc2_castle_quota(lvl);
-        let mut balloons: Vec<usize> = Vec::new();
-        let mut guards = 0usize;
-        for j in 1..self.ent.len() {
-            let e = &self.ent[j];
-            if e.flags & 0x400 != 0 {
-                continue;
-            }
-            match (e.class64, e.model65) {
-                (3, 3) if e.id24 == own => balloons.push(j),
-                (5, 15) if e.id24 == own => guards += 1,
-                _ => {}
+        // ⭐⭐ THE FLEET HALF WALKS A REGISTER, NOT A CENSUS. The MC1
+        // twin ([`Gen::castle_balloons`]) has carried this since the
+        // mc1l42 t=17150 row; the MC2 arm kept the ascending-slot
+        // stand-in because `sub_60400`'s caller had not been read.
+        // It has now: `sub_5FF50` (EF:61377-61431) drives EVERY step
+        // from the owner's `array_0x3C_60[v1]`, v1 = 0..quota — an
+        // empty slot spawns and `goto LABEL_17`s past the retarget, a
+        // dead one converts, CLEARS the slot and likewise walks on
+        // (so its replacement is a pass late), and the two exclusions
+        // handed to `sub_5F810` are indices `(v1+1)%3` and `(v1+2)%3`
+        // (EF:61417-19). INDEX IS SPAWN ORDER, NEVER SLOT ORDER.
+        // galore t=1212 is the law in one tick: register
+        // [296, 384, 237], so 296 picks first and takes sphere 341,
+        // 384 takes 318 and 237 is left 312 — the ascending walk got
+        // the same SET and handed it out rotated by one
+        // (`port[k] == retail[k-1]`, all three).
+        let mut reg = [0u16; 3];
+        if !crate::engine::features::no_balloon_reg()
+            && let Some(v) = self.mc1_balloon_reg.0.get(&own)
+        {
+            for (k, s) in v.iter().take(3).enumerate() {
+                reg[k] = *s;
             }
         }
-        // Dead + over-quota balloons → mana spheres (EF:61397-402 /
-        // EF:61437-45).
-        let mut alive: Vec<usize> = Vec::new();
-        for &b in &balloons {
-            if self.ent[b].act_life < 0 || alive.len() >= bq {
-                self.mc2_balloon_to_sphere(b);
-            } else {
-                alive.push(b);
+        // A register entry can only go stale through a NON-retail
+        // path (a forged test entity, a pool import, a balloon freed
+        // outside the dispatcher): retail's own writers clear the slot
+        // as they free it. Clear those, then ADOPT any live owned
+        // balloon the register does not name into the first empty
+        // index in slot order — the fill order retail's own spawns
+        // produce, and the recovery that keeps an orphaned fleet
+        // steerable. With the register empty (the `MGC_NO_BALLOON_REG`
+        // A/B arm) the adoption pass alone reproduces the old
+        // ascending-slot walk exactly.
+        for k in 0..3 {
+            let s = reg[k] as usize;
+            if s == 0 {
+                continue;
             }
+            let e = &self.ent[s];
+            if e.class64 != 3 || e.model65 != 3 || e.id24 != own || e.flags & 0x400 != 0 {
+                reg[k] = 0;
+            }
+        }
+        for j in 1..self.ent.len() {
+            let e = &self.ent[j];
+            if e.flags & 0x400 != 0
+                || (e.class64, e.model65) != (3, 3)
+                || e.id24 != own
+                || reg.contains(&(j as u16))
+            {
+                continue;
+            }
+            let Some(k) = reg.iter().position(|&s| s == 0) else {
+                break;
+            };
+            reg[k] = j as u16;
         }
         let (cx, cy, cz) = {
             let e = &self.ent[i];
             (e.x, e.y, e.z)
         };
-        // Shortfall spawn (EF:61382-90): one per empty slot. The
-        // spawn arm jumps PAST the retarget (`goto LABEL_17`) — a
-        // newborn keeps target 0 until the NEXT roster pass, so its
-        // first frames run no flight body at all (mc2l3 t=264: the
-        // port's same-pass retarget sent the fresh balloon through
-        // its servo to ground+512 while retail's sat at the castle
-        // z; the castle died before another pass ever targeted it).
-        let firstborn = alive.len();
-        while alive.len() < bq {
-            let Some(b) = self.mc2_spawn_balloon(cx, cy, cz, own) else {
-                break;
-            };
-            alive.push(b);
-        }
         // Retarget (EF:61403-31): default = come home; a sphere
         // override only on the fleet-staggered tick, with cargo
         // room, skipping the siblings' claims.
@@ -782,8 +1041,32 @@ impl Gen {
         // EF:61405), not the live-fleet size — they differ only on
         // a pool-starved shortfall.
         let stagger = bq != 0 && self.ent[i].f63 as usize % bq == 0;
-        for k in 0..firstborn {
-            let b = alive[k];
+        // The 0..quota walk (EF:61370-61431). Spawn, convert and
+        // retarget INTERLEAVE per index — index 0 retargets before
+        // index 1 is even resolved — which is why the exclusions
+        // below read the register as it stands at that moment.
+        for k in 0..bq.min(3) {
+            let b = reg[k] as usize;
+            if b == 0 {
+                // Shortfall spawn (EF:61382-90), then `goto LABEL_17`
+                // — a newborn keeps target 0 until the NEXT pass, so
+                // its first frames run no flight body at all (mc2l3
+                // t=264: the port's same-pass retarget sent the fresh
+                // balloon through its servo to ground+512 while
+                // retail's sat at the castle z).
+                if let Some(nb) = self.mc2_spawn_balloon(cx, cy, cz, own) {
+                    reg[k] = nb as u16;
+                }
+                continue;
+            }
+            if self.ent[b].act_life < 0 {
+                // EF:61397-402 — convert, clear, walk on. NO
+                // same-pass replacement: the slot stays empty until
+                // the next pass spawns into it.
+                self.mc2_balloon_to_sphere(b);
+                reg[k] = 0;
+                continue;
+            }
             if full {
                 self.ent[b].f146 = i as u16;
                 continue;
@@ -810,27 +1093,106 @@ impl Gen {
             // them. Since OPEN-6 a NATIVE m57 carries model 57 too, so
             // the model test is the filter on both paths; the action
             // test is kept as belt-and-braces.
-            let (bx, by) = (self.ent[b].x, self.ent[b].y);
+            let (bx, by, bz) = (self.ent[b].x, self.ent[b].y, self.ent[b].z);
+            let excl = {
+                let t = |s: u16| if s == 0 { 0 } else { self.ent[s as usize].f146 };
+                [t(reg[(k + 1) % 3]), t(reg[(k + 2) % 3])]
+            };
             let mut best = 0usize;
-            let mut best_d = i32::MAX;
-            for j in 1..self.ent.len() {
+            let mut best_d = u32::MAX;
+            // ⭐⭐ THE SCAN IS THE TICK-TOP `dword_38523` CHAIN, NOT THE
+            // POOL. `sub_5F810` seeds from the chain HEAD (EF:61003)
+            // and steps `v5x = v5x->next_0` (EF:61021-22), so it sees
+            // the ascending tick-top membership the case-10 arm of the
+            // rebuild files — and, crucially, NOTHING PAST A SEVERED
+            // LINK. A member REALLOCATED mid-tick has its +0 wiped by
+            // the NewEvent ctor, so every later walk in that frame
+            // stops one node past it (the `TickChain::cut` law,
+            // lowered in `Gen::new_event`). A SOFT KILL does NOT sever
+            // — that is the re-pick law documented immediately below,
+            // and the two are opposite halves of the same chain.
+            //
+            // mc2l0 t=9953 is the row: sphere 145 is drunk and REBORN
+            // as a (10,12) puff earlier in the same tick, cutting the
+            // walk after node 145, so balloon 108's own spheres past
+            // the cut (156, 164) are invisible and retail takes 101
+            // though 164 is nearer in the 3-D metric. The pool scan
+            // took 164 and at t=9954 aimed 1320 at it where retail
+            // bears 1319 at 101 — the free-run signature
+            // `(3,3)slot108:heading`.
+            //
+            // ⭐ MC1's twin `Gen::castle_balloons` has walked
+            // `ball_chain.visible_len()` for this exact pick since
+            // mc1l5. ⚠ And the BANKED note on `mc2_castle_absorb`
+            // named the wrong call site: the row that pays is the
+            // RETARGET, not the absorb.
+            for c in 0..self.ball_chain.visible_len() {
+                let j = self.ball_chain.list[c] as usize;
                 let e = &self.ent[j];
+                // ⭐⭐ NO REAP TEST, AND NO LIFE TEST. `sub_5F810`'s
+                // gate is EXACTLY four tests (EF:61006-10): model 39,
+                // not decay-channelled, owner matches, and not one of
+                // the other two fleet members' claims. A sphere
+                // swallowed EARLIER IN THIS SAME TICK carries only
+                // `byte[1] |= 4` — `DisableEntityDrawing04_57F10`
+                // (EF:40332) is that one line and nothing else, so the
+                // record keeps its class, model, position and its place
+                // on the `dword_38523` chain. The actual free is the
+                // TICK-TOP reaper (EF:39954), which runs BEFORE the
+                // roster rebuild — so the sphere is still a full chain
+                // member for the rest of the frame and only vanishes
+                // next tick. mc2l3 t=403: the balloon at slot 162 eats
+                // sphere 129 at its own feet (cargo 0 -> 300), then the
+                // castle's roster pass at slot 252 still sees 129, and
+                // 129 is nearest by 52x in the 3-D metric — so retail
+                // RE-PICKS THE SPHERE IT JUST ATE and `target96` stays
+                // 129. The port's reap skip dropped it and took slot
+                // 215 instead (3-D 8,019,381 vs 152,881), bearing 205
+                // where retail bears 0: the t=404 free-run signature
+                // `(3,3)slot162:x,y,heading`.
                 if e.class64 != 10
                     || e.model65 != 39
                     || e.tick70 == 62
-                    || e.flags & 0x400 != 0
                     || e.flags & 0x2000 != 0
                     || e.f144 != own
                 {
                     continue;
                 }
-                if alive
-                    .iter()
-                    .any(|&s| s != b && self.ent[s].f146 as usize == j)
-                {
+                // The two exclusions are REGISTER-INDEXED, not a
+                // census of the live fleet: retail passes
+                // `Entities[Entities[array[(v1+1)%3]]->word_0x96_150]`
+                // and the `+2` twin (EF:61417-19), having first
+                // scrubbed `Entities[0]->word_0x96_150 = 0` so an
+                // EMPTY register slot resolves to entity 0 and
+                // excludes nothing.
+                if excl.contains(&(j as u16)) {
                     continue;
                 }
-                let d = Self::dist2_sq(bx, by, e.x, e.y);
+                // THE PICK METRIC IS 3-D. `sub_58440` (EF:40430-36) sums
+                // wrapping-i16 x, y AND z deltas; it is NOT
+                // `Maths::EuclideanDistXYZ_58490`, the 2-D-despite-the-name
+                // routine `dist2_sq` ports (Maths.cpp:738-42, x²+y² through
+                // a sqrt) — EF:61014 is the ONE call site of 58440 in the
+                // whole decompile, so every other `dist2_sq` caller stays
+                // 2-D. The compare is UNSIGNED: `v3` seeds at -1 (EF:61000)
+                // and EF:61015 tests `v7 < v3` as `unsigned int`, which a
+                // 3-D sum can exceed i32::MAX to reach.
+                //
+                // Same law as MC1's certified ball pick (DEVIATIONS §120,
+                // "the ball pick metric is 3-D (sub_42390 includes z)").
+                // mc2l3 t=331: balloon 162 docked on the castle pad at
+                // z 1536 has ground sphere 247 (25979,49844,0) nearest in
+                // XY (496,553 vs 721,225) but sphere 231 (25404,48683,829)
+                // nearest in 3-D (1,221,074 vs 2,855,849) — retail takes
+                // 231, and the bearing it flies at t=332 is 1726, exactly
+                // `angle_of` toward 231 (the port's 1085 is toward 247).
+                let dx = (e.x as i16).wrapping_sub(bx as i16) as i32;
+                let dy = (e.y as i16).wrapping_sub(by as i16) as i32;
+                let dz = e.z.wrapping_sub(bz) as i32;
+                let d = dx
+                    .wrapping_mul(dx)
+                    .wrapping_add(dy.wrapping_mul(dy))
+                    .wrapping_add(dz.wrapping_mul(dz)) as u32;
                 if d < best_d {
                     best_d = d;
                     best = j;
@@ -840,41 +1202,159 @@ impl Gen {
                 self.ent[b].f146 = best as u16;
             }
         }
+        // LABEL_22 (EF:61437-45): the quota..3 tail — a downgraded
+        // castle sheds exactly the fleet its register still names,
+        // and this is the ONLY over-quota cull (the walk above never
+        // looks past the quota).
+        for k in bq.min(3)..3 {
+            let b = reg[k] as usize;
+            if b != 0 {
+                self.mc2_balloon_to_sphere(b);
+                reg[k] = 0;
+            }
+        }
+        self.mc1_balloon_reg.0.insert(own, reg.to_vec());
         // Guard slots (EF:61446-61510): cooldown, then one (5,15)
         // per pass into the courtyard.
-        if self.ent[i].f44 > 0 {
-            self.ent[i].f44 -= 1;
+        //
+        // ⭐⭐ THE COOLDOWN IS `word_0x2C_44` (@0x2C) AND ITS PORT HOME
+        // IS `f46`, NOT `f44`. Retail decrements it at EF:61446-48
+        // (`v11 = a1x->word_0x2C_44; if (v11 > 0) ... = v11 - 1`),
+        // gates on it at EF:61486 and latches 16 at EF:61491. The
+        // port's `f44` on a (3,2) carries `subSpellIndex_0x2A`
+        // instead, and BOTH runners feed it 100: `import_ent_mc2`
+        // maps `f44 <- r.f2a` (a castle is not in `ramp2c`), and the
+        // shared allocator seeds `e.f44 = 100` because
+        // `NewEvent_4A050` (Events.cpp:569/595) stamps
+        // `subSpellIndex_0x2A_42 = 100` on every fresh record. The
+        // castle ctor `sub_4AA40` (EF:33362) never overwrites it, so
+        // retail's castles carry @0x2A = 100 for life, dead and
+        // unread. Reading it as the cooldown gave every port castle a
+        // phantom 100-PASS (200-tick) guard lockout — and because
+        // `sub_60400` (EF:61522-61559) returns quota 0 at levels 1-2
+        // the word is never read until a castle first reaches LEVEL 3,
+        // which is precisely where both free runs die: mc2l0
+        // t=7610->7611 slot 235 and galore t=1101->1102 slot 266,
+        // retail latching @0x2C = 16 and minting the take's FIRST EVER
+        // (5,15) while the port spawned nothing. Measured free-run
+        // divergence at mc2l0 t=7610: retail f2a 100, port 12 — the
+        // phantom counter, decremented once per even STANDING pass
+        // since the castle's birth (suspended through the action-5
+        // transform), which made the port mint its first guard at
+        // t=7633, 22 ticks late, and corrupted the ungraded @0x2A lane
+        // the whole way down.
+        //
+        // ⭐ MC1's CERTIFIED TWIN IS THE PROOF THAT ONLY THE SOURCE
+        // OFFSET MOVED: remc1 :56414-51 runs the identical walk on
+        // `*(_WORD *)(a1 + 46)` = @0x2E = this same `f46`, and the
+        // (unreachable) MC2 arm of `features.rs::castle_balloons`
+        // already uses `f46` too. MC2 relocated the word from @0x2E to
+        // @0x2C; the algorithm and the port field are unchanged. `f46`
+        // is free on a (3,2): the importer's `r.f2e` copy is redundant
+        // with `f59` and has no reader anywhere on this column.
+        if self.ent[i].f46 > 0 {
+            self.ent[i].f46 -= 1;
         }
-        if guards < gq && self.ent[i].f44 == 0 {
-            let gx = cx.wrapping_add(128);
-            let gy = cy.wrapping_add(640);
-            let gz = self.ground_z(gx, gy) as i16;
-            if let Some(g) = self.mc2_spawn_m15(gx, gy, gz) {
-                self.ent[g].id24 = own;
-                self.ent[g].f144 = own;
-                self.ent[g].f30 = 512;
-                self.ent[g].f34 = 512;
-                self.ent[i].f44 = 16;
+        // ⭐⭐⭐ AND THE GUARD HALF WALKS A REGISTER TOO — `array_0x5C_92`
+        // (EF:61483-61508), the fleet register's twin one field along on
+        // the same owner block. The port kept a live CENSUS here long
+        // after the fleet half was converted, and `features.rs`'s MC1
+        // twin said so in its own words: *"MC2 keeps the live-census
+        // stand-in: its dispatcher twin has not been register-verified
+        // against the binary, its corpora measure identical under both
+        // forms."* mc2l3 t=18148 is the corpus that separates them.
+        //
+        // Retail's walk is `for v20 in 0..quota` over the OWNER's
+        // register, and the two arms are NOT symmetric:
+        // * slot EMPTY (index 0) → spawn one (5,15) if the cooldown is
+        //   down, latch 16, and record the new index;
+        // * slot STALE (the record is no longer a live (5,15), or it is
+        //   the state-125 corpse) → CLEAR THE SLOT AND LATCH 16 WITH NO
+        //   SPAWN. The replacement costs a full cooldown, and the pass
+        //   that pays it looks, from the pool alone, exactly like a pass
+        //   that should have spawned.
+        //
+        // ⭐ A census cannot see the difference, because the stale entry
+        // is retail-only memory of a guard that is already gone. mc2l3
+        // t=18148, the re-sited castle at slot 254 (level 3, quota 4)
+        // with ZERO live (5,15) anywhere in the pool: retail latches
+        // `word_0x2C_44` 0 → 16 and mints nothing, because the register
+        // it inherited from the DEMOLISHED castle still named four dead
+        // guards. The port's census read 0 < 4, spawned into slot 245 —
+        // the record retail frees in that very tick — and the take's
+        // signature was `extra(5,15)slot245x1`.
+        //
+        // ⭐⭐ THE REGISTER LIVES ON THE OWNER, SO IT OUTLIVES THE CASTLE.
+        // That is the whole point here: nothing in the self-destruct
+        // ladder clears `array_0x5C_92`, so the castle the player
+        // re-sites starts its guard ladder holding the previous
+        // castle's ghosts, and pays 16 passes per rung to shed them.
+        if gq > 0 {
+            let mut greg = self
+                .mc1_guard_reg
+                .0
+                .get(&own)
+                .cloned()
+                .unwrap_or_else(|| vec![0u16; 34]);
+            for k in 0..gq.min(greg.len()) {
+                let s = greg[k] as usize;
+                if s == 0 {
+                    if self.ent[i].f46 != 0 {
+                        continue;
+                    }
+                    let gx = cx.wrapping_add(128);
+                    let gy = cy.wrapping_add(640);
+                    let gz = self.ground_z(gx, gy) as i16;
+                    if let Some(g) = self.mc2_spawn_m15(gx, gy, gz) {
+                        self.ent[i].f46 = 16;
+                        self.ent[g].id24 = own;
+                        self.ent[g].f144 = own;
+                        self.ent[g].f30 = 512;
+                        self.ent[g].f34 = 512;
+                        greg[k] = g as u16;
+                    }
+                } else {
+                    // ⚠ NO REAP TEST — retail asks class, model and the
+                    // corpse action and nothing else (EF:61506). A guard
+                    // killed earlier in THIS tick still reads (5,15)
+                    // until the tick-top reaper clears its class next
+                    // frame, so it holds its slot for one more pass.
+                    let g = &self.ent[s];
+                    if g.class64 != 5 || g.model65 != 15 || g.tick70 == 125 {
+                        greg[k] = 0;
+                        self.ent[i].f46 = 16;
+                    }
+                }
             }
+            self.mc1_guard_reg.0.insert(own, greg);
         }
     }
 
-    /// `TransformEntityToManaSphere_36BA0` on a balloon: the cargo
-    /// (plus nothing else — the balloon body itself carries no
-    /// bounty) drops as one owned sphere; the balloon despawns.
+    /// EF:61396-97 / EF:61440-41, both literally
+    /// `TransformEntityToManaSphere_36BA0(x, false)` followed by
+    /// `DisableEntityDrawing04_57F10(x)`.
+    ///
+    /// ⚠⚠ THIS WAS A SECOND, IMPOVERISHED COPY OF A FUNCTION THE PORT
+    /// ALREADY HAD EXACT. [`Gen::mc2_mana_spheres`] (mc2/mobs.rs) is
+    /// `TransformEntityToManaSphere_36BA0` verbatim — the SOURCE's
+    /// pre-loop draw (EF:26889), the sphere's two draws feeding
+    /// `yaw = (r1 % 0x71 + src.yaw - 56) & 0x7FF` and
+    /// `actSpeed = r2 % 0x30 + 16`, the `word_0x2C_44` fall arc from
+    /// the SOURCE's height over ground, the `MoveEntity_57FA0`
+    /// velocity seed into `dest_x`/`dest_y`, and the tail
+    /// `playerEntityIndex = 0`. This copy had NONE of them, and
+    /// carried an INVENTED `ball_resize` on top: retail's ctor
+    /// `CreateManaSphere_500C0` runs `SetManaSphereColorAndRot_36920`
+    /// (EF:36607) while mana is still 512 and the owner still 0, and
+    /// the transform never re-runs it.
+    ///
+    /// Measured, mc2l3 t=585 slot 127 (the dying castle's balloon):
+    /// retail `yaw 1306` = `(25497 % 0x71 + 1290 - 56) & 0x7FF` off
+    /// the balloon's own 1290, `speed 56` = `r % 0x30 + 16`, and
+    /// `f2c 64` = `(1024 - 512) / 8` from the balloon's 512 over
+    /// ground — none of which this copy produced.
     fn mc2_balloon_to_sphere(&mut self, b: usize) {
-        let cargo = self.ent[b].f140;
-        if cargo > 0 {
-            let (x, y, z, own) = {
-                let e = &self.ent[b];
-                (e.x, e.y, e.z, e.id24)
-            };
-            if let Some(s) = self.spawn_mana_ball(x, y, z) {
-                self.ent[s].f140 = cargo;
-                self.ent[s].f144 = own;
-                self.ball_resize(s);
-            }
-        }
+        self.mc2_mana_spheres(b, false);
         self.ent[b].flags |= 0x400;
     }
 
@@ -928,14 +1408,14 @@ impl Gen {
         use super::behavior::{BEHAVIOR, ROW_BASE};
         let t = self.ent[i].f146 as usize;
         let row = &BEHAVIOR[ROW_BASE + self.ent[i].row156 as usize];
-        // Stale-slot guard: same latent retail bug as MC1
-        // balloon_move — a recycled ball slot must not be "absorbed"
-        // as if it were still the claimed (10,39) ball.
-        if t != 0 && self.ent[t].class64 == 10 && self.ent[t].model65 != 39 {
-            self.ent[i].f146 = 0;
-            return;
-        }
-        if t != 0 && self.ent[t].flags & 0x400 == 0 {
+        // The target read is identity-blind (EF:61779): the only
+        // retail gate is the slot itself — no liveness, reap-mark or
+        // model test — so a reaped-and-reminted target slot is chased
+        // as-is (re-bear + servo; the "ours" test then filters the
+        // move/absorb). The MC1 balloon_move guards fell to the same
+        // law 2026-08-12; the recycled-record absorb is retail's own
+        // latent bug and the port's law.
+        if t != 0 && t < self.ent.len() {
             let mut pos = {
                 let e = &self.ent[i];
                 (e.x, e.y, e.z)
@@ -1120,22 +1600,63 @@ impl Gen {
         _own: u16,
         parent: u16,
     ) -> Option<usize> {
+        let i = self.mc2_new_painter_record(pos, row)?;
+        // Same fused-parent id24 convention as the castle painter
+        // (retail @0x28 = the wizard's own slot here). ⚠ `f40` is the
+        // port's home for retail `@0x26`, which `sub_5FBD0` never
+        // writes — stamping the parent there too put 152 on a lane
+        // retail leaves at 0.
+        self.ent[i].id24 = parent;
+        Some(i)
+    }
+
+    /// ⭐⭐ **`sub_50370` (EF:36735) — THE (10,42) CTOR DOES NOT LINK,
+    /// AND IT ARMS THE SETTLE WINDOW.** Every painter in the game is
+    /// minted through `_4A190(pos, 10, 42)`, and that ctor
+    /// ASSIGNS `position_0x4C_76` directly instead of calling
+    /// `AddEventToMap_57D70` — so a painter is never a member of any
+    /// tile chain — clears flag bits 0 and 3 and sets bit 0
+    /// (`&= 0xF6; |= 1`, i.e. walk, NOT collidable, NOT linked), and
+    /// stamps `byte_0x3B_59 = 1` UNCONDITIONALLY. Extents come from
+    /// the plain `SetShiftByCastle_49EC0` (EF:32882), whose `fov` is
+    /// a flat **256** — the `0x4000` in [`Self::mc2_castle_extents_ent`]
+    /// belongs to the castle aim stamp that follows a CASTLE's extent
+    /// refresh, and no such stamp follows a painter.
+    ///
+    /// The `+0x3B` stamp is the load-bearing one: the painter tick's
+    /// countdown end (EF:27760) parks at `-25` when it is set and
+    /// `-1` when it is not, and `-1` is a DEATH. mc2l0's four village
+    /// painters minted at t=3221 with `f59 = 0` therefore expired at
+    /// t=3240, set their own reap mark and were gone by 3241, where
+    /// retail's sit out the settle window as inert records — the
+    /// take's `missing (10,42)` entity-set break. Landing the ctor
+    /// verbatim moves the free horizon 3240 → **3470**, which is
+    /// exactly the take's first divergent PAIR — the free run has
+    /// caught up with the graded census.
+    fn mc2_new_painter_record(&mut self, pos: (u16, u16, i16), row: u8) -> Option<usize> {
         let i = self.new_event()?;
-        {
-            let e = &mut self.ent[i];
-            e.class64 = 10;
-            e.model65 = 42;
-            e.tick70 = 0x2C;
-            e.max_life = 0;
-            e.f59 = 0;
-            e.f71 = row;
-            // Same fused-parent id24 convention as the castle
-            // painter (retail @0x28 = the wizard's own slot here).
-            e.id24 = parent;
-            e.f40 = parent;
-        }
-        self.link(i, pos.0, pos.1, pos.2);
-        self.mc2_castle_extents_ent(i, row);
+        let e = &mut self.ent[i];
+        e.class64 = 10;
+        e.model65 = 42;
+        e.tick70 = 0x2C; // action 44 → AddTerrainMod0A_2A_37BC0
+        e.max_life = 0;
+        e.act_life = 0; // CopyMaxLifeToLife_49A20
+        e.flags = (e.flags & !0x9) | 1;
+        e.f59 = 1;
+        e.f71 = row;
+        e.x = pos.0;
+        e.y = pos.1;
+        e.z = pos.2;
+        let (w, h) = self
+            .assets
+            .build_tab
+            .get(row as usize)
+            .map_or((0u16, 0u16), |d| (d.w as u16, d.h as u16));
+        let e = &mut self.ent[i];
+        e.f78 = 0;
+        e.f80 = ((w << 8).wrapping_add(1280)) >> 1;
+        e.f82 = ((h << 8).wrapping_add(1280)) >> 1;
+        e.f84 = 256;
         Some(i)
     }
 
@@ -1149,26 +1670,23 @@ impl Gen {
             let e = &self.ent[castle];
             (e.x, e.y, e.site_z)
         };
-        let i = self.new_event()?;
-        {
-            let e = &mut self.ent[i];
-            e.class64 = 10;
-            e.model65 = 42;
-            e.tick70 = 0x2C; // action 44 → AddTerrainMod0A_2A_37BC0
-            e.max_life = 0;
-            e.f59 = u8::from(repaint); // byte_0x3B_59: settle window
-            e.f71 = row;
-            // The port's id24 convention for painters is the FUSED
-            // parentId @0x28 (the import's `id24 = tr(@0x28)`, and
-            // `obs_project_mc2` recovers the recorded `owner` lane
-            // from it) — the parent CASTLE slot, not the owning
-            // wizard (mc2l3 t=243 slot 131: retail owner obs 127 =
-            // the castle). The wizard identity rides the parent.
-            e.id24 = castle as u16;
-            e.f40 = castle as u16; // parentId_0x28_40
-        }
-        self.link(i, x, y, site_z);
-        self.mc2_castle_extents_ent(i, row);
+        let i = self.mc2_new_painter_record((x, y, site_z), row)?;
+        let e = &mut self.ent[i];
+        // ⚠ `byte_0x3B_59` is the ctor's flat 1 (see
+        // [`Self::mc2_new_painter_record`]); the repaint distinction
+        // the port carries here is a port-side pin with no decompile
+        // site behind it, and it is now the ONLY thing this mint adds
+        // over the ctor. Left in place because the castle column's
+        // corpus rows sit on it — the wizard painter is what the
+        // corpus arbitrated, and it takes the flat 1.
+        e.f59 = u8::from(repaint);
+        // The port's id24 convention for painters is the FUSED
+        // parentId @0x28 (the import's `id24 = tr(@0x28)`, and
+        // `obs_project_mc2` recovers the recorded `owner` lane
+        // from it) — the parent CASTLE slot, not the owning
+        // wizard (mc2l3 t=243 slot 131: retail owner obs 127 =
+        // the castle). The wizard identity rides the parent.
+        e.id24 = castle as u16;
         Some(i)
     }
 
@@ -1186,7 +1704,15 @@ impl Gen {
             self.ent[i].flags |= 2;
             self.ent[i].f26 = 19;
         }
-        let parent = self.ent[i].f40 as usize;
+        // Parent = the fused id24 (@0x28), NOT f40: both ctors stamp
+        // both, but an IMPORTED painter only carries the parent in
+        // id24 (the import fuses @0x28 there; f40 mirrors @0x26 = 0),
+        // and the settle-end stamp below is how the castle learns its
+        // build finished (retail EF:27753 writes through parentId).
+        let parent = match self.ent[i].id24 as usize {
+            p if p != 0 && p < self.ent.len() => p,
+            _ => 0,
+        };
         let row = (self.ent[i].f71 as usize).min(7);
         let Some(def) = self.assets.build_tab.get(row).copied() else {
             self.ent[i].flags |= 0x400;
@@ -1371,6 +1897,38 @@ impl Gen {
     /// the sphere-drop height only — no spheres here: the scratch
     /// runs with level 0, the 10% haircut already scattered), then
     /// one retile over the footprint.
+    ///
+    /// ⭐⭐⭐ THE JITTER RNG IS THE SCRATCH ENTITY'S, NOT THE CASTLE'S.
+    /// `sub_605E0` (EF:61629-36) does not hand `RemoveCastleStage_385C0`
+    /// the castle — it stages `Entities_EA3E4[0]` (position, level as
+    /// `byte_0x46_70`, owner, `model_0x40_64 = 0`, `dword_0x10_16 = 0`,
+    /// `parentId_0x28_40` = the castle) and passes THAT. Every
+    /// `event->rand_0x14_20 = 9377 * … + 9439` in the height arm
+    /// (EF:28149-28160) therefore lands on SLOT 0, and the castle's own
+    /// `rand` does not move across the whole un-stamp.
+    ///
+    /// Two things ride on it, and only the first is visible as a lane:
+    /// the castle's `rand` (drawing it here desynchronises every later
+    /// draw the castle makes), and — the one that matters — the HEIGHTS
+    /// themselves, which come out of slot 0's chain and not the
+    /// castle's. mc2l3 t=16248, the last rung of the self-destruct
+    /// ladder (castle 162, level 1 → 0): retail's slot 0 goes
+    /// `rand` 0 → 46293 (107 draws) with `owner28` 162 and `b46` 1 —
+    /// the scratch staging, read straight off the capture — while the
+    /// castle holds 29231 on both sides of the tick. The port drew 103
+    /// times on the castle instead.
+    ///
+    /// ⚠ Slot 0's `rand` is a PERSISTENT field, not a per-call scratch:
+    /// it reads 0 through every earlier downgrade in the take (15904,
+    /// 15956) because those un-stamps found `template >= height` on
+    /// every cell and took the no-draw arm, and it holds 46293 from
+    /// 16248 to the end of the level. So it must be a real pool lane
+    /// the port advances, not a local.
+    ///
+    /// ⚠ The OTHER caller of `RemoveCastleStage_385C0` — the building
+    /// collapse ([`World::mc2_house_collapse`]) — passes a REAL entity,
+    /// so its jitter is that building's own `rand`. The scratch is
+    /// specific to the castle downgrade's staging.
     fn mc2_castle_unstamp(&mut self, i: usize, row: u8) {
         self.terrain_dirty = true;
         let Some(def) = self.assets.build_tab.get(row as usize).copied() else {
@@ -1404,11 +1962,13 @@ impl Gen {
                     if c[1] >= cur {
                         self.t.height[t] = 0;
                     } else {
-                        let d = self.ent_rand(i);
+                        // ⭐ SLOT 0 — the staged scratch entity, not
+                        // the castle (see this fn's doc comment).
+                        let d = self.ent_rand(0);
                         if d % 0x32 <= 20 {
                             self.t.height[t] = cur.wrapping_sub(c[1]);
                         } else {
-                            let d2 = self.ent_rand(i);
+                            let d2 = self.ent_rand(0);
                             self.t.height[t] =
                                 cur.wrapping_sub(c[1].wrapping_sub((d2 % 0x14) as u8));
                         }
@@ -1444,20 +2004,57 @@ impl Gen {
 
     // ---- the (10,79) stage pieces --------------------------------------------
 
-    /// Free the castle's (10,79) piece set (identified by the
-    /// back-link f146 = castle slot — the retail word_0x32_50 /
-    /// word_0x34_52 chain, scan-collected).
+    /// Free the castle's (10,79) piece set. Retail (EF:62256-62264)
+    /// WALKS THE CHAIN the rebuild itself built —
+    /// `castle.word_0x34_52` → piece → piece → 0 — and hands every
+    /// node to `sub_57F20` (Events.cpp:5209-39), which is an
+    /// **IMMEDIATE** free: tile-unlink, recycle-stack removal,
+    /// `class = 0`, and the slot PUSHED BACK ON THE FREE STACK right
+    /// now. (Retail's *other* primitive, the deferred `0x400` flag,
+    /// is `DisableEntityDrawing04_57F10` — EF:61665 uses it for the
+    /// castle BODY and deliberately not for the pieces.) The very
+    /// next `new_event` therefore pops the piece that was just freed
+    /// (LIFO), which is why a retail rebuild RE-USES the old records
+    /// instead of minting a fresh set.
+    ///
+    /// Measured, mc2l0-spells-galore t=1055 (castle 266, level 1→2,
+    /// free-stack tail `[…,467,474,475,220,458]`): retail frees the
+    /// lone old piece 230, pushing it on top, and allocates
+    /// 230,220,475,474 — while the deferred flag this used to set
+    /// left 230 off the stack and shifted every pop by one
+    /// (220,475,474,467): one record too many AND the four footprint
+    /// corners landing on the wrong four slots. The offsets
+    /// themselves were never wrong.
+    ///
+    /// A piece's `word_0x34_52` has no port home — `f54` carries the
+    /// piece's `@0x36` windup boost there (conformance.rs:1568) — so
+    /// the FORWARD link is derived from the back-links the recording
+    /// does carry: `p(k+1)` is the (10,79) whose `@0x32` (`f52`) is
+    /// `p(k)`.
     fn mc2_castle_free_stages(&mut self, i: usize) {
-        for j in 1..self.ent.len() {
-            if self.ent[j].class64 == 10
-                && self.ent[j].model65 == 79
-                && self.ent[j].f146 as usize == i
-                && self.ent[j].flags & 0x400 == 0
-            {
-                self.ent[j].flags |= 0x400;
+        let mut node = self.ent[i].f54 as usize;
+        for _ in 0..64 {
+            // EF:62258-59 stops at `Entities_EA3E4[0]`; the extra
+            // already-free guard only fires on states retail cannot
+            // reach — a double free would double-push the slot.
+            if node == 0 || node >= self.ent.len() || self.ent[node].class64 == 0 {
+                break;
             }
+            let mut next = 0usize;
+            for j in 1..self.ent.len() {
+                if j != node
+                    && self.ent[j].class64 == 10
+                    && self.ent[j].model65 == 79
+                    && self.ent[j].f52 as usize == node
+                {
+                    next = j;
+                    break;
+                }
+            }
+            self.free_entity(node); // sub_57F20 — IMMEDIATE
+            node = next;
         }
-        self.ent[i].f52 = 0;
+        self.ent[i].f54 = 0; // EF:62265 `a1x->word_0x34_52 = 0`
     }
 
     /// `sub_613D0` (EF:62233): rebuild the visible (10,79) piece
@@ -1498,6 +2095,20 @@ impl Gen {
         };
         let tlx = cx.wrapping_sub(def.w / 2);
         let tly = cy.wrapping_sub(def.h / 2);
+        // EF:62305-07 — `v18x` is the chain CURSOR: the castle for
+        // the first piece, then the piece just made.
+        //     i2x->word_0x32_50 = v18x;   // back-link → f52
+        //     v18x->word_0x34_52 = i2x;   // forward   → f54
+        //     i2x->word_0x34_52 = 0;
+        //     v18x = i2x;
+        // Only the CASTLE end of the forward write has a port home
+        // (`f54`); a piece's `f54` is its `@0x36` windup boost, so
+        // the piece→piece direction is rebuilt from `f52` by
+        // `mc2_castle_free_stages`. The old `f146` back-link was an
+        // invention — `f146` is retail's `target96`, which is 0 on
+        // every (10,79) (dump-state t=1055 slot 230: `target96 0 0`)
+        // and which the piece brain never reads (its target is f28).
+        let mut prev = i;
         for &(ox, oy) in mc2_stage_parts(stage) {
             let px = (
                 (tlx.wrapping_add(ox) as u16) << 8,
@@ -1506,8 +2117,11 @@ impl Gen {
             let Some(p) = self.mc2_spawn_castle_piece(px.0, px.1, own, stage, part) else {
                 break;
             };
-            self.ent[p].f146 = i as u16; // back-link (word_0x32_50)
-            self.ent[i].f52 = p as u16; // chain root (word_0x34_52)
+            self.ent[p].f52 = prev as u16; // @0x32 back-link
+            if prev == i {
+                self.ent[i].f54 = p as u16; // @0x34 chain root
+            }
+            prev = p;
         }
     }
 
@@ -1527,6 +2141,25 @@ impl Gen {
             .iter()
             .find(|(o, _, _)| *o == own)
             .map_or(0, |(_, _, part)| part[stage as usize - 1])
+    }
+
+    /// `array_0x24E_590[level]` — the researched HP FACTOR for a
+    /// level, the other half of [`Self::mc2_castle_part_type`]'s
+    /// table. Retail fills it from
+    /// `SPELLS[model].subspell[row].subSpellIndex_2` when the research
+    /// for `castleLevel + 1` completes (EF:56116-20); the port stamps
+    /// it at cast/upgrade time from the castle-spell tier
+    /// (`mc2_research_stamp`). Unstamped levels read 0 = identity,
+    /// a fresh retail castle's exact state. Level 0 has no rung.
+    fn mc2_castle_hp_factor(&self, own: u16, level: u8) -> u8 {
+        if !(1..=7).contains(&level) {
+            return 0;
+        }
+        self.mc2_castle_research
+            .0
+            .iter()
+            .find(|(o, _, _)| *o == own)
+            .map_or(0, |(_, hp, _)| hp[level as usize - 1])
     }
 
     /// The `sub_69AB0` research write (EF:56120-21), stamped by the
@@ -1762,17 +2395,46 @@ impl Gen {
     }
 
     /// The state-3 ring scan (EF:30194-30394): first hostile at tile
-    /// ring distance 3..=12 from the piece. Retail walks the
-    /// per-ring cell-offset tables nearest-ring-first and takes the
-    /// FIRST hostile in walk order; we take the nearest by ring then
-    /// pool order (deliberate — same admission set, same 3-tile hole).
-    /// Hostile predicate (EF:30359-84): class 3 model {0,1,3} or
-    /// class 5 model ≠22, owner ≠ ours. No invisibility test —
-    /// retail turrets see through Invisibility (unlike the m15
-    /// guards' scan). The class-5 `StageVar2==14` own-parent
-    /// exemption (EF:30378-81) is skipped (deliberate: the stage
-    /// binding lives in side-vecs; only shields own summons at own
-    /// walls).
+    /// ring distance 3..=12 from the piece. Hostile predicate
+    /// (EF:30359-84): class 3 model {0,1,3} or class 5 model ≠22,
+    /// owner ≠ ours. No invisibility test — retail turrets see
+    /// through Invisibility (unlike the m15 guards' scan). The
+    /// class-5 `StageVar2==14` own-parent exemption (EF:30378-81) is
+    /// skipped (deliberate: the stage binding lives in side-vecs;
+    /// only shields own summons at own walls).
+    ///
+    /// ⭐⭐⭐ THE RING IS SEARCH.DAT'S, NOT A CHEBYSHEV BOX, AND THE
+    /// WALK IS THE TILE MAP, NOT THE POOL. Retail's `AddE7EE0x_10080(3,
+    /// 12)` + `sub_10130` pair is the same ring iterator every disc dig
+    /// uses — [`Gen::ring_cells`], whose membership comes from the
+    /// 32×32 ring-index image `DATA/SEARCH.DAT` — and each yielded cell
+    /// is resolved through `mapEntityIndex_15B4E0` and walked down
+    /// `oldMapEntity_0x16_22` (EF:30341-30393). So "ring 12" is a
+    /// rasterised DISC ring, and the corners a Chebyshev box would
+    /// include are simply not in the table.
+    ///
+    /// The old stand-in read `max(|dx|, |dy|)` off each pool record's
+    /// position and called the admission sets equal. They are not, and
+    /// the corner is where they part: mc2l3 t=18551, piece 235 on tile
+    /// (82,180) and the wild (5,19) at slot 226 on tile (70,175) —
+    /// dx 12, dy 5, Chebyshev 12 (admitted) but Euclidean 13 (NOT in
+    /// SEARCH.DAT's ring 12). Retail's turret never leaves state 3; the
+    /// port latched a target, wound up, and the piece's graded `z` rose
+    /// on the windup boost while retail's kept bobbing.
+    ///
+    /// ⚠ The walk is FIRST-IN-ORDER, not nearest: ring by ring, cell by
+    /// cell within the ring, chain link by chain link within the cell,
+    /// stopping at the first hostile (`v39` gates both loop heads).
+    /// [`Gen::ring_cells`] already carries retail's off-by-one — the
+    /// last entry of the outermost ring is fetched with the stop code
+    /// and dropped.
+    ///
+    /// ⚠ The OUT-OF-POOL HUMAN JOINS NO TILE CHAIN. Retail's carpet is
+    /// a pool record linked like any other, so it is found at its own
+    /// cell in walk order; ours is checked as that cell comes up,
+    /// ahead of whatever the chain there holds. (Only a RIVAL castle's
+    /// piece can reach it at all — a piece never targets its own
+    /// owner.)
     fn mc2_piece_scan(&self, i: usize, player: Option<(u16, u16, i16)>) -> Option<u16> {
         let (px, py, own) = {
             let e = &self.ent[i];
@@ -1780,44 +2442,42 @@ impl Gen {
         };
         let tx = (px.wrapping_add(128) >> 8) as u8;
         let ty = (py.wrapping_add(128) >> 8) as u8;
-        let ring = |ax: u8, ay: u8| -> u8 {
-            let dx = (ax.wrapping_sub(tx) as i8).unsigned_abs();
-            let dy = (ay.wrapping_sub(ty) as i8).unsigned_abs();
-            dx.max(dy)
+        let human = if own == crate::mc1::mobs::PLAYER_TARGET {
+            None
+        } else {
+            player.map(|(hx, hy, _)| {
+                (
+                    (hx.wrapping_add(128) >> 8) as u8,
+                    (hy.wrapping_add(128) >> 8) as u8,
+                )
+            })
         };
-        let mut best: Option<(u16, u8)> = None;
-        if own != crate::mc1::mobs::PLAYER_TARGET
-            && let Some((hx, hy, _)) = player
-        {
-            let r = ring(
-                (hx.wrapping_add(128) >> 8) as u8,
-                (hy.wrapping_add(128) >> 8) as u8,
-            );
-            if (3..=12).contains(&r) {
-                best = Some((crate::mc1::mobs::PLAYER_TARGET, r));
+        for (dx, dy) in self.ring_cells(3, 12) {
+            let (gx, gy) = (tx.wrapping_add(dx), ty.wrapping_add(dy));
+            if human == Some((gx, gy)) {
+                return Some(crate::mc1::mobs::PLAYER_TARGET);
+            }
+            let mut j = self.map_entity[tile(gx, gy)] as usize;
+            while j != 0 {
+                let e = &self.ent[j];
+                let next = e.next20 as usize;
+                // ⚠ NO REAP TEST — EF:30355-84 asks class, model and
+                // the owner word and nothing else, and a soft-killed
+                // record keeps its tile link until the tick-top reaper.
+                if j != i && e.id24 != own {
+                    let hostile = match e.class64 {
+                        3 => e.model65 <= 1 || e.model65 == 3,
+                        5 => e.model65 != 22,
+                        _ => false,
+                    };
+                    if hostile {
+                        return Some(j as u16);
+                    }
+                }
+                j = next;
             }
         }
-        for (j, e) in self.ent.iter().enumerate().skip(1) {
-            if j == i || e.flags & 0x400 != 0 || e.id24 == own {
-                continue;
-            }
-            let hostile = match e.class64 {
-                3 => e.model65 <= 1 || e.model65 == 3,
-                5 => e.model65 != 22,
-                _ => false,
-            };
-            if !hostile {
-                continue;
-            }
-            let r = ring(
-                (e.x.wrapping_add(128) >> 8) as u8,
-                (e.y.wrapping_add(128) >> 8) as u8,
-            );
-            if (3..=12).contains(&r) && best.is_none_or(|(_, br)| r < br) {
-                best = Some((j as u16, r));
-            }
-        }
-        best.map(|(t, _)| t)
+        None
     }
 
     /// The state-7/8 FIRE arm (LABEL_48, EF:30249-30328): validate
@@ -1833,7 +2493,15 @@ impl Gen {
             player
         } else {
             let e = &self.ent[tgt as usize];
-            (e.act_life >= 0 && e.flags & 0x400 == 0).then_some((e.x, e.y, e.z))
+            // ⭐ THE AIM MEASURES THE TARGET AT ITS Z-BOX CENTRE.
+            // `sub_655C0` brackets the two angle calls in
+            // `sub_65580`/`sub_655A0` (EF:62750-67) — the target's z is
+            // temporarily raised by its own `array_0x52_82.yaw` unless
+            // it is model 2 — which is exactly [`Ent::aim_z`], already
+            // the port's home for that bracket everywhere else.
+            // ⚠ RESIDUAL: the human branch above cannot apply it — the
+            // out-of-pool carpet arrives as a bare pose with no `f78`.
+            (e.act_life >= 0 && e.flags & 0x400 == 0).then_some((e.x, e.y, e.aim_z()))
         };
         let Some((tx, ty, tz)) = tpos else {
             self.ent[i].f28 = 0;
@@ -1859,11 +2527,26 @@ impl Gen {
         let spawned =
             crate::engine::world::World::mc2_dispatch_arm(spell, sub.life).and_then(|arm| {
                 // Muzzle: the piece's position + its sprite half-height
-                // (retail `pos.z += array_0x52_82.yaw`, EF:30296 —
-                // the shift-rot vertical; f78 is our derivation).
+                // ⭐⭐ THE MUZZLE LIFT HAPPENS AFTER THE AIM, NOT BEFORE.
+                // `sub_6DCA0` is handed `&a1x->position_0x4C_76` — the
+                // PIECE's own z — and `sub_655C0(proj, target)` runs on
+                // the shot as spawned; only on the NEXT line does
+                // retail write `proj->position.z += a1x->
+                // array_0x52_82.yaw` (EF:30285/30292/30296, in that
+                // order). So the turret aims from its own centre and
+                // then teleports the shot up to the muzzle; the elevation
+                // it fires at is one sprite-half-height too shallow, and
+                // that is retail behaviour, not an accident to smooth
+                // over.
+                //
+                // mc2l3 t=18620, turret 235 at z 2218 with `f78` 100
+                // shooting the (5,19) at slot 226: retail's shot carries
+                // `pitch` 270 (the angle from 2218), the port's 285 (the
+                // angle from 2318). One lane, and it is the aim of every
+                // castle turret shot in the game.
                 let (mx, my, mz) = {
                     let e = &self.ent[i];
-                    (e.x, e.y, e.z.wrapping_add(e.f78 as i16))
+                    (e.x, e.y, e.z)
                 };
                 let p = self.mc2_spawn_cast_proj(arm.subtype, mx, my, mz)?;
                 let own = self.ent[i].id24;
@@ -1892,6 +2575,10 @@ impl Gen {
                     e.f126 = e.f126.clamp(384, 0x2000);
                     e.f146 = tgt; // homing target (word_0x96_150)
                 }
+                // NOW the muzzle lift (EF:30296) — a bare `z +=`, no
+                // relink; the tile link is x/y only.
+                let lift = self.ent[i].f78 as i16;
+                self.ent[p].z = self.ent[p].z.wrapping_add(lift);
                 // The local player's castle FIREBALL swaps to the
                 // star muzzle sprite 42 (EF:30290-91).
                 if own == crate::mc1::mobs::PLAYER_TARGET && spell == 0 {
@@ -2141,6 +2828,57 @@ mod tests {
         assert!(g.mc2_castle_space_ok(a), "a (10,2) prop does not block");
     }
 
+    /// Completing a build/upgrade ZEROES the guard-respawn cooldown.
+    ///
+    /// `BeginOfCastleCreation_5FA70` case 2 (EF:61149-52) runs
+    /// `sub_5F890(locEvent, 0)`, whose `a2 == 0` arm ends in
+    /// `sub_6D880(a1x)` (EF:61047) — and `a1x` is THE CASTLE. That
+    /// helper is `if (@0x2C) { SetSpell_6D5E0(a1x, @0x2C - 1); @0x2C
+    /// = 0; }` (EF:58215-24), and on a (3,2) the word it clears is the
+    /// guard cooldown (`f46`), not a deferred spell tier. So a castle
+    /// that froze its ladder mid-transform re-arms the spawn instead
+    /// of resuming the count.
+    ///
+    /// ⚠ PAIR-BLIND, SO IT GETS A UNIT TEST: `exec_pair` imports
+    /// retail's state at the pair start, which already carries the
+    /// zeroed `f2c`, so the port spawns the guard correctly with or
+    /// without the fix and NO fixture can ever hold this law
+    /// (measured: galore t=1129 conforms at the pre-fix rig). The
+    /// free run is the only grader — galore 1129 → 1211.
+    ///
+    /// Non-vacuity: delete the `f46 = 0` in `mc2_castle_build`'s
+    /// arm 2 and the second assert fails with `f46 == 13`.
+    #[test]
+    fn a_completed_build_zeroes_the_guard_cooldown() {
+        let mut g = castle_gen();
+        let i = place_castle(&mut g, 100 << 8, 100 << 8, 4, 7);
+        // Mid-transform: the build machine on arm 2 (the painter has
+        // signalled "pass done"), with a cooldown frozen part-way
+        // down its 16-pass ladder — galore castle 266 held exactly 13
+        // across all 19 ticks of its level-3 → 4 transform.
+        g.ent[i].tick70 = 5;
+        g.ent[i].f59 = 2;
+        g.ent[i].f46 = 13;
+        g.mc2_castle_build(i);
+        assert_eq!(g.ent[i].tick70, 4, "arm 2 settles back to standing");
+        assert_eq!(g.ent[i].f59, 0, "and clears the build sub-state");
+        assert_eq!(
+            g.ent[i].f46, 0,
+            "sub_6D880 clears the castle's own @0x2C on the way out"
+        );
+        // The freeze half stays faithful: the build machine must NOT
+        // decrement it, so a castle that is still transforming keeps
+        // whatever it froze at.
+        let mut h = castle_gen();
+        let j = place_castle(&mut h, 100 << 8, 100 << 8, 4, 7);
+        h.ent[j].tick70 = 5;
+        h.ent[j].f59 = 4; // wait-for-painter
+        h.ent[j].f46 = 13;
+        h.ent[j].f63 = 1; // odd → the 32-tick poll gate stays shut
+        h.mc2_castle_build(j);
+        assert_eq!(h.ent[j].f46, 13, "a transform in progress FREEZES it");
+    }
+
     /// A castle driven to death spills its ENTIRE stored bank as
     /// owner-tagged (10,39) spheres — the eject runs unconditionally
     /// after the downgrade (EF:61228), even when the level-0 death
@@ -2170,8 +2908,29 @@ mod tests {
     /// row 2 (castle) carries the retail part-type law `life_0x1A =
     /// {0,1,2}` by tier; rows 0/7 give the fire/lightning arms a
     /// payload.
+    /// A stand-in for SEARCH.DAT's 32×32 ring-index grid: cell (dx, dy)
+    /// belongs to ring `round(hypot(dx, dy))`, enumerated row-major
+    /// from the same (15, 15) centre [`FeatureAssets::parse`] finds.
+    /// `flat_gen`'s one-dummy-cell stub cannot serve the turret scan —
+    /// that scan IS a ring walk (see [`Gen::mc2_piece_scan`]), so with
+    /// the stub it can never see anything.
+    fn ring_grid() -> Vec<Vec<(u8, u8)>> {
+        let mut rings = vec![Vec::new(); 32];
+        for y in 0..32i32 {
+            for x in 0..32i32 {
+                let (dx, dy) = (x - 15, y - 15);
+                let r = ((dx * dx + dy * dy) as f64).sqrt().round() as usize;
+                if r < 32 {
+                    rings[r].push(((dx as i8) as u8, (dy as i8) as u8));
+                }
+            }
+        }
+        rings
+    }
+
     fn turret_gen() -> Gen {
         let mut g = castle_gen();
+        g.assets.rings = ring_grid();
         let mut spells = vec![crate::mc2::spells::Mc2SpellRow::default(); 10];
         spells[0].tiers[1].sub_spell = 555;
         spells[0].tiers[1].life = 1;

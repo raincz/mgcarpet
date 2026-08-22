@@ -744,12 +744,17 @@ impl Gen {
     /// (EF:32531-32542; no off-cave else arm in retail).
     /// Shared by the pad-edge ring and the castle-unstamp finalizer.
     /// Neighbour indexing is retail's PACKED-WORD arithmetic
-    /// (`word − 0x101` borrows across the y byte at x==0; the
-    /// kernel's `uint16 i` wraps) — reproduced with wrapping u16
-    /// index math, torus like the rest of the port. (Retail's GATE
-    /// reads signed-negative offsets near y==0 — remc2's FIX pins
-    /// those to 0/natural; our torus wrap reads the far edge
-    /// instead. Divergence only for footprints touching row 0.)
+    /// (`word − 0x101` borrows across the y byte at x==0).
+    /// ⚠ RETAIL USES **TWO** CONVENTIONS HERE AND THEY ARE NOT
+    /// INTERCHANGEABLE: the four-way GATE passes a signed `int` to
+    /// `fix_10B4E0_terraintype` (:32502-11), which pins a negative
+    /// index to 0 = natural (:32465-70), while only the 3x3 kernel
+    /// runs on a wrapping `uint16 i` (:32514) and is a true torus.
+    /// The port modelled BOTH as a torus, so a footprint touching
+    /// row 0 bailed on whatever sat at the far edge — mc2l3 t=5643,
+    /// see the gate below. Fixed 2026-08-24e; the old text of this
+    /// paragraph ("divergence only for footprints touching row 0")
+    /// named the defect exactly and left it standing.
     pub(crate) fn mc2_smooth_pad_edge(&mut self, cx: u8, cy: u8) {
         let t = tile(cx, cy) as u16;
         let natural = |g: &Self, idx: u16| {
@@ -760,6 +765,29 @@ impl Gen {
             return;
         }
         for off in [0x101u16, 0x100, 0x1, 0] {
+            // ⭐⭐ THE GATE IS A *SIGNED* READ; ONLY THE 3x3 LOOP IS
+            // THE TORUS. `SetHeightmapByBuilding_48B90` hands
+            // `-0x101 + axis.word` — an `int` — to
+            // `fix_10B4E0_terraintype(int)` (:32502-11), and that
+            // helper pins a NEGATIVE index to 0, a natural type
+            // (:32465-70). So every cell whose tile word is below the
+            // offset — all of row 0, plus (0,1) — passes the gate.
+            // The 3x3 average below is the one that genuinely wraps
+            // (`uint16 i`, :32514) and stays a torus.
+            //
+            // Collapsing the two cost mc2l3 t=5643: the (10,45) at
+            // tile (198,12) completes, `mc2_pad_edge_ring` reaches
+            // (198,0), and its WRAPPED gate cell (197,255) carries
+            // type 6 — a building texture — so the port bailed and
+            // left the height at 49 where retail smoothed it to 51.
+            // Two height bytes are three engine units of
+            // `interp_plane` at that quad, and the (9,0) fireball that
+            // terrain-contacts there twenty ticks later burst at z
+            // 2056 against retail's 2059 — the take's
+            // `first=5663 sig=(9,0)slot235:z`.
+            if t < off {
+                continue;
+            }
             if !natural(self, t.wrapping_sub(off)) {
                 return;
             }

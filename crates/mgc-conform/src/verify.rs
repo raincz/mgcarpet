@@ -158,6 +158,10 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
         })
         .flatten();
     let mut pending_terrain: Option<mgc_formats::mgcr::TerrainBlock> = None;
+    // Terrain@N held across the pose lane's in-place advance to N+1 —
+    // see [`PlanesAtN`]. The pose-alt probe re-executes the PAIR and
+    // must see terrain@N, not the settled planes the mover probes.
+    let mut planes_n = PlanesAtN::default();
     while let Some(r) = rec.next_tick() {
         let tick = r?;
         if let Some(img) = timg.as_mut() {
@@ -353,6 +357,17 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     // the loop-top re-apply is idempotent). The
                     // flight seed still comes from the recorded
                     // closure at N.
+                    // ARM terrain@N before the advance below. The MC1
+                    // arm's only re-exec is the pose-alt probe (its
+                    // `--dump` re-diffs the projection it already
+                    // has), so grading cannot move here — but the
+                    // phase CLASSIFIER was tagging against terrain@N+1
+                    // on every tick that carries a terraform block.
+                    if !args.no_pose_alt && pending_terrain.is_some() {
+                        planes_n.arm(&timg);
+                    } else {
+                        planes_n.disarm();
+                    }
                     if !args.no_pose_lane {
                         let snap = world.take_midtick_ground_snapshot();
                         // The oracle's second witness: the port's
@@ -465,7 +480,7 @@ fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         let (alt, _, _) = exec_pair(
                             aw,
                             &pristine,
-                            measured_planes(&timg),
+                            planes_n.get(&timg),
                             &pst,
                             &st,
                             obs,
@@ -895,6 +910,83 @@ pub(crate) fn measured_planes(
     timg: &Option<mgc_formats::mgcr::TerrainImage>,
 ) -> Option<MeasuredPlanes<'_>> {
     timg.as_ref().and_then(|img| img.measured())
+}
+
+/// TERRAIN@N, HELD ACROSS THE POSE LANE'S ADVANCE.
+///
+/// The pose channel probes the SETTLED planes, so it applies the
+/// pair's pending terraform block to the shared [`TerrainImage`]
+/// in place, leaving it at N+1. But the probes that run BELOW it —
+/// the pose-alt phase classifier, and (MC2) the `--dump` re-exec —
+/// are still executing the PAIR, and a pair runs on terrain@N. They
+/// were reading the advanced image, so on a measured-terrain take
+/// every `--dump` printed PHANTOM `z` rows for anything ground-
+/// sampled and the phase classifier tagged against the wrong
+/// terrain. Exemplar: mc2l0 pair 7224→7225 grades ZERO field rows
+/// while its `--dump` printed nineteen.
+///
+/// Snapshotting rather than reordering is deliberate: the pose lane
+/// must keep running against the world the GRADED exec left behind,
+/// and the re-execs rebuild their world from `pristine` regardless.
+/// Buffers are reused across pairs, and a pair only arms one when the
+/// tick actually CARRIES a terraform block — with no block the pose
+/// lane advances nothing and the shared image is already correct.
+#[derive(Default)]
+pub(crate) struct PlanesAtN {
+    height: Vec<u8>,
+    ty: Vec<u8>,
+    ceil: Option<Vec<u8>>,
+    angle: Option<Vec<u8>>,
+    /// `None` — not armed for this pair; read the shared image.
+    /// `Some(false)` — armed, but the take has no anchored channel.
+    /// `Some(true)` — armed, the buffers below hold terrain@N.
+    armed: Option<bool>,
+}
+
+impl PlanesAtN {
+    /// Copy the measured image as it stands NOW, before the advance.
+    pub(crate) fn arm(&mut self, timg: &Option<mgc_formats::mgcr::TerrainImage>) {
+        let Some((h, ty, ceil, angle)) = measured_planes(timg) else {
+            self.armed = Some(false);
+            return;
+        };
+        let fill = |dst: &mut Vec<u8>, src: &[u8]| {
+            dst.clear();
+            dst.extend_from_slice(src);
+        };
+        let fill_opt = |dst: &mut Option<Vec<u8>>, src: Option<&[u8]>| match src {
+            Some(s) => fill(dst.get_or_insert_with(Vec::new), s),
+            None => *dst = None,
+        };
+        fill(&mut self.height, h);
+        fill(&mut self.ty, ty);
+        fill_opt(&mut self.ceil, ceil);
+        fill_opt(&mut self.angle, angle);
+        self.armed = Some(true);
+    }
+
+    /// This pair will not advance the image (or has no re-exec below):
+    /// the shared image stays the authority.
+    pub(crate) fn disarm(&mut self) {
+        self.armed = None;
+    }
+
+    /// The planes a re-exec of THIS pair must run on.
+    pub(crate) fn get<'a>(
+        &'a self,
+        timg: &'a Option<mgc_formats::mgcr::TerrainImage>,
+    ) -> Option<MeasuredPlanes<'a>> {
+        match self.armed {
+            None => measured_planes(timg),
+            Some(false) => None,
+            Some(true) => Some((
+                &self.height,
+                &self.ty,
+                self.ceil.as_deref(),
+                self.angle.as_deref(),
+            )),
+        }
+    }
 }
 
 /// The pose channel's per-cell MID-WALK ground reconstruction: the

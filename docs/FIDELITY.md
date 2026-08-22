@@ -158,37 +158,50 @@ faithful defaults:
 
 ---
 
-## Spell jars — owned-spell removal (unfaithful improvement)
+## Spell jars — the owned-spell hide (RETAIL, not an option)
 
-**Original.** Both MC1 and MC2 leave every spell jar in the world even
-when the local player already owns that spell. The pickup gate
-(`sub_68FF0` MC2 / the class-12 pickup MC1) flies you *through* an
-already-owned jar without collecting it, and AUTHORED/PLACED jars carry
-`life = 0` so they never decay. The authors scattered redundant spell
-sources as a safety net for players who missed one — but for a player
-who already has the spell they become permanent, unidentifiable clutter
-(you can't tell what a jar holds without flying into it). Only
-DEATH-scattered jars self-cull (life 200-289).
+**Original.** Both MC1 and MC2 keep every spell jar in the world
+forever: the pickup gate (`sub_68FF0` MC2 / the class-12 pickup MC1)
+flies you *through* an already-owned jar without collecting it, and
+AUTHORED/PLACED jars carry `life = 0` so they never decay. Only
+DEATH-scattered jars carry a ttl (life 200-289). **But retail does not
+DRAW the ones you own.** The wizard's init claims one entity per carried
+spell as its live manifestation and sets the byte[0] hide bit
+(MC1 :54907); the record stays pooled and invisible. Measured: mc2l3
+t=0 carries 26 class-15 records, one per carried spell, every one at
+`flags 0x5`. Corroborated on the retail build twice — owning a spell
+hides its jar, and the all-spells cheat makes floor jars vanish (that
+second witness is what proves the hide reaches WORLD pickups and not
+just the wizard's own claimed records).
 
-**Improvement (P-class, opt-in; player-directed 2026-07-14).** With
-`gameplay.enhancement.prune_owned_jars` on, any jar whose spell the local player
-already owns — and therefore can never pick up — is removed. The
-criterion is exactly the retail pickup gate ("owns `s`" = "can't take
-it"). Single-player entity removal (in MP, gate on the local human or
-make it presentation-only — deferred until MP exists). Implemented as a
-per-tick self-cull at each game's jar tick, which covers BOTH the
-level-load sweep and the instant the player gains the spell (every jar
-of it despawns on its next tick). **This is the lone enhancement that
-defaults ON** — player-judged "one no one will ever complain about";
-the faithful behavior is a `--no-prune-owned-jars` (config `false`)
-away. CLI `--prune-owned-jars` / `--no-prune-owned-jars`.
+**So this is faithful behaviour, and as of 2026-08-25g it is
+unconditional.** It shipped for weeks as `gameplay.enhancement.
+prune_owned_jars`, a P-class option defaulting ON with
+`--no-prune-owned-jars` as its "faithful" arm — an arm that showed
+something retail never shows. The player closed it from a replay: after
+a death the port drew the whole scattered spell book at the death site
+and kept drawing it across the respawn, which retail does not do. The
+option, its CLI flags and its settings row are gone.
 
-**Verified.** `owned_spell_jars_are_pruned_when_enabled` (MC1) +
-`mc2_owned_spell_tokens_are_pruned_when_enabled` (MC2): with it off the
-jar remains, on removes it. The sim default (`World::prune_owned_jars`)
-stays OFF so state-hash goldens are unaffected; only the app config
-turns it on.
+**Where it lives.** `World::owned_spell_jar`, a PAINTER test in
+`live_things`/`live_poses` — never a sim edit. Retail hides per-entity
+because a jar is per-player collectible (one wizard owning a spell must
+not remove the pickup for anybody else), so a world edit could not
+express it even in principle; keeping it in the painter also makes it
+allocation-neutral and `state_hash`-free. Strict-retail worlds read the
+REAL bit (`flags & 1`) instead, so imported and replayed retail states
+never depend on the port's stand-in. The residual deviation is the
+encoding only: the port models owned spells outside the pool and never
+mints manifestation records, so it keys the test on the local player's
+spell set.
 
+**Verified.** `owned_spell_jars_are_never_drawn` (MC1) +
+`mc2_owned_spell_tokens_are_never_drawn` (MC2), both asserting BOTH
+halves — absent from the painter, PRESENT in the pool — because
+asserting only the first would pass equally well for the pre-2026-08-24f
+cull. Corpus-side: `level_005_golden_state_hashes` re-pinned D/E with
+the STATE hashes byte-identical (2 jars drawn until the all-spells cheat
+arms, 0 after).
 ---
 
 ## Vertical projection (crosshair/pitch feel) — APPROX, player-ruled

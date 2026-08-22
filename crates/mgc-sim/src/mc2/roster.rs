@@ -31,8 +31,12 @@
 //! - m26's human drain uses +14 flat (the human's manaRegen isn't
 //!   modeled yet). The %63 spell-hijack is live: the roll mails
 //!   [`crate::engine::world::World::mc2_spell_steal`].
-//! - m12's site-jitter/footprint-clear scans (EF:13991-14093) are
-//!   shaped, not verbatim (the overlap helpers are untraced).
+//! - m12's footprint-clear/overlap scans (EF:14036-14093) are shaped,
+//!   not verbatim. ⚠ NOT because the helpers are untraced — `sub_22640`
+//!   is at EF:13906 and `sub_48990` at EF:32301, both fully decompiled
+//!   in-tree; the site-jitter half (EF:13991-14024) went verbatim in
+//!   2026-08-24e and the ANCHOR PICK (`sub_23020`, EF:14395-99) in
+//!   2026-08-24f.
 
 use super::behavior::BEHAVIOR;
 use crate::engine::features::Gen;
@@ -98,6 +102,24 @@ impl Gen {
                 && t != 0
                 && self.ent[t as usize].class64 == 3
                 && self.ent[t as usize].model65 <= 1)
+    }
+
+    /// The bare POINTER test on `word_0x96_150` —
+    /// `Entities_EA3E4[target] > Entities_EA3E4[0]`, i.e. "the slot
+    /// resolves to something other than the null record". Entity
+    /// records are contiguous, so retail's `<=` is exactly `target ==
+    /// 0`; the human's own record is a pool record like any other, so
+    /// the port's out-of-pool [`PLAYER_TARGET`] passes it.
+    ///
+    /// ⚠ THIS IS NOT [`Gen::mc2_target`]. That one carries the
+    /// life/reap/class guard the CHASE applies (`sub_1C310`
+    /// EF:9297-9302), and a state body that re-asks it is re-asking
+    /// what its own chase would ask one level down — with a whole
+    /// tick of the state machine in between. Several state heads take
+    /// only this pointer test and then run arms that WRITE before the
+    /// chase ever resolves the target.
+    fn mc2_target_ptr(&self, t: u16) -> bool {
+        t == PLAYER_TARGET || (t != 0 && (t as usize) < self.ent.len())
     }
 
     /// `KillEntity_1C930`'s corpse effect is the (10,1) explosion
@@ -372,7 +394,10 @@ impl Gen {
                 best = Some((slot, d2));
             }
         };
-        if !self.player_invisible {
+        // ⚠ `pdead` is `dword_38519`'s ENTRY test (EF:39975), which the
+        // pool arm below applies itself and the out-of-pool human
+        // cannot — see [`Gen::mc2_wizard_scan`].
+        if !self.player_invisible && !ctx.pdead {
             consider(ctx.px, ctx.py, PLAYER_TARGET);
         }
         for (j, c) in self.ent.iter().enumerate().skip(1) {
@@ -747,26 +772,50 @@ impl Gen {
                         let period = BEHAVIOR[self.ent[i].row156 as usize].v_26.max(1);
                         if (self.ent[i].f63 as i16 % period) / 2 == 0 {
                             self.ent[i].f26 -= 1;
+                            // :14294 latches the site pointer BEFORE
+                            // the decrement, and an out-of-pool handle
+                            // lands on `Entities_EA3E4[0]`, the class-0
+                            // sentinel — so resolve the slot once, up
+                            // front, and let both the liveness test and
+                            // the aim below read the same record.
                             let t = self.ent[i].f146 as usize;
+                            let t = if t < self.ent.len() { t } else { 0 };
                             let live = t != 0
-                                && t < self.ent.len()
                                 && self.ent[t].class64 != 0
                                 && self.ent[t].flags & 0x400 == 0;
                             if self.ent[i].f26 < 0 || !live {
                                 self.ent[i].f26 = 5;
                                 self.ent[i].tick70 = M12_BASE + 1;
-                            } else {
-                                let (tx, ty, tz) = {
-                                    let s = &self.ent[t];
-                                    (s.x, s.y, s.z)
-                                };
-                                let e = &self.ent[i];
-                                self.ent[i].f34 = Self::angle_between(e.x, e.y, tx, ty);
-                                let e = &self.ent[i];
-                                if Self::mc2_dist3((e.x, e.y, e.z), (tx, ty, tz)) < 0xA00 {
-                                    self.ent[i].tick70 = M12_BASE;
-                                    self.ent[i].f26 = 0;
-                                }
+                            }
+                            // ⚠ THE RE-AIM AND THE ARRIVAL TEST ARE NOT
+                            // IN AN `else`. Retail's give-up arm
+                            // (:14296-300) is a BARE `if`: it resets the
+                            // counter and flips to 97, then FALLS
+                            // THROUGH (:14301-09) to
+                            // `roll_0x20_32 = tan2(self, site)` and the
+                            // `< 0xA00` arrival test regardless — so the
+                            // walk's LAST tick still re-aims, and can
+                            // still arrive (96 overrides the 97 flip).
+                            // Gating them behind the live arm left a
+                            // STALE @0x20 for the roam brain to carry:
+                            // mc2l0-spells-galore t=3848 retail re-aimed
+                            // 625 -> 617 while the port held 625, the
+                            // t=3864 wander turn added the same +219 to
+                            // both (836 vs 844), and at t=3891 the
+                            // move-core yaw servo (row 101 `v_2` = 22)
+                            // clamped onto 844 where retail parked on
+                            // 836 — 43 ticks of an UNGRADED lane before
+                            // the graded `heading` could see it.
+                            let (tx, ty, tz) = {
+                                let s = &self.ent[t];
+                                (s.x, s.y, s.z)
+                            };
+                            let e = &self.ent[i];
+                            self.ent[i].f34 = Self::angle_between(e.x, e.y, tx, ty);
+                            let e = &self.ent[i];
+                            if Self::mc2_dist3((e.x, e.y, e.z), (tx, ty, tz)) < 0xA00 {
+                                self.ent[i].tick70 = M12_BASE;
+                                self.ent[i].f26 = 0;
                             }
                         }
                     }
@@ -785,14 +834,63 @@ impl Gen {
                     }
                     2 => self.ent[i].tick70 = M12_BASE + 4,
                     _ => {
-                        let (ex, ey) = (self.ent[i].x, self.ent[i].y);
-                        let mut best: Option<(usize, i32)> = None;
-                        for (j, c) in self.ent.iter().enumerate().skip(1) {
-                            if c.class64 == 10 && c.model65 == 45 && c.flags & 0x400 == 0 {
-                                let d2 = Self::dist2_sq(ex, ey, c.x, c.y);
-                                if best_d2(&best, d2) {
-                                    best = Some((j, d2));
-                                }
+                        // ⭐⭐ :14395-99 — THE ANCHOR PICK IS A **3-D**
+                        // NEAREST OVER THE **BUILDING CHAIN**, NOT A
+                        // 2-D POOL SCAN.
+                        //
+                        // `v9 = sub_583F0_distance_3d(&a1x->position_0x4C_76,
+                        //  &jx->position_0x4C_76); if (v9 && v9 < v11)`
+                        // — `sub_583F0` (:40421) is
+                        // `radix_3d(dy² + dx² + **dz²**)`, a TRUNCATED
+                        // isqrt; `v11` starts at unsigned −1 (:14337);
+                        // the `v9 &&` drops a coincident record and the
+                        // strict `<` resolves equal roundings to the
+                        // EARLIER chain entry. The walk is
+                        // `jx = dword_38527; jx > Entities_EA3E4[0];
+                        // jx = jx->next_0` (:14395) — the TICK-TOP
+                        // building roster ([`Gen::bldg_chain`]), which
+                        // carries no class/model/flags test of its own
+                        // and severs at a slot freed earlier in the
+                        // tick.
+                        //
+                        // ⚠ Retail uses BOTH forms deliberately: the
+                        // m14 townie's walk (:14617-25) runs the same
+                        // chain with a genuinely 2-D `dx² + dy²`. Only
+                        // `sub_23020` is the 3-D one.
+                        //
+                        // mc2l0-spells-galore t=4360, builder slot 430
+                        // at (15254, 50184, 3567), 42 live (10,45)
+                        // houses: slot 35 at (16128, 48640, 5152) is
+                        // the 2-D nearest (1774 v 1900) and slot 25 at
+                        // (16384, 51712, 4992) is the 3-D nearest
+                        // (2375 v 2379) — a FOUR-unit margin the
+                        // dropped z axis inverts. The port anchored on
+                        // 35, so the t=4376 arrival re-aim wrote `roll`
+                        // 105 (the bearing to 35) where retail wrote
+                        // 862 (the bearing to 25); six ticks later the
+                        // roam brain's heading servo (row 101 `v_2` =
+                        // 22) stepped −22 against retail's +22 and the
+                        // graded `heading` finally showed it at t=4382
+                        // — 21 ticks and two ungraded lanes downstream.
+                        //
+                        // ⭐ MC1's m12 SEEK has carried this exact
+                        // helper all along
+                        // (`Gen::nearest_building_3d`, mc1/mobs.rs:2431
+                        // — 3-axis, truncated isqrt, strict `<`,
+                        // `d != 0` skip, its doc comment already
+                        // quoting `if (v10 && v10 < v1)`). The TENTH
+                        // MC2-is-the-laggard case of the campaign.
+                        let (ex, ey, ez) = {
+                            let e = &self.ent[i];
+                            (e.x, e.y, e.z)
+                        };
+                        let mut best: Option<(usize, u32)> = None;
+                        for c in 0..self.bldg_chain.visible_len() {
+                            let j = self.bldg_chain.list[c] as usize;
+                            let b = &self.ent[j];
+                            let d = Self::mc2_dist3((ex, ey, ez), (b.x, b.y, b.z));
+                            if d != 0 && best.is_none_or(|(_, bd)| d < bd) {
+                                best = Some((j, d));
                             }
                         }
                         if let Some((j, _)) = best {
@@ -872,25 +970,55 @@ impl Gen {
             let s = &self.ent[t];
             (s.x, s.y, s.z)
         };
-        let d1 = (self.mc2_rand(i) % 3) << 8;
-        let d2 = (self.mc2_rand(i) % 3) << 8;
-        let side = self.ent[t].f80 as i32 + ((w as i32) << 7) + 256 + d1 as i32;
-        let (cx, cy) = match v2 {
+        let d1 = ((self.mc2_rand(i) % 3) << 8) as i32;
+        let d2 = ((self.mc2_rand(i) % 3) << 8) as i32;
+        // ⭐⭐ :13991 SWITCHES ON THE **POST**-INCREMENT PASS COUNTER.
+        // `switch (a1x->dword_0x10_16)` runs AFTER
+        // `a1x->dword_0x10_16 = v2 + 1` (:13982), so the four passes
+        // the `v2 >= 4` give-up budgets (:13983) are sides 1,2,3,4 in
+        // that order. Matching the PRE-increment value rotated them to
+        // 4,1,2,3 — the second attempt took the EAST face where retail
+        // takes the WEST one, and side 4 was never reached at all.
+        // (`switch(v2)` cannot be the original: an arrival enters this
+        // state with @0x10 = 0, which would fall to `default:` and site
+        // the house on the anchor's own centre.)
+        //
+        // Sides 1/2 straddle X off the anchor's PITCH extent
+        // (:13996/:14003); sides 3/4 straddle Y off its ROLL extent
+        // (:14013/:14020). And in EVERY case the FIRST draw jitters X
+        // and the SECOND jitters Y — the port had d1/d2 swapped on 3/4
+        // and read the pitch/width pair there as well.
+        //
+        // mc2l0-spells-galore t=4282: builder slot 430, @0x10 1 -> 2,
+        // anchor (10,45) slot 25 — the port minted a (10,45) at slot
+        // 478 off the east candidate while retail's blocked west one
+        // left the pool alone (`extra(10,45)slot478x1`).
+        let apitch = self.ent[t].f80 as i32;
+        let aroll = self.ent[t].f82 as i32;
+        // `sub_226D0` (:13933/:13935): the pass extent is the template
+        // HALF-size plus a flat 768 (3-tile) clearance —
+        // `*exwidth = (width_4 << 8) / 2 + 768`. `(w << 7)` was only
+        // the first term, so every candidate sat 3 tiles too close to
+        // the anchor. ⚠ Not modelled: :13928 halves both extents when
+        // `x_WORD_180660_VGA_type_resolution == 1`.
+        let exw = ((w as i32) << 7) + 768;
+        let exh = ((h as i32) << 7) + 768;
+        let (cx, cy) = match v2 + 1 {
             1 => (
-                (ax as i32 + side) as u16,
-                (ay as i32 + d2 as i32 - 1280) as u16,
+                (ax as i32 + d1 + apitch + exw + 256) as u16,
+                (ay as i32 + d2 - 1280) as u16,
             ),
             2 => (
-                (ax as i32 - side) as u16,
-                (ay as i32 + d2 as i32 - 1280) as u16,
+                (ax as i32 - (d1 + apitch + exw + 256)) as u16,
+                (ay as i32 + d2 - 1280) as u16,
             ),
             3 => (
-                (ax as i32 + d2 as i32 - 1280) as u16,
-                (ay as i32 + side) as u16,
+                (ax as i32 + d1 - 1280) as u16,
+                (ay as i32 + d2 + aroll + exh + 256) as u16,
             ),
             _ => (
-                (ax as i32 + d2 as i32 - 1280) as u16,
-                (ay as i32 - side) as u16,
+                (ax as i32 + d1 - 1280) as u16,
+                (ay as i32 - (aroll + exh + d2 + 256)) as u16,
             ),
         };
         // Water veto (:14031-35).
@@ -900,25 +1028,48 @@ impl Gen {
             self.ent[i].tick70 = M12_BASE + 1;
             return;
         }
-        // Footprint-clear: no building/wizard bodies on the candidate
-        // tiles (the sub_22640 + overlap scans, deliberate).
-        let tlx = ((cx >> 8) as u8).wrapping_sub((w / 2) as u8);
-        let tly = ((cy >> 8) as u8).wrapping_sub((h / 2) as u8);
-        for dy in 0..h {
-            for dx in 0..w {
-                let cell = crate::engine::features::tile(
-                    tlx.wrapping_add(dx as u8),
-                    tly.wrapping_add(dy as u8),
-                );
-                let mut j = self.map_entity[cell] as usize;
-                while j != 0 {
-                    let c = &self.ent[j];
-                    if c.flags & 0x400 == 0
-                        && ((c.class64 == 10 && c.model65 == 45) || c.class64 == 3)
-                    {
-                        return; // occupied — try again next tick
-                    }
-                    j = c.next20 as usize;
+        // ⭐⭐ THE SITE TEST IS FLATNESS + AN **EXTENT BOX**, NOT A
+        // FOOTPRINT-TILE WALK.
+        //
+        // `sub_22640` (:13906-16) first: the 4-corner max−min of the
+        // inflated footprint under `((exw >> 7) + (exh >> 7) > 4) + 15`
+        // (:14036-40). Then :14044-53 walks the BUILDING CHAIN
+        // (`dword_38527` = `Gen::bldg_chain`) and rejects on
+        // `|dx| <= ix.pitch + exwidth && |dy| <= exheight + ix.roll`
+        // — each scanned building's OWN apitch/aroll widening the box.
+        // Village dwellings carry apitch/aroll of 1536..2560, so the
+        // real exclusion reaches ~15 tiles.
+        //
+        // The port walked only the candidate's own w×h tiles, a ±768
+        // box that fires only when a building's single `link` cell
+        // lands inside the footprint. mc2l0-spells-galore t=4282: the
+        // west candidate (13886, 50944) is NINE TILES from live
+        // (10,45) slot 35 at (16128, 48640) (apitch 2304, aroll 2560)
+        // — dx 2242 ≤ 3840 and dy 2304 ≤ 3840, a wide margin — so
+        // retail vetoes and the port built, minting the extra (10,45)
+        // at slot 478 (`extra(10,45)slot478x1`).
+        //
+        // ⭐ MC1's `m12_build` HAS CARRIED BOTH GATES ALL ALONG
+        // (mc1/mobs.rs: the 15/16 threshold and the
+        // `dx <= c.f80 + half_x && dy <= c.f82 + half_y` box) — the
+        // NINTH "grep MC1 before building for MC2" case.
+        //
+        // ⚠ Retail's :14056+ adds two more chain scans (class-2
+        // model 2, class-2 model 67) and the model-12 `@0x3D` gate at
+        // :14086-93; those stay unported and are still registered in
+        // docs/DEVIATIONS.md.
+        let thr = if (exh >> 7) + (exw >> 7) > 4 { 16 } else { 15 };
+        if self.site_roughness(cx, cy, (exw >> 8) as u8, (exh >> 8) as u8) >= thr {
+            return;
+        }
+        for c in 0..self.bldg_chain.visible_len() {
+            let b = self.bldg_chain.list[c] as usize;
+            let e = &self.ent[b];
+            let dx = (e.x.wrapping_sub(cx) as i16 as i32).abs();
+            if dx <= e.f80 as i32 + exw {
+                let dy = (e.y.wrapping_sub(cy) as i16 as i32).abs();
+                if dy <= exh + e.f82 as i32 {
+                    return; // occupied — try again next tick
                 }
             }
         }
@@ -1337,7 +1488,23 @@ impl Gen {
                     Some((tx, ty, tz)) => {
                         if self.ent[i].f63 & 3 == 0 {
                             let e = &self.ent[i];
-                            self.ent[i].f30 = Self::angle_between(e.x, e.y, tx, ty);
+                            // ⚠ EF:15135-36 writes `roll_0x20_32` —
+                            // the COMMITTED heading (`f34`), NOT yaw.
+                            // Aiming `f30` dragged the GRADED `heading`
+                            // obs lane with it: 477 unexplained (5,15)
+                            // heading rows (mc2l4 466, galore 8,
+                            // mc2l30 3), none carried by any ledger
+                            // rule. mc2l4 slot 370 is the proof from
+                            // the CAPTURE, not the decompile — a
+                            // stationary guard in state 122 whose
+                            // retail yaw is PINNED at 512 while its
+                            // retail roll steps 512 (t=2380) -> 668
+                            // (t=2381), against the grader's
+                            // `heading: retail 512 port 668`. Same
+                            // idiom as `mc2_aim_avoid` (roster.rs:88),
+                            // and the docstring above this fn already
+                            // says "the committed heading directly".
+                            self.ent[i].f34 = Self::angle_between(e.x, e.y, tx, ty);
                         }
                         let period = BEHAVIOR[self.ent[i].row156 as usize].v_26.max(1) as u8;
                         let mut left = false;
@@ -2085,7 +2252,7 @@ impl Gen {
     }
 
     /// `HitFirebug_25610` (:16281) — the attack-run machine.
-    fn m19_attack(&mut self, i: usize, ctx: &MobCtx) {
+    pub(crate) fn m19_attack(&mut self, i: usize, ctx: &MobCtx) {
         match self.mc2_state_head(i) {
             1 => {
                 // The hit arm is a TAIL arm (`else if (v1 <= 1)`,
@@ -2197,7 +2364,15 @@ impl Gen {
                     self.ent[i].f71 = 5;
                 }
                 5 => {
+                    // LABEL_81 (EF:16472-93): the `phase & 3` gate
+                    // covers the TARGET AIM and the pack-avoid both —
+                    // aim first, pack override second. (Case 3's aim
+                    // is the opposite: pre-gate, every tick.)
                     if self.ent[i].f63 & 3 == 0 {
+                        {
+                            let e = &self.ent[i];
+                            self.ent[i].f34 = Self::angle_between(e.x, e.y, tx, ty);
+                        }
                         self.mc2_avoid_packmate(i);
                     }
                     if self.ent[i].f63 as i16 % period == 0 {
@@ -2232,11 +2407,18 @@ impl Gen {
                         self.ent[i].f71 = 0;
                         break;
                     }
-                    if self.ent[i].f26 > 16 {
-                        let e = &self.ent[i];
-                        self.ent[i].f34 = Self::angle_between(e.x, e.y, tx, ty);
-                    }
+                    // LABEL_59's phase gate (EF:16521) jumps past
+                    // BOTH the `v21 > 16` re-aim and the pack-avoid
+                    // to LABEL_70 — the dive aims only on phase-0
+                    // ticks (mc2l3 t=242: slot 148's roll froze at
+                    // 1932 through its 7→8 entry tick, phase 10&3=2,
+                    // while the ungated port aim wrote 1936 — the
+                    // head standing right behind the castle ball).
                     if self.ent[i].f63 & 3 == 0 {
+                        if self.ent[i].f26 > 16 {
+                            let e = &self.ent[i];
+                            self.ent[i].f34 = Self::angle_between(e.x, e.y, tx, ty);
+                        }
                         self.mc2_avoid_packmate(i);
                     }
                     let dz = (tz as i32 - self.ent[i].z as i32).clamp(-64, 64);
@@ -2298,7 +2480,26 @@ impl Gen {
         Some(i)
     }
 
-    /// The wizard-validation wrapper deviation (:16613+).
+    /// The state-2 lock validator — retail's `sub_25D80` (patrol,
+    /// EF:16619) and `sub_25DE0` (idle, EF:16637) tails, VERBATIM: if
+    /// the wrapped state body left us at action 162, re-read
+    /// `word_0x96_150` and clear it unless the record is class 3 and
+    /// model 0 or 1, then zero `byte_0x46_70`.
+    ///
+    /// ⚠ THIS WAS LABELLED "the wizard-validation wrapper DEVIATION"
+    /// for months and it is nothing of the kind — it is the decompile
+    /// line for line. The mislabel survived because the scan it
+    /// guards had an invented `model65 <= 1` filter, which made the
+    /// clear unreachable and left the wrapper looking like an
+    /// unmotivated port-side extra. Both halves of that were wrong at
+    /// once: retail's `sub_1BF90` sweep has NO model test precisely
+    /// because this wrapper does it afterwards, and the difference is
+    /// live — the scan is nearest-in-cone, so a castle it must be
+    /// allowed to WIN is a castle that stops a farther wizard from
+    /// winning (mc2l3 t=10222, [`Gen::mc2_wizard_scan`]).
+    ///
+    /// *When a guard looks unmotivated, check what its caller was
+    /// prevented from producing before calling the guard the deviation.*
     fn m20_validate(&mut self, i: usize) {
         if self.ent[i].tick70 == M20_BASE + 2 {
             let t = self.ent[i].f146;
@@ -2321,7 +2522,30 @@ impl Gen {
             }
             2 => {
                 // sub_25E40 (:16649).
-                if self.mc2_target(self.ent[i].f146, ctx).is_none() {
+                //
+                // ⭐⭐⭐ THE HEAD TEST IS A BARE POINTER TEST (:16661-66)
+                // — `Entities_EA3E4[word_0x96_150] <= Entities_EA3E4[0]`
+                // and nothing else. NO life test, NO reap test, NO
+                // class test. The port asked `mc2_target`, which
+                // carries all three, and so dropped out of state 162
+                // on a target the chase would still have honoured.
+                //
+                // The life/reap guard is REAL but it lives one level
+                // down, in `sub_1C310`'s QUIET arm (EF:9297-9302,
+                // `mc2_chase_attack`) — reached only when the
+                // creature took no damage this tick. So a m20 that is
+                // itself being hit never re-tests its target at all,
+                // and the arms below have already committed by then.
+                //
+                // mc2l3 t=11731: the player is dead (life −720) and
+                // this m20 at slot 161 takes 160 damage on the same
+                // tick. Retail's `byte_0x46_70` 1 → 2 arm fires
+                // regardless — `dword_0x10_16` = 32, `actSpeed` =
+                // 2*minSpeed = 64 — then `sub_1C310` takes its
+                // damaged path and never looks at the target. The
+                // port bailed to 161 with speed 32, and left the 160
+                // damage sitting unconsumed in the inbox.
+                if !self.mc2_target_ptr(self.ent[i].f146) {
                     self.ent[i].tick70 = M20_BASE + 1;
                     self.ent[i].f126 = self.ent[i].f128;
                     return;
@@ -2329,12 +2553,36 @@ impl Gen {
                 self.snd(32, i);
                 match self.ent[i].f71 {
                     0 => {
-                        // Approach + (9,21) arcs; a landed thunk
-                        // commits the melee rush. (Retail also
-                        // gates the human on the mobilize counter —
-                        // MC2 flight state, not modeled; deliberate.)
-                        let v3 = self.mc2_chase_attack(i, M20_BASE, ctx, Self::mc2_atk_lob21);
-                        if v3 {
+                        // Approach + (9,21) arcs. ⭐⭐ THE COMMIT TEST
+                        // IS TARGET-KEYED AND AGAINST A WIZARD IT
+                        // DOES NOT READ THE ATTACK AT ALL (EF:16673-
+                        // 79): the chase runs either way, but
+                        //   v4 = (target is class-3 model-0)
+                        //        ? (target.mobilizeCounter == 0)
+                        //        : (attack == 0);
+                        //   if (!v4) byte_0x46_70 = 1;
+                        // — so a m20 only commits its melee rush on a
+                        // PARALYZED human, never on a landed lob. The
+                        // old note here called the counter "MC2 flight
+                        // state, not modeled"; `Mc2Ext::mobilize` has
+                        // modeled it all along and `Gen::mc2_mobilize`
+                        // is the pool-side mirror. mc2l3 t=1294: the
+                        // port's lob landed and set f71 = 1, retail
+                        // held 0 through the whole window, and the
+                        // rush doubled slot 145's speed to 64 at 1295.
+                        let hit = self.mc2_chase_attack(i, M20_BASE, ctx, Self::mc2_atk_lob21);
+                        let t = self.ent[i].f146;
+                        let wizard = t == PLAYER_TARGET
+                            || (t != 0
+                                && (t as usize) < self.ent.len()
+                                && self.ent[t as usize].class64 == 3
+                                && self.ent[t as usize].model65 == 0);
+                        let commit = if wizard {
+                            self.mc2_mobilize.0 != 0
+                        } else {
+                            hit
+                        };
+                        if commit {
                             self.ent[i].f71 = 1;
                         }
                     }

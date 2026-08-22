@@ -60,6 +60,11 @@ pub struct ReplayFile {
     /// refuses on.
     pub sim_pool_slots: Option<usize>,
     pub sim_awake_range: Option<u32>,
+    /// MC2 retail takes: the campaign REPLAY gate, derived from the
+    /// capture's own witness exactly as the conformance runner derives
+    /// it ([`mgcr::mc2_take_replayed`]). Scanned once at open — it is a
+    /// run-constant — and applied to the world at every anchor.
+    pub mc2_replayed: bool,
     /// The import pin the take was recorded under
     /// ([`mgc_sim::engine::world::World::import_pin`]); all-default
     /// for a native session, which needs no re-establishing.
@@ -118,6 +123,13 @@ impl ReplayFile {
             .map(mgcr::b64_decode)
             .transpose()?;
         let n = |key: &str| sim.and_then(|s| s.get(key)).and_then(|v| v.as_u64());
+        // The REPLAY gate is a property of the CAPTURE, not of the
+        // header, so it costs one scan to the first (14,5) scroll.
+        let mc2_replayed = if family == Family::Mc2 && source == ReplaySource::Retail {
+            mgcr::mc2_take_replayed(path)?
+        } else {
+            false
+        };
         Ok(ReplayFile {
             game: rec.header.game.clone(),
             level,
@@ -128,6 +140,7 @@ impl ReplayFile {
             sim_patches: s("patches"),
             sim_pool_slots: n("entity_pool_size").map(|v| v as usize),
             sim_awake_range: n("awake_range").map(|v| v as u32),
+            mc2_replayed,
             sim_import_pin: sim
                 .and_then(|s| s.get("import_pin"))
                 .map(|p| ImportPin {
@@ -147,7 +160,7 @@ impl ReplayFile {
                     },
                     human_yaw: pin_u64(p, "human_yaw") as u16,
                     human_yaw_prev: pin_u64(p, "human_yaw_prev") as u16,
-                    mc1_hand_bits: pin_u64(p, "mc1_hand_bits") as u32,
+                    hand_bits: pin_u64(p, "mc1_hand_bits") as u32,
                     mc1_cast_pose: {
                         let a = pin_i64s::<6>(p, "mc1_cast_pose");
                         mgc_sim::engine::world::PlayerPose {
@@ -282,6 +295,9 @@ pub struct ReplayDriver {
     family: Family,
     // Retail chain state.
     timg: Option<TerrainImage>,
+    /// The take's campaign REPLAY gate ([`ReplayFile::mc2_replayed`]),
+    /// re-applied to the world at every MC2 anchor.
+    mc2_replayed: bool,
     pristine: Option<Planes>,
     things: Option<ThingTable>,
     witness: recover::Mc2RespawnWitness,
@@ -295,7 +311,14 @@ pub struct ReplayDriver {
     segments: u64,
     steps: u64,
     graded: u64,
+    /// Clean boundaries BEFORE the first divergence — i.e. the horizon,
+    /// which is what `mgc-conform replay --brief`'s `clean=` means. The
+    /// two instruments' headline numbers are only comparable if this
+    /// one stops where that one stops.
     clean: u64,
+    /// Clean boundaries after it (a transient divergence recovers;
+    /// a permanent one never does).
+    clean_after: u64,
     skipped: u64,
     stick_unrec: u64,
     diverged: Option<(u64, String)>,
@@ -337,6 +360,7 @@ impl ReplayDriver {
             source: file.source,
             family: file.family,
             timg,
+            mc2_replayed: file.mc2_replayed,
             pristine,
             things,
             witness: recover::Mc2RespawnWitness::default(),
@@ -348,6 +372,7 @@ impl ReplayDriver {
             steps: 0,
             graded: 0,
             clean: 0,
+            clean_after: 0,
             skipped: 0,
             stick_unrec: 0,
             diverged: None,
@@ -361,10 +386,23 @@ impl ReplayDriver {
     /// `None` = the take ended (or a fatal record error) — the caller
     /// hands control back to the player.
     pub fn next(&mut self, sim: &mut Simulation) -> Option<FlightInput> {
-        match self.source {
+        let input = match self.source {
             ReplaySource::Port => self.next_port(sim),
             ReplaySource::Retail => self.next_retail(sim),
+        };
+        // ⭐ STAMP THE TAKE'S TICK FOR THE WORLD-SIDE PROBES. Every
+        // `MGC_*_TRACE` in the sim labels itself from
+        // [`mgc_sim::DEBUG_TICK`], and only the conform drivers had ever
+        // stamped it — so the app, the second retail instrument, ran the
+        // whole shared trace suite reading `t=0`. One line buys
+        // `MGC_CARPET_PROBE`, `MGC_WRITE_TRACE`, `MGC_MAIL_TRACE` and
+        // the rest on this driver, with the same tick numbering conform
+        // uses (the tick the upcoming step PRODUCES, which is the tick
+        // `grade` then reports).
+        if let Some((t, _)) = &self.prev {
+            mgc_sim::DEBUG_TICK.store(*t, std::sync::atomic::Ordering::Relaxed);
         }
+        input
     }
 
     /// The world was re-imported since the last call (the caller
@@ -385,7 +423,10 @@ impl ReplayDriver {
             self.steps, self.segments, self.graded, self.skipped, self.clean
         );
         match &self.diverged {
-            Some((t, lane)) => format!("{base}; DIVERGED since t={t} ({lane})"),
+            Some((t, lane)) => format!(
+                "{base} (+{} clean after); DIVERGED since t={t} ({lane})",
+                self.clean_after
+            ),
             None => format!("{base}; bit-exact throughout"),
         }
     }
@@ -423,7 +464,13 @@ impl ReplayDriver {
             self.graded += 1;
             let got = sim.state_hash();
             if want == got {
-                self.clean += 1;
+                // Clean = the horizon, same rule as the retail arm's
+                // grade.
+                if self.diverged.is_none() {
+                    self.clean += 1;
+                } else {
+                    self.clean_after += 1;
+                }
             } else if self.diverged.is_none() {
                 self.diverged = Some((tick.t, "hash".into()));
                 println!(
@@ -447,6 +494,9 @@ impl ReplayDriver {
         if self.segments == 0 {
             self.segments = 1;
         }
+        // The port arm keeps no `prev`, so it stamps its own tick (see
+        // [`ReplayDriver::next`]).
+        mgc_sim::DEBUG_TICK.store(tick.t, std::sync::atomic::Ordering::Relaxed);
         self.refresh_hud(tick.t);
         Some(flight_input_from(&input))
     }
@@ -596,6 +646,13 @@ impl ReplayDriver {
             let w = sim.world.as_mut().ok_or("no world")?;
             w.restore_planes(self.pristine.as_ref().expect("retail install"));
             w.restore_thing_table(self.things.as_ref().expect("mc2 install"));
+            // ⭐ THE CAMPAIGN REPLAY GATE IS PART OF THE TAKE'S WORLD.
+            // `build_world_mc2` hands it to the conformance runner at
+            // construction; the app builds its world through the level
+            // loader, which has no capture to read, so the driver must
+            // stamp it here — otherwise every MC2 take runs UNGATED and
+            // the (14,5) XP scrolls leak for the rest of the run.
+            w.set_mc2_level_replayed(self.mc2_replayed);
             let report = w
                 .retail_import_mc2(&st)
                 .map_err(|e| format!("import: {e}"))?;
@@ -640,7 +697,7 @@ impl ReplayDriver {
             // Retail's dw_0 bit 0x80 IS the barrel-roll command.
             barrel_roll: rp.move_byte & 0x80 != 0,
             mc1_move_byte: Some(rp.move_byte as u8),
-            mc2_cmd_speed: rp.mc2_cmd_speed,
+            mc2_cmd_speed: None,
             mc2_park: rp.mc2_park,
             ..FlightInput::default()
         };
@@ -666,21 +723,49 @@ impl ReplayDriver {
             self.refresh_hud(t);
             return;
         }
-        let lanes = match prev {
-            RetailPrev::Mc1(st) => conformance::pose_lanes_mc1(
-                &sim.carpet,
-                &st.ents[self.human_slot as usize],
-                &st.wizards[st.local_player as usize],
+        // The full lane set, so the microscope and the grader cannot
+        // disagree about what "the pose channel" is; `lanes` below is
+        // this filtered to the parting lanes.
+        let (all, extras) = match prev {
+            RetailPrev::Mc1(st) => (
+                conformance::pose_all_mc1(
+                    &sim.carpet,
+                    &st.ents[self.human_slot as usize],
+                    &st.wizards[st.local_player as usize],
+                ),
+                Vec::new(),
             ),
-            RetailPrev::Mc2(st) => conformance::pose_lanes_mc2(
-                &sim.carpet,
-                &st.ents[self.human_slot as usize],
-                &st.players[st.local_player as usize],
-            ),
+            RetailPrev::Mc2(st) => {
+                let e = &st.ents[self.human_slot as usize];
+                (
+                    conformance::pose_all_mc2(
+                        &sim.carpet,
+                        e,
+                        &st.players[st.local_player as usize],
+                    ),
+                    // Retail-only context: the death column's two tells
+                    // (the fall accumulator and the action index).
+                    vec![("f2c", e.f2c as i64), ("action45", e.action45 as i64)],
+                )
+            }
         };
+        conformance::emit_pose_window(t, &all, &extras);
+        let lanes: Vec<_> = all.into_iter().filter(|&(_, w, g)| w != g).collect();
         self.graded += 1;
         if lanes.is_empty() {
-            self.clean += 1;
+            // ⚠ CLEAN IS THE HORIZON, NOT A TALLY. It used to count
+            // every clean boundary in the whole take, so mc2l4 read
+            // "718 clean; DIVERGED since t=573" and the app's headline
+            // number meant something different from `mgc-conform
+            // --brief`'s `clean=`, which stops at the first divergence.
+            // Ticks that come back clean AFTER the horizon are still
+            // worth knowing (they say the divergence is transient), so
+            // they are counted separately and reported as such.
+            if self.diverged.is_none() {
+                self.clean += 1;
+            } else {
+                self.clean_after += 1;
+            }
         } else if self.diverged.is_none() {
             let (lane, want, got) = lanes[0];
             self.diverged = Some((t, lane.to_string()));
@@ -707,8 +792,10 @@ impl ReplayDriver {
             e.z as f32 / 256.0,
             e.y as f32 / 256.0,
             (e.yaw as u16 & 0x7FF) as f32 * GHOST_RAD,
-            // The MC2 wizard-carpet art family, human color row.
-            272 + mgc_sim::mc2::color_art(0) as u16,
+            // The MC2 wizard-carpet art family, human color row —
+            // row 44, NOT 272 (that one is the storm cloud; see
+            // `mc2::carpet_sprite_row`).
+            mgc_sim::mc2::carpet_sprite_row(0),
         ));
     }
 }
@@ -805,7 +892,7 @@ impl PortRecorder {
                         ],
                         "human_yaw": pin.human_yaw,
                         "human_yaw_prev": pin.human_yaw_prev,
-                        "mc1_hand_bits": pin.mc1_hand_bits,
+                        "mc1_hand_bits": pin.hand_bits,
                         "mc1_cast_pose": [
                             pin.mc1_cast_pose.x as i64,
                             pin.mc1_cast_pose.y as i64,
@@ -1064,6 +1151,38 @@ pub fn ghost_billboard(driver: &ReplayDriver, sess: &Session) -> Option<mgc_rend
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Opening an MC2 retail take DERIVES its campaign REPLAY gate, so
+    /// the app's driver can stamp the world with it exactly as
+    /// `build_world_mc2` stamps the conformance runner's. The app
+    /// hardcoded `false` for four sessions; mc2l0 is the one MC2 take
+    /// whose gate is genuinely clear, which is why it hid there and
+    /// showed on mc2l3 as a mover divergence 900 ticks after the
+    /// scrolls it actually leaked.
+    ///
+    /// Skips silently without the player's local captures
+    /// (`recordings/` is gitignored — CI has no takes).
+    #[test]
+    fn an_mc2_retail_take_carries_its_own_replay_gate() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../recordings");
+        let gate = |name: &str| {
+            let p = root.join(name);
+            p.exists()
+                .then(|| ReplayFile::open(&p).map(|f| f.mc2_replayed))
+                .transpose()
+                .expect("the take opens")
+        };
+        if let Some(g) = gate("mc2l3.mgcr") {
+            assert!(g, "mc2l3's scrolls are born at 0xD — the gate is SET");
+        }
+        if let Some(g) = gate("mc2l0.mgcr") {
+            assert!(!g, "mc2l0's scrolls live at 0xC — the gate is clear");
+        }
+        // MC1 takes have no such gate and must never scan for one.
+        if let Some(g) = gate("mc1l0.mgcr") {
+            assert!(!g, "the gate is MC2-only");
+        }
+    }
 
     /// The port loop, closed: record a world-less faithful session,
     /// reopen the file, replay it onto a fresh sim — every tick must

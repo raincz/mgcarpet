@@ -1,90 +1,270 @@
 {
-  "dir": "fixtures/mc2l3",
-  "pin_pose": "n1",
-  "fixtures": [
-    {
-      "t": 14,
-      "file": "the-14-2-cave-pillar-s-orient-rides-word-0x2c-44.mgcr",
-      "source": "mc2l3",
-      "note": "THE (14,2) CAVE PILLAR'S ORIENT RIDES word_0x2C_44: the THING wiring (EF:33236-41) parks the long-axis pick there and sub_5B100 splits koefX/koefY on it; @0x2A is dead. The uniform f44 import read @0x2A, so every pair re-imported orient 0 and an X-run pillar grew a TRANSPOSED 2x8 footprint \u2014 its GROW arm missed retail's convergence tick. mc2l3 t=15: slot 195 life retail 3 (built, sealed) port 1 (still growing)."
-    },
-    {
-      "t": 23,
-      "file": "the-cave-drip-spawner-reads-the-pose-settled-las.mgcr",
-      "source": "mc2l3",
-      "note": "THE CAVE-DRIP SPAWNER READS THE POSE SETTLED LAST TICK: sub_58630 (EF:40513-15) reads the local player's POOL entity in a pre-pass, before the wizard body runs \u2014 the wake-pass law's MC2 face. The conformance drivers feed pose@N as the arg, so the probe must read the human_pose_prev/human_yaw_prev echo the import seeds from the capture. mc2l3 t=24: probe y 41344 vs 41314 crosses the +128 cell round \u2014 the drip minted one row south (slot 127 y 148 vs 147)."
-    },
-    {
-      "t": 104,
-      "file": "fire-rides-the-consumed-move-byte-a-hud-click-is.mgcr",
-      "source": "mc2l3",
-      "note": "FIRE RIDES THE CONSUMED MOVE BYTE \u2014 A HUD CLICK IS NOT A CAST: retail's widget layer consumes a press over the spell panel before the fire bit ever reaches HandleMouseButtons, and the consumed byte on the pair's END record carries exactly that routing; the raw press-latch fold cannot (the latch's extra edges ARE the UI clicks). mc2l3 t=104: the equip press at press_pos (70,312) \u2014 the panel row \u2014 folded into a phantom left fireball, an extra (9,0) retail never fired."
-    },
-    {
-      "t": 108,
-      "file": "the-pane-select-replays-and-lands-on-both-hand-h.mgcr",
-      "source": "mc2l3",
-      "note": "THE PANE SELECT REPLAYS AND LANDS ON BOTH HAND HOMES: a recorded hand change across the pair replays as the equip (recover_pair_mc2's rebind law \u2014 the runner must fold it), and mc2_select_spell writes retail's ONE SpellIndexLeft/Right lane into both port homes \u2014 the book (the cast machine's read) AND Player::left/right (the import/obs lane). mc2l3 t=108: the (70,312) panel click's flip \u2014 retail hand_left Some(2), the port projected the stale Some(0)."
-    },
-    {
-      "t": 205,
-      "file": "the-m19-hover-rides-the-ctor-scratch-retail-0x10.mgcr",
-      "source": "mc2l3",
-      "note": "THE m19 HOVER RIDES THE CTOR SCRATCH: retail @0x10 = the ctor's slot%100 (:34290) then the attack case-2 hover roll (rand&0x3FF + target z, EF:16410-16); the case-3 bob (z += z<=hover ? +64 : \u221264 on v16&3==0, EF:16455-61) read the port's dead @0x2E as 0, so every imported firebug bobbed straight DOWN. f26 now imports from scratch10 \u2014 (5,19) joins the (5,0|27) club; M19_BASE=152, action 154 IS the attack. mc2l3 t=206: slot 151 z retail 115 port -13."
-    },
-    {
-      "t": 241,
-      "file": "the-castle-ball-s-arm-tick-neither-moves-nor-age.mgcr",
-      "source": "mc2l3",
-      "note": "THE CASTLE BALL'S ARM TICK NEITHER MOVES NOR AGES: sub_66D00's head (EF:58556) latches byte0&2, site-tests the launch pose and RETURNS \u2014 no polar step, no speed ease, no life count. The generic-flyer routing flew and aged the fresh ball one tick early on every lane. mc2l3 t=242: retail life 21 speed 464 at the launch pose; the port read life 20 speed 462, one step downrange."
-    },
-    {
-      "t": 242,
-      "file": "the-castle-ball-homes-on-its-dest-point-sub-66d0.mgcr",
-      "source": "mc2l3",
-      "note": "THE CASTLE BALL HOMES ON ITS DEST POINT: sub_66D00 eases yaw and pitch toward the axis_0x9A dest (the 4096-ahead ground target, dest z = terrain) at the behavior row's turn caps, speed eased 2/tick toward min. The generic flyer had no dest target and flew the launch attitude straight. mc2l3 t=243: retail turns 789->810 / 205->183 toward the site; the port held 789/205."
-    },
-    {
-      "t": 243,
-      "file": "the-castle-birth-stamps-aim-owner-and-the-ladder.mgcr",
-      "source": "mc2l3",
-      "note": "THE CASTLE BIRTH STAMPS AIM, OWNER, AND THE LADDER PRICE: sub_60480 and the standing even-tick block write yaw=-8192 / fov=0x4000 into the extents block's aim seats after every refresh (EF:61590-91 / 61098-99); the painter's id24 is the FUSED PARENT castle, not the owner wizard (obs recovers owner through it); and sub_60780's gate-suppressed SetSpell rides the HP/CAP stamp MID-TRANSFORM, re-pricing the book token at the fresh castle level while the cast window is still open \u2014 ladder[1]=10000, tier-0 divisor f28=101 -> 99. mc2l3 t=244: (3,2) applied_yaw -8192 v 200, (10,42) owner 127 v 167, (15,2) mana/mana_max 10000/99 v 1000/9."
-    },
-    {
-      "t": 244,
-      "file": "measured-terrain-disables-the-pad-reconstruct-an.mgcr",
-      "source": "mc2l3",
-      "note": "MEASURED TERRAIN DISABLES THE PAD-RECONSTRUCT AND THE STAGE BINDING SURVIVES DYING: on a measured take the import's castle-pad stamper wrote the FINISHED 48-byte pad over the true partial rise, so the pinned castle read ground 1536 where retail read 64 \u2014 no 19-tick rise, no per-tick crush sweep ('solves to a no-op on a finished map' is NOT a no-op mid-transform); and retail's StageVar1 byte lives until the record FREES (the reaction gate skips phases 4/5, EF:5050) where the port pruned on act_life<0. mc2l3 t=245: (3,2) z 64 v 1536, twelve crush-killed (5,19) sv1 1 v 0."
-    },
-    {
-      "t": 245,
-      "file": "the-crush-kill-the-corpse-s-mana-and-the-scatter.mgcr",
-      "source": "mc2l3",
-      "note": "THE CRUSH KILL, THE CORPSE'S MANA, AND THE SCATTER SPEED: the imported mid-rise painter carries the (10,42) crush arm (retail byte[2]&1 is per-class overloaded \u2014 fire no-broadcast AND F_BUILD_KILL) and the crush owner resolves through the parent castle's id24; TransformEntityToManaSphere_36BA0's tail zeroes ONLY playerEntityIndex@0x94, so the corpse keeps its 300 mana; and the scatter's rand%0x30+16 roll is stamped onto the sphere's actSpeed@0x82 (EF:26907). mc2l3 t=246: slot 147 life -1 v 600 (the pre-fix port kept it walking), slot 135 mana 300 v 0, (10,39) speed 53 v 32."
-    },
-    {
-      "t": 252,
-      "file": "the-m19-hit-arm-is-a-tail-arm-else-if-v1-1-ef-16.mgcr",
-      "source": "mc2l3",
-      "note": "THE m19 HIT ARM IS A TAIL ARM: else if (v1 <= 1) (EF:16565-69) latches f71=7, retargets the attacker and ENDS the dispatch \u2014 no move core, no rand, no dive until the next tick. The port ran the dive same-tick. mc2l3 t=253: slot 144 x/y/z/heading/speed/rand all one dive step downrange (speed 76 v 228, z 51 v 75)."
-    },
-    {
-      "t": 260,
-      "file": "possession-acquires-from-the-tick-top-ball-chain.mgcr",
-      "source": "mc2l3",
-      "note": "POSSESSION ACQUIRES FROM THE TICK-TOP BALL CHAIN GATED ON AWAKE: sub_67CB0 case 1's candidates = the dword_38523 chain (model 57 admitted on MC2) + possessable buildings + worm chains, ALL gated on the byte_0x39_57 awake byte \u2014 a sphere minted MID-TICK is INVISIBLE to this tick's acquisition, so the bolt flies straight at the cast attitude. The port's live-pool scan locked a just-scattered sphere. mc2l3 t=261: (9,1) slot 239 x/y/z/heading/pitch pulled off the straight line."
-    },
-    {
-      "t": 264,
-      "file": "the-newborn-balloon-is-not-retargeted-on-its-bir.mgcr",
-      "source": "mc2l3",
-      "note": "THE NEWBORN BALLOON IS NOT RETARGETED ON ITS BIRTH PASS: the spawn arm jumps past the roster retarget (goto LABEL_17), so a fresh balloon parks target-0 AT THE CASTLE Z until the next roster pass. The port's same-pass retarget ran the z servo toward ground+512. mc2l3 t=265: (3,3) slot 149 z retail 1536 (the castle z) port 2048."
-    },
-    {
-      "t": 265,
-      "file": "the-death-downgrade-re-prices-at-the-level-0-run.mgcr",
-      "source": "mc2l3",
-      "note": "THE DEATH DOWNGRADE RE-PRICES AT THE LEVEL-0 RUNG: sub_605E0 -> sub_60810 -> sub_60780 runs the gate-suppressed SetSpell on EVERY HP/CAP ladder stamp, downgrades included, so the dying castle's unwind re-prices the book token at base 1000 BEFORE the record frees. The port kept the level-1 price past the death. mc2l3 t=266: (15,2) slot 170 mana 9 v 99, mana_max 1000 v 10000."
-    }
-  ]
+ "dir": "fixtures/mc2l3",
+ "pin_pose": "n1",
+ "fixtures": [
+  {
+   "t": 14,
+   "file": "the-14-2-cave-pillar-s-orient-rides-word-0x2c-44.mgcr",
+   "source": "mc2l3",
+   "note": "THE (14,2) CAVE PILLAR'S ORIENT RIDES word_0x2C_44: the THING wiring (EF:33236-41) parks the long-axis pick there and sub_5B100 splits koefX/koefY on it; @0x2A is dead. The uniform f44 import read @0x2A, so every pair re-imported orient 0 and an X-run pillar grew a TRANSPOSED 2x8 footprint \u2014 its GROW arm missed retail's convergence tick. mc2l3 t=15: slot 195 life retail 3 (built, sealed) port 1 (still growing)."
+  },
+  {
+   "t": 23,
+   "file": "the-cave-drip-spawner-reads-the-pose-settled-las.mgcr",
+   "source": "mc2l3",
+   "note": "THE CAVE-DRIP SPAWNER READS THE POSE SETTLED LAST TICK: sub_58630 (EF:40513-15) reads the local player's POOL entity in a pre-pass, before the wizard body runs \u2014 the wake-pass law's MC2 face. The conformance drivers feed pose@N as the arg, so the probe must read the human_pose_prev/human_yaw_prev echo the import seeds from the capture. mc2l3 t=24: probe y 41344 vs 41314 crosses the +128 cell round \u2014 the drip minted one row south (slot 127 y 148 vs 147)."
+  },
+  {
+   "t": 104,
+   "file": "fire-rides-the-consumed-move-byte-a-hud-click-is.mgcr",
+   "source": "mc2l3",
+   "note": "FIRE RIDES THE CONSUMED MOVE BYTE \u2014 A HUD CLICK IS NOT A CAST: retail's widget layer consumes a press over the spell panel before the fire bit ever reaches HandleMouseButtons, and the consumed byte on the pair's END record carries exactly that routing; the raw press-latch fold cannot (the latch's extra edges ARE the UI clicks). mc2l3 t=104: the equip press at press_pos (70,312) \u2014 the panel row \u2014 folded into a phantom left fireball, an extra (9,0) retail never fired."
+  },
+  {
+   "t": 108,
+   "file": "the-pane-select-replays-and-lands-on-both-hand-h.mgcr",
+   "source": "mc2l3",
+   "note": "THE PANE SELECT REPLAYS AND LANDS ON BOTH HAND HOMES: a recorded hand change across the pair replays as the equip (recover_pair_mc2's rebind law \u2014 the runner must fold it), and mc2_select_spell writes retail's ONE SpellIndexLeft/Right lane into both port homes \u2014 the book (the cast machine's read) AND Player::left/right (the import/obs lane). mc2l3 t=108: the (70,312) panel click's flip \u2014 retail hand_left Some(2), the port projected the stale Some(0)."
+  },
+  {
+   "t": 205,
+   "file": "the-m19-hover-rides-the-ctor-scratch-retail-0x10.mgcr",
+   "source": "mc2l3",
+   "note": "THE m19 HOVER RIDES THE CTOR SCRATCH: retail @0x10 = the ctor's slot%100 (:34290) then the attack case-2 hover roll (rand&0x3FF + target z, EF:16410-16); the case-3 bob (z += z<=hover ? +64 : \u221264 on v16&3==0, EF:16455-61) read the port's dead @0x2E as 0, so every imported firebug bobbed straight DOWN. f26 now imports from scratch10 \u2014 (5,19) joins the (5,0|27) club; M19_BASE=152, action 154 IS the attack. mc2l3 t=206: slot 151 z retail 115 port -13."
+  },
+  {
+   "t": 241,
+   "file": "the-castle-ball-s-arm-tick-neither-moves-nor-age.mgcr",
+   "source": "mc2l3",
+   "note": "THE CASTLE BALL'S ARM TICK NEITHER MOVES NOR AGES: sub_66D00's head (EF:58556) latches byte0&2, site-tests the launch pose and RETURNS \u2014 no polar step, no speed ease, no life count. The generic-flyer routing flew and aged the fresh ball one tick early on every lane. mc2l3 t=242: retail life 21 speed 464 at the launch pose; the port read life 20 speed 462, one step downrange."
+  },
+  {
+   "t": 242,
+   "file": "the-castle-ball-homes-on-its-dest-point-sub-66d0.mgcr",
+   "source": "mc2l3",
+   "note": "THE CASTLE BALL HOMES ON ITS DEST POINT: sub_66D00 eases yaw and pitch toward the axis_0x9A dest (the 4096-ahead ground target, dest z = terrain) at the behavior row's turn caps, speed eased 2/tick toward min. The generic flyer had no dest target and flew the launch attitude straight. mc2l3 t=243: retail turns 789->810 / 205->183 toward the site; the port held 789/205."
+  },
+  {
+   "t": 243,
+   "file": "the-castle-birth-stamps-aim-owner-and-the-ladder.mgcr",
+   "source": "mc2l3",
+   "note": "THE CASTLE BIRTH STAMPS AIM, OWNER, AND THE LADDER PRICE: sub_60480 and the standing even-tick block write yaw=-8192 / fov=0x4000 into the extents block's aim seats after every refresh (EF:61590-91 / 61098-99); the painter's id24 is the FUSED PARENT castle, not the owner wizard (obs recovers owner through it); and sub_60780's gate-suppressed SetSpell rides the HP/CAP stamp MID-TRANSFORM, re-pricing the book token at the fresh castle level while the cast window is still open \u2014 ladder[1]=10000, tier-0 divisor f28=101 -> 99. mc2l3 t=244: (3,2) applied_yaw -8192 v 200, (10,42) owner 127 v 167, (15,2) mana/mana_max 10000/99 v 1000/9."
+  },
+  {
+   "t": 244,
+   "file": "measured-terrain-disables-the-pad-reconstruct-an.mgcr",
+   "source": "mc2l3",
+   "note": "MEASURED TERRAIN DISABLES THE PAD-RECONSTRUCT AND THE STAGE BINDING SURVIVES DYING: on a measured take the import's castle-pad stamper wrote the FINISHED 48-byte pad over the true partial rise, so the pinned castle read ground 1536 where retail read 64 \u2014 no 19-tick rise, no per-tick crush sweep ('solves to a no-op on a finished map' is NOT a no-op mid-transform); and retail's StageVar1 byte lives until the record FREES (the reaction gate skips phases 4/5, EF:5050) where the port pruned on act_life<0. mc2l3 t=245: (3,2) z 64 v 1536, twelve crush-killed (5,19) sv1 1 v 0."
+  },
+  {
+   "t": 245,
+   "file": "the-crush-kill-the-corpse-s-mana-and-the-scatter.mgcr",
+   "source": "mc2l3",
+   "note": "THE CRUSH KILL, THE CORPSE'S MANA, AND THE SCATTER SPEED: the imported mid-rise painter carries the (10,42) crush arm (retail byte[2]&1 is per-class overloaded \u2014 fire no-broadcast AND F_BUILD_KILL) and the crush owner resolves through the parent castle's id24; TransformEntityToManaSphere_36BA0's tail zeroes ONLY playerEntityIndex@0x94, so the corpse keeps its 300 mana; and the scatter's rand%0x30+16 roll is stamped onto the sphere's actSpeed@0x82 (EF:26907). mc2l3 t=246: slot 147 life -1 v 600 (the pre-fix port kept it walking), slot 135 mana 300 v 0, (10,39) speed 53 v 32."
+  },
+  {
+   "t": 252,
+   "file": "the-m19-hit-arm-is-a-tail-arm-else-if-v1-1-ef-16.mgcr",
+   "source": "mc2l3",
+   "note": "THE m19 HIT ARM IS A TAIL ARM: else if (v1 <= 1) (EF:16565-69) latches f71=7, retargets the attacker and ENDS the dispatch \u2014 no move core, no rand, no dive until the next tick. The port ran the dive same-tick. mc2l3 t=253: slot 144 x/y/z/heading/speed/rand all one dive step downrange (speed 76 v 228, z 51 v 75)."
+  },
+  {
+   "t": 260,
+   "file": "possession-acquires-from-the-tick-top-ball-chain.mgcr",
+   "source": "mc2l3",
+   "note": "POSSESSION ACQUIRES FROM THE TICK-TOP BALL CHAIN GATED ON AWAKE: sub_67CB0 case 1's candidates = the dword_38523 chain (model 57 admitted on MC2) + possessable buildings + worm chains, ALL gated on the byte_0x39_57 awake byte \u2014 a sphere minted MID-TICK is INVISIBLE to this tick's acquisition, so the bolt flies straight at the cast attitude. The port's live-pool scan locked a just-scattered sphere. mc2l3 t=261: (9,1) slot 239 x/y/z/heading/pitch pulled off the straight line."
+  },
+  {
+   "t": 264,
+   "file": "the-newborn-balloon-is-not-retargeted-on-its-bir.mgcr",
+   "source": "mc2l3",
+   "note": "THE NEWBORN BALLOON IS NOT RETARGETED ON ITS BIRTH PASS: the spawn arm jumps past the roster retarget (goto LABEL_17), so a fresh balloon parks target-0 AT THE CASTLE Z until the next roster pass. The port's same-pass retarget ran the z servo toward ground+512. mc2l3 t=265: (3,3) slot 149 z retail 1536 (the castle z) port 2048."
+  },
+  {
+   "t": 265,
+   "file": "the-death-downgrade-re-prices-at-the-level-0-run.mgcr",
+   "source": "mc2l3",
+   "note": "THE DEATH DOWNGRADE RE-PRICES AT THE LEVEL-0 RUNG: sub_605E0 -> sub_60810 -> sub_60780 runs the gate-suppressed SetSpell on EVERY HP/CAP ladder stamp, downgrades included, so the dying castle's unwind re-prices the book token at base 1000 BEFORE the record frees. The port kept the level-1 price past the death. mc2l3 t=266: (15,2) slot 170 mana 9 v 99, mana_max 1000 v 10000."
+  },
+  {
+   "t": 268,
+   "file": "the-tile-chain-imports-in-recorded-order-chain-o.mgcr",
+   "source": "mc2l3",
+   "note": "THE TILE CHAIN IMPORTS IN RECORDED ORDER \u2014 CHAIN ORDER IS LOAD-BEARING: the capture carries the per-entity chain words (next @0x16 = the lane sub_108B0/sub_10780 walk from mapEntityIndex, prev @0x18 = 0 at the head), so the importer rebuilds each cell chain by walking the recorded links and head-inserting in reverse \u2014 the MC1 recorded-order law's MC2 face (mc1l0 pair 2371 precedent). The old ascending rebuild (head = highest slot) reversed every first-hit tie: mc2l3 t=268, the possession bolt's endpoint cell (106,196) chains firebug 152 -> sphere 137 -> sphere 241; retail's claim probe passes 152 and CLAIMS 137, the canonical chain served 241 first \u2014 the bolt snapped to the wrong sphere and the (10,12) claim pulse minted 105/69/68 units off (slots 131+250 x/y/z, the first divergent pair)."
+  },
+  {
+   "t": 326,
+   "file": "the-build-done-stamp-resolves-through-the-fused.mgcr",
+   "source": "mc2l3",
+   "note": "THE BUILD-DONE STAMP RESOLVES THROUGH THE FUSED PARENT: the (10,42) painter's settle-end writes the parent castle's @0x2E = 2 through parentId @0x28 (EF:27753), the castle's action-5 case 2 hands build->standing (action 4, sub-state 0) later in the SAME walk, and the first standing tick drains the damage mailbox accrued during the build. The port's painter tick resolved its parent via f40 - set only at native mint (the import maps f40 from @0x26, which is 0 here) - so an imported painter finished MUTE and the castle idled in build sub-state 4: mc2l3 t=326, painter 160 reaps on the boundary, retail castle 252 stands while the port holds action 5 / sub-state 4 (the t=583-595 damage+death cluster is downstream of this castle standing on time). Parent now resolves through the fused id24 (the import recovers @0x28 there; both native ctors stamp id24 = f40 = parent)."
+  },
+  {
+   "t": 343,
+   "file": "the-balloon-target-read-is-identity-blind-addbal.mgcr",
+   "source": "mc2l3",
+   "note": "THE BALLOON TARGET READ IS IDENTITY-BLIND: AddBallon_60AB0 (EF:61779) gates only on target96 != 0 - no liveness, reap-mark or model test - re-bears (atan2) at the target record every tick and runs the LABEL_20 altitude servo even when the class-10 'ours' test (@0x94 vs the balloon's @0x1A) skips the move. mc2l3 t=343: balloon 162's target sphere 231 was reaped and re-minted as a (10,86) earlier in the SAME tick; retail re-bears at the new tenant (yaw 300) and settles z -16; the port's invented reap-mark gate (flags & 0x400 == 0) plus the model-39 stale-slot guard (clear f146 and return) skipped the whole tick (yaw 1728 held, z 1831, target cleared). The same two guards MC1's balloon mover shed 2026-08-12 (DEVIATIONS castle_balloons: 'the mover is BLIND'); both removed, the gate is now t != 0 alone (bounds-clamped), the recycled-record absorb is retail's own latent bug and the port's law."
+  },
+  {
+   "t": 354,
+   "file": "a-freed-mc2-slot-is-not-an-empty-slot-the-mc1-im.mgcr",
+   "source": "mc2l3",
+   "note": "A FREED MC2 SLOT IS NOT AN EMPTY SLOT (the MC1 importer's blind-tracker law, MC2 face): retail's free path clears the class byte and pushes the stack - every other byte stays - and blind target reads steer at whatever the record still holds. mc2l3 t=354: balloon 162's target96 = 247, a freed (0,39) ex-sphere; retail chases the corpse's stale position (yaw 914 via the class-0 plain-move arm, x/y step toward the residue), and the castle's roster pass retargets it to live sphere 156 later in the same walk; the port's retail_import_mc2 defaulted every class-0 slot to zeros, re-aiming the balloon at the ORIGIN (yaw 1354, x/y stepping toward 0,0). The importer now imports freed slots' stale bytes (class 0, not counted active, bad-row stand-in 59) - the exact block shape of the MC1 importer's freed-slot arm."
+  },
+  {
+   "t": 355,
+   "file": "the-objective-board-is-a-global-and-it-was-never.mgcr",
+   "source": "mc2l3",
+   "note": "THE OBJECTIVE BOARD IS A GLOBAL AND IT WAS NEVER IMPORTED: retail's per-player struct_0x3659C[8] (LS:190-96, stride 11 = IsLevelEnd + row cursor + the m32 one-pass pause + stage_0x3659F[8]) is read and written by sub_58F00_game_objectives at the frame tail (EF:40693) and gated on by the class-11 model-32 switches (stage_0x3659F[par1] == 2, EF:54369), so every pair ran the port's board as a free-running fiction and mc2l3 t=356 lost the WHOLE disposition-6 wave (17 records missing in port, and with them slot 53). The bytes were always in the capture: 0x3659C + 8*11 == 0x365F4, the stagevar base the decoder already read. The same pair pins the (10,11) scorch ring's subSpell home (@0x2A, EF:23510, not the dead @0x90) and the pack scan's tick-top roster walk (EF:9183 - model 20's roster is EMPTY for the rest of the frame the wave mints into, so retail's newborn finds no leader and stays at action 161)."
+  },
+  {
+   "t": 584,
+   "file": "the-balloon-sphere-is-the-last-pop-of-a-castle-d.mgcr",
+   "source": "mc2l3",
+   "note": "THE BALLOON SPHERE IS THE LAST POP OF A CASTLE-DEATH BURST: sub_5FCA0 (EF:61222-31) is a straight line sub_605E0 -> actionIndex=4 -> sub_5FD00 (the bank EJECTOR) -> sub_5FF50 (the ROSTER), and sub_605E0's level-0 death arm (EF:61645-61666) never touches the fleet - the balloons dissolve in sub_5FF50's v1<3 TAIL (EF:61436-45), which at quota 0 sweeps every register slot. So retail mints the BANK spheres first and the BALLOON sphere last. The port front-loaded the conversion into mc2_castle_downgrade's death arm (a REGISTERED deviation, DEVIATIONS 'mc2_castle_destroy (eject ordering)', now retired), which rotated the whole burst by one free-stack pop. mc2l3 t=584->585, castle 252 dies 1->0 holding 6300 = 6 x 1050 with fleet cargo 1200: retail pops 228,248,129,215,135,126 for the bank and 127 for the balloon; the port put the balloon sphere on 228 and every bank scatter slid one slot down, port[p_k] == retail[p_k-1] exactly. Second law in the same hunk: mc2_balloon_to_sphere was an impoverished second copy of TransformEntityToManaSphere_36BA0, which mc2_mana_spheres already implements verbatim - it dropped all three LCG draws, the yaw, the actSpeed, the word_0x2C_44 fall arc and the velocity seed, and carried an INVENTED ball_resize. Retail slot 127: yaw 1306 = (25497 % 0x71 + 1290 - 56) & 0x7FF, speed 56, f2c 64 = (1024-512)/8."
+  },
+  {
+   "t": 644,
+   "file": "the-mc2-mailbox-drain-moved-with-the-mover-the-c.mgcr",
+   "source": "mc2l3",
+   "note": "THE MC2 MAILBOX DRAIN MOVED WITH THE MOVER (the carpet-dispatch law's second face, class-3 model-2): with sub_5EFA0 back inside AddPlayer03_00_5E010 the human's damage and regen resolve at its walk slot instead of behind the whole walk, which re-phases every lane the drain feeds. mc2l3 t=644: the wizard castle at slot 252 reads life 15300 where the post-walk drain left 15600."
+  },
+  {
+   "t": 879,
+   "file": "a-drowned-projectile-is-left-at-the-terrain-z-of.mgcr",
+   "source": "mc2l3",
+   "note": "A DROWNED PROJECTILE IS LEFT AT THE TERRAIN Z OF THE CELL IT FLEW INTO: retail commits the clamped contact position BEFORE it reads the water tile (v16x.z = predictedAxis.z; CopyEntityPosition_57CF0, EF:63139-40; the generic core writes z in place at :62954), and the water arm below it (EF:63141-47) only spawns the (10,5) splash and disables drawing - it never moves the projectile again. The port's water arm returned without ever committing, so every splashing (9,0) kept its TICK-ENTRY z while x/y matched only by accident. mc2l3 t=879 slot 254 retail 0 port 50."
+  },
+  {
+   "t": 1311,
+   "file": "class-10-s-0x90-mana-lane-is-dead-and-f140-is-th.mgcr",
+   "source": "mc2l3",
+   "note": "CLASS 10'S @0x90 MANA LANE IS DEAD AND f140 IS THE PORT'S HOME FOR retail's subSpellIndex_0x2A_42: sub_507C0 (EF:36936) stamps the (10,66) PARALYZE ctor with subSpell 200 and the impact seam then overwrites BOTH sides' @0x2A with the flyer's carried payload (v11x->subSpellIndex_0x2A_42 = a1x->subSpellIndex_0x2A_42, EF:62993) - which is the amount mc2_debuff_stamp_tick mails. Census over all seven MC2 takes (levels 0/1/3/4/24/30, 8.7M class-10 obs rows, 49 distinct models): @0x90 is nonzero ONLY on the (10,39)/(10,57) mana spheres and the (10,45) buildings, and the decompile's only class-10 writers of mana_0x90_144 are the mana-sphere ctors (EF:24057 the wandering sphere, EF:25997 the split-into-N share). obs_project_mc2 published the port's amount in the GRADED mana lane against retail's dead 0. mc2l3 t=1312: slot 156's freshly minted (10,66) reads retail 0 / port 780."
+  },
+  {
+   "t": 1340,
+   "file": "my-sign32-is-1-0-never-1-ef-23864-s-meteor-quad.mgcr",
+   "source": "mc2l3",
+   "note": "my_sign32 IS -1/0, NEVER +1: EF:23864's meteor quad is (768*ring - my_sign32(768*ring)*5) >> 2, and engine_support.cpp:2962 returns -1 for a negative and 0 otherwise - so the -5 is a NO-OP on the only branch the ring counter ever takes (it cycles 0..10 via (f26+2)%11) and an ADD of 5 on the negative one. Reading it as a signum subtracted 5 on the positive branch and cost 2 units per ring step in BOTH the apitch and aroll lanes at once. mc2l3 t=1341: slot 163's (10,17) at ring 2 wants 768*2 >> 2 = 384; the port published 382."
+  },
+  {
+   "t": 1409,
+   "file": "a-launch-aims-from-the-caster-not-from-the-lifte.mgcr",
+   "source": "mc2l3",
+   "note": "A LAUNCH AIMS FROM THE CASTER, NOT FROM THE LIFTED SPAWN POINT: every creature launch thunk holds v2 = &a1x->position_0x4C_76 - the CASTER's - and hands THAT to both sub_581E0_maybe_tan2 and sub_58210_radix_tan before touching the new record's z: sub_1CC20 (9,0) bolt EF:9697-99, sub_1CCE0 EF:9725-27, sub_1CDA0 arrow EF:9753-55, sub_1D1A0 (9,21) lob EF:9865-68 - which even SAVES the spawned z in v7, computes the pitch, and only then writes v7+128 back - sub_1D460's 5-shot fan EF:9962-66, and the doomsday launcher aiming from the AVATAR (EF:13497-501) while spawning 640 ahead at z+768. So the z-lift is applied AFTER the aim and must not tilt it. None of them writes roll_0x20_32 or fov_0x22_34 either: those are sub_655C0's LOCK (EF:62775-76), which the flyer's own first tick runs. mc2l3 t=1410: the m20 at (31785, 28647, 927) lobs a (9,21) at the human - retail's radix_tan from z 927 gives pitch 1907, the port's from the lifted 1055 gave 1915."
+  },
+  {
+   "t": 2396,
+   "file": "the-one-shot-aim-acquisition-walks-the-tick-top.mgcr",
+   "source": "mc2l3",
+   "note": "THE ONE-SHOT AIM ACQUISITION WALKS THE TICK-TOP ROSTERS, NOT THE LIVE POOL: sub_67CB0 (EF:54710) scans its candidate lists through the chains the tick-top sweep built - the class-3 roster dword_38519 (EF:54783/54862/54892/54937, admitted on life >= 0 ALONE), the per-model class-5 buckets bytearray_38403x (EF:39987-40008, life >= 0 and actionIndex not in {0xB4,0xE8,0xEA}), the building chain dword_38527, and bucket 22 - re-asking NONE of those questions at the walk. Every liveness test was settled when the roster was BUILT, so a candidate that dies mid-tick stays lockable for the rest of the frame and one already dead at the tick top is invisible however alive its record reads. The port walked the live pool in four of its five lists (only the sphere list had been converted), so it acquired a different target and the whole homing pose followed. mc2l3 t=2396: the (9,0) fireball at slot 152 bears 483 in retail where the port bore 494, carrying x/y/z/pitch with it. Same story at t=2400 on slot 159 - duplicate coverage, deliberately not cut. Ledger: 2026-08-23c."
+  },
+  {
+   "t": 2703,
+   "file": "mc2-point-damage-snowballs-sub-11900-ef-4375-is.mgcr",
+   "source": "mc2l3",
+   "note": "MC2 POINT DAMAGE SNOWBALLS: sub_11900 (EF:4375) is MC2's single-target mailbox write and its two branches are the exact INVERSE of MC2's own AREA protocol at EF:4021-24 - it OVERWRITES while a source is still pending and ACCUMULATES onto the stale amount once a reader has cleared it. Readers clear the SOURCE and never the amount (EF:5407), so the residue is live ammunition, exactly like MC1's sub_12B50. Its callers are ALL of the three melee thunks sub_1CE80/sub_1CED0/sub_1CF20 (EF:9780/9794/9808) and the (10,65)/(10,66) debuff stamps' sub_38F70 (EF:28440); the port routed both through the area writer. mc2l3 t=2704: the human's inbox stands at (780, src 0) - consumed, residue standing - a (9,21) lob detonates into a (10,66) paralyze at slot 137 which mails 780 more, and the drain at slot 167 takes retail's accumulated 1560 where the port's overwrite left 780 (life 8440 v 9220)."
+  },
+  {
+   "t": 5423,
+   "file": "the-mana-sphere-has-a-cave-ceiling-clamp-transfo.mgcr",
+   "source": "mc2l3",
+   "note": "THE MANA SPHERE HAS A CAVE-CEILING CLAMP: TransformArcherToMana_35940's tail (EF:26256-63) caps the stepped z at sub_10C60(pos) - array_0x52_82.fov and forces the lift to -abs(lift) - the ceiling twin of the ground rebound the port already carried, and MC2-ONLY because MC1 has no ceiling plane. It must land BEFORE the grounded test, whose retail form (v22 == pred.z, EF:26265) compares the terrain altitude against the FULLY clamped z. mc2l3 t=5424: sphere 234 arcs from z 2937 at lift -5 and retail parks it on 2913 - the ceiling less its own fov - where the port flew on to 2932."
+  },
+  {
+   "t": 5425,
+   "file": "a-wedged-mana-sphere-fans-for-an-opening-it-does.mgcr",
+   "source": "mc2l3",
+   "note": "A WEDGED MANA SPHERE FANS FOR AN OPENING, IT DOES NOT STOP: EF:26192-26239 - a sphere whose stepped position pokes the rock (sub_11E70, Terrain.cpp:2152) takes actSpeed 256 and searches +/-170 at a time out to +/-1020 (v30 alternating sign, v32 advancing only on the way back to +1), each candidate probed from the CURRENT position rather than the stepped one and dropped onto the terrain; the first opening becomes BOTH the yaw and the roll. If all twelve poke, retail nudges +64/+64 and - its own quirk - leaves z at the LAST probe's terrain altitude, sampled at an x/y it then discards. Either way the lift is slammed to -128. Retail's v35 arm (skip the fan) is the COLLECTOR TETHER, which the port returns out of well above, so the ballistic path only ever runs with v35 = 0. mc2l3 t=5426: sphere 234 wedges under the rock and retail relaunches it at speed 256 on a fanned heading (x, y, z, heading and speed all move)."
+  },
+  {
+   "t": 5613,
+   "file": "a-building-s-footprint-clear-soft-kills-scenery.mgcr",
+   "source": "mc2l3",
+   "note": "A BUILDING'S FOOTPRINT CLEAR SOFT-KILLS SCENERY, IT DOES NOT FREE IT: sub_57390's class-2 arm (EF:39763-66) is DisableEntityDrawing04_57F10 (EF:40332-35), a one-line byte[1] |= 4 = our 0x400 \u2014 the static stays a class-2 GHOST, still tile-linked and OFF the free stack, until the next tick-top reap or a mid-tick disposition fire sweeps it through mc2_rebuild_free's ghost loop, which hands the slots back ASCENDING. The port called free_entity, so 92/96/97 hit the free stack mid-tick and every later allocation rotated. mc2l3 t=5614: retail's dis-9 payload takes 92 for its (11,22) kill-watch where the port had already spent 92 on a mana sphere and 96 on a projectile \u2014 0 missing / 0 extra, a pure permutation of 7 records over a fixed slot set. MC1's twin build_footprint_kill has carried the soft kill since mc1l0 t=3855."
+  },
+  {
+   "t": 5706,
+   "file": "the-m9-arrow-s-launch-lift-is-the-caster-s-fov-e.mgcr",
+   "source": "mc2l3",
+   "note": "THE M9 ARROW'S LAUNCH LIFT IS THE CASTER'S FOV EXTENT, NOT ITS ROLL - AND THE DECOMPILE SAYS OTHERWISE. sub_1CDA0 (EF:9756) reads `v3x->position_0x4C_76.z += a1x->array_0x52_82.roll;` and the measurement cannot be reconciled with it. mc2l3 t=5707: the m9 archer at slot 225 stands at z 1124 wearing the extent quad 128/86/86/128 and fires a (9,13) arrow into recycled slot 237. Every other lane of the launch is bit-exact on both sides - yaw 1111, pitch 1963, speed 384, x 47782, y 3240, the arrow's own quad 30/44/44/60 - so the whole 42-unit delta is in the BIRTH z: the same-tick flight step is (384 * SIN[1963]) >> 16 = -100, retail's final 1352 implies birth 1252 = 1124 + 128 (the .fov/.yaw member, +0x58), and the port's .roll (+0x56) = 86 gives the measured 1310. THE VALUE IS MEASURED; THE NOUN IS A THREE-WAY TIE THIS CORPUS CANNOT BREAK - SetEntityIndexAndRot_49CD0 (EF:32842-45) sets .yaw == .fov == rot_speed_8/2 and the m9 only ever wears rows 201/202 through that plain path, so .yaw, .fov and a literal 128 are indistinguishable here forever, and the immediate family does all three (sub_1CC20 EF:9699 .fov, sub_1CCE0 EF:9728 .fov/2, sub_1D1A0 EF:9847 a bare literal). .fov is chosen as the family idiom: EF:9756 is the ONLY `z += ....roll` in all 63,636 lines against 30+ .fov z-lifts, and it is one struct member away. Provenance checked - no //fix marker, and the line entered EventsFunctions.cpp via a file SPLIT commit, so it is most likely original decompiler output (a struct-member mis-attribution) rather than a hand edit. The ordering hypothesis was KILLED first: AddEventToMap_57D70 (EF:40315-29) copies the axis verbatim with no clamp, so pre-lifting into the ctor and lifting after it are the same computation. Also landed on the same thunk: sub_49E10(v3x, 203) (EF:9764) re-stamps the arrow's sprite row over the ctor's own 195, geometry-safe because rows 195/203 are both 18x24 in the day bank. Free run: mc2l3 5706 -> 6444. Ledger: 2026-08-24f."
+  },
+  {
+   "t": 7884,
+   "file": "a-creature-drops-its-attack-run-the-tick-the-pla.mgcr",
+   "source": "mc2l3",
+   "note": "A CREATURE DROPS ITS ATTACK RUN THE TICK THE PLAYER DIES: every caller of sub_1ED30 guards the resolved target with `v7x->life_0x8 < 0 || v7x->byte[1] & 4` (HitFirebug_25610 EF:16360) and nothing in that test knows the record is the human's \u2014 the carpet is a pool entity in retail like any other. The port's mc2_target short-circuited PLAYER_TARGET to an unconditional Some, so the liveness test that every pooled target got was the one the human never did. mc2l3 t=7885, the tick slot 167 takes life 230 -> -670: three (5,19) firebugs above the carpet's walk slot take retail's LABEL_92 \u2014 actionIndex 154 -> 153 (attack -> idle) and actSpeed -> minSpeed 76 \u2014 where the port held all three in the attack run. Wired through ctx.pdead, which already existed for exactly this and is now re-published mid-walk at the carpet's own dispatch so a creature ABOVE the carpet reads the death on its own tick."
+  },
+  {
+   "t": 9816,
+   "file": "the-mana-magnet-aura-s-range-is-a-32-bit-square.mgcr",
+   "source": "mc2l3",
+   "note": "THE MANA-MAGNET AURA'S RANGE IS A 32-BIT SQUARE AND THE DRAGGED SPHERE WRITES ITS OWN HEADING: sub_38D80 (EF:28371) compares the raw squared xy distance straight against dword_0x10_16, and every writer stores (k<<8)^2 - the ctor's 12,845,056 (EF:36825) and the possession impact's copy of the bolt's own value (EF:59053). The port's field home is the TILE RADIUS, and the importer's catch-all `as i16` truncated every multiple of 65536 to exactly 0, so EVERY imported aura ran at range 0 and dragged nothing. Paired with it, TransformArcherToMana_35940 has the SPHERE write yaw_0x1C_28 = tan2(sphere, aura) itself before it flies (EF:26101) - the MC1 ch4 twin already did this; the MC2 half threw the aura slot away. mc2l3 t=9816 slot 168: retail heading 960, port 0."
+  },
+  {
+   "t": 10296,
+   "file": "the-mc2-mana-tail-is-part-of-the-carpet-s-dispat.mgcr",
+   "source": "mc2l3",
+   "note": "THE MC2 MANA TAIL IS PART OF THE CARPET'S DISPATCH: EF:59996-60033 applies manaRegen and RE-SELECTS it at the end of AddPlayer03_00_5E010, so a token BELOW the carpet stamps mana_delta and this apply lands it in the same frame while one ABOVE pays next frame \u2014 retail's below-carpet ordering law itself, where the port applied at the TOP of the turn and faked the phase with three stashes (mc2_applied_regen's take-back, the mc2_regen_owed pay-back window, and mc2_gate_purse so the cast gate could still read the pre-apply purse; all three deleted). mc2l3 t=10296: the human reads life 9540 where the pre-walk apply left 9535. A/B-attributed \u2014 reverting only the tail's placement puts this pair dirty again and leaves t=644 and mc2l0 t=4133 clean."
+  },
+  {
+   "t": 11730,
+   "file": "the-m20-s-state-2-head-is-a-bare-pointer-test-su.mgcr",
+   "source": "mc2l3",
+   "note": "THE M20'S STATE-2 HEAD IS A BARE POINTER TEST: sub_25E40 (EF:16661-66) validates word_0x96_150 with `Entities_EA3E4[target] <= Entities_EA3E4[0]` and NOTHING else \u2014 no class test, no life test, no reap test. The port asked mc2_target, which carries all three, and so dropped out of action 162 on a target the chase would still have honoured. The life/reap guard is real but it lives one level down in sub_1C310's QUIET arm (EF:9297-9302), reached only when the creature took no damage this tick \u2014 so a m20 that is itself being hit never re-tests its target at all, and the byte_0x46_70 arms have already committed by then. mc2l3 t=11731: the player is dead (life -720) and the m20 at slot 161 takes 160 damage the same tick; retail's 1 -> 2 arm fires regardless (dword_0x10_16 = 32, actSpeed = 2*minSpeed = 64) and sub_1C310 takes its damaged path, where the port bailed to 161 with speed 32 and left the 160 sitting unconsumed in the inbox."
+  },
+  {
+   "t": 14610,
+   "file": "bldgprm-s-77th-record-is-not-in-the-file-and-the.mgcr",
+   "source": "mc2l3",
+   "note": "BLDGPRM'S 77TH RECORD IS NOT IN THE FILE AND THE VILLAGER LOTTERY CAN RAISE IT: str_D93C0_bldgprmbuffer is std::array<...,77> while DataFileIO::Read fills only 76*sizeof(record) (EF:38328) and BLDGPRM.DAT is 304 bytes \u2014 exactly the 76 it reads. Index 76 is therefore the four bytes at 0xD93C0 + 76*4 = 0xD94F0, which is str_D94F0_bldgprmbuffer's initialised {0xAA,0x00,0x63,0x0D}. sub_232C0 draws `rand % 0x3C + 17`, whose maximum is exactly 76, and takes the index outright when byte_2 & 2 \u2014 which 0x63 has. mc2l3 t=14611 pins all four bytes on four separate lanes of one newborn (10,45) at slot 199: b46 (byte_0x46_70) 76, f2a (word_0 -> subSpellIndex) 170 = 0x00AA, b38 35 = 33|2 so byte_2 & 8 is clear, b3d (fontTypeIndex <- byte_3) 13 = 0x0D. MSPRD00 row 76 is a 0x0 footprint, so the site test also runs its smallest box \u2014 filtered to the 76 real rows the port drew id 19 (6x4) and vetoed on roughness a plot retail builds on."
+  },
+  {
+   "t": 14913,
+   "file": "the-fireball-s-one-shot-yaw-nudge-is-written-unm.mgcr",
+   "source": "mc2l3",
+   "note": "THE FIREBALL'S ONE-SHOT YAW NUDGE IS WRITTEN UNMASKED: sub_65610's servo masks both axes (HIBYTE(v5) &= 7u EF:62798, HIBYTE(v7) &= 7u EF:62803) but sub_65C20's one-shot acquisition arm writes the sum RAW (v4 = v3 * sub_582F0(yaw, roll) + yaw; a1x->yaw_0x1C_28 = v4, EF:63117-19, same in the shielded arm at :63100-02). The port carried the servo's 11-bit mask across to the one-shot. The fireball's yaw legally leaves 0..2047 and the capture records it: mc2l3 t=14913 slot 19 retail 2054 (= 2048 + 6) where the masked port wrote 6."
+  },
+  {
+   "t": 15418,
+   "file": "a-zero-size-building-template-is-a-parity-test-n.mgcr",
+   "source": "mc2l3",
+   "note": "A ZERO-SIZE BUILDING TEMPLATE IS A PARITY TEST, NOT A SKIP: the ch0 footprint pass (EF:4082-88) has no size test \u2014 put w = h = 0 through its expression and both terms vanish, so v22 = wtx, v20 = wty and the index is 0 when wtx + wty is EVEN and -2 when it is ODD. The port carried a defensive `w == 0 -> continue` with no line behind it. It is reachable through BUILD.TAB's 77th entry (offset 80064 = BUILD.DAT's exact length, 0x0), whose data pointer sits one past the blob: index -2 reads the last byte, 0xFF, a miss; index 0 reads the byte after the buffer. mc2l3 t=15419 decides it \u2014 the (10,45) raised at 14611 stands at (46080,17920) = tile (180,70), sum 250, EVEN, and the (10,0) burst on top of it broadcasts 160 which retail's building takes (life 170000 -> 169840, word_0x26_38 -> the human)."
+  },
+  {
+   "t": 15905,
+   "file": "the-castle-s-shake-countdown-is-an-early-return.mgcr",
+   "source": "mc2l3",
+   "note": "THE CASTLE'S SHAKE COUNTDOWN IS AN EARLY RETURN: in EndOfCastleProjectile_5F8F0 the ground refresh (:61091), the playerEntityIndex echo (:61093) and the ENTIRE even-phase block \u2014 sub_5FD00 eject, extents, aim lift, sub_5FF50, absorb \u2014 all sit INSIDE the `else` of `if (word_0x30_48)`. The countdown arm is three statements: word_0x30_48--, sub_5F890(a1x,1), and its own ground refresh. The port ran the whole tail during the countdown, on a comment that asserted the opposite and admitted no corpus pair covered it. mc2l3 t=15904 the player self-destructs the castle: the destroy handler arms word_0x30_48 = 5 and maxMana reprices 78600 -> 38800, leaving mana 38816 sixteen OVER cap for the whole countdown. Retail ejects nothing on any of those ticks \u2014 38816 stands from 15904 to 15910 across two even phases \u2014 because sub_5FD00 is never reached, where the port spilled a 16-mana (10,39) into slot 180 at t=15906, a slot retail leaves on the free stack."
+  },
+  {
+   "t": 15909,
+   "file": "the-demolish-witness-has-no-action-clause-retail.mgcr",
+   "source": "mc2l3",
+   "note": "THE DEMOLISH WITNESS HAS NO ACTION CLAUSE: retail's PlayerAction 0x2A is three lines (EF:37991-96) and tests NOTHING about the castle \u2014 the recovery required action45==6, which only holds when the press lands on a castle standing at rest, so every press that landed mid-build-state-machine was silently dropped. mc2l3 t=15910: the self-destruct's second rung, castle 252 at action 5 / word_0x2E_46 3 \u2014 retail writes life -1, the port left 79999 and the whole demolish ladder (and the re-site that opens the sealed chamber) never happened."
+  },
+  {
+   "t": 16247,
+   "file": "the-castle-un-stamp-s-jitter-rng-is-the-staged-s.mgcr",
+   "source": "mc2l3",
+   "note": "THE CASTLE UN-STAMP'S JITTER RNG IS THE STAGED SCRATCH ENTITY: sub_605E0 (EF:61629-36) hands RemoveCastleStage_385C0 a staged Entities_EA3E4[0], not the castle, so every 9377*rand+9439 in the height arm (EF:28149-60) lands on SLOT 0 and the castle's own rand does not move. mc2l3 t=16248, castle 162 level 1 -> 0: retail's slot 0 goes 0 -> 46293 (107 draws) with owner28 162 / b46 1 while the castle holds 29231 on both sides; the port drew 103 times on the castle and sourced the heights from the wrong chain."
+  },
+  {
+   "t": 18147,
+   "file": "the-castle-guard-half-walks-the-owner-register-n.mgcr",
+   "source": "mc2l3",
+   "note": "THE CASTLE GUARD HALF WALKS THE OWNER REGISTER, NOT A CENSUS: sub_5FF50's guard tail (EF:61483-508) drives 0..quota over array_0x5C_92, and a STALE slot is cleared and RE-ARMS the 16-pass cooldown WITHOUT spawning. mc2l3 t=18148: the re-sited castle 254 (level 3, quota 4) with zero live (5,15) anywhere latches word_0x2C_44 0 -> 16 and mints nothing, because the register it inherited from the demolished castle still named four dead guards; the port's census read 0 < 4 and spawned into slot 245 - the record retail frees that very tick."
+  },
+  {
+   "t": 18619,
+   "file": "the-turret-aims-before-the-muzzle-lift-and-at-th.mgcr",
+   "source": "mc2l3",
+   "note": "THE TURRET AIMS BEFORE THE MUZZLE LIFT, AND AT THE TARGET'S Z-BOX CENTRE: sub_6DCA0 is handed the PIECE's own position, sub_655C0 runs on the shot as spawned, and only then does EF:30296 add array_0x52_82.yaw - so the elevation is one sprite-half-height too shallow, and sub_655C0's own sub_65580/sub_655A0 bracket raises the TARGET by its f78 (Ent::aim_z). mc2l3 t=18620, turret 235 at z 2218 with f78 100 shooting the (5,19) at 226: retail's shot carries pitch 270, the port's 285."
+  },
+  {
+   "t": 18620,
+   "file": "the-lightning-beam-detonates-after-its-trail-and.mgcr",
+   "source": "mc2l3",
+   "note": "THE LIGHTNING BEAM DETONATES AFTER ITS TRAIL, AND THE COUNTDOWN IS INCLUSIVE: sub_66610 (EF:63583) is a bare walk + blocker test whose whole hit arm is DisableEntityDrawing04 - no clamp, no impact - and sub_66750 lays steps*8+1 nodes starting ON THE MUZZLE before spawning the (10,23) blast at v20x (EF:58401). mc2l3 t=18621: retail allocates 148 records in one tick, 147 trail nodes and the blast LAST at slot 350; the port detonated during the march and took the tick's first pop (slot 114)."
+  }
+ ]
 }

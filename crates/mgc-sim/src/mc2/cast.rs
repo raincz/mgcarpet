@@ -37,7 +37,7 @@
 //!   `sub_69AB0` build-queue variant is OPEN; the MC2 mana ladder
 //!   (L:1729-55) applies either way.
 
-use crate::engine::features::{Gen, lcg32};
+use crate::engine::features::Gen;
 use crate::engine::world::{AimLock, LifeState, PlayerPose, World};
 use crate::mc1::mobs::{MobCtx, PLAYER_TARGET};
 use crate::mc2::spells::Mc2SubSpell;
@@ -506,15 +506,48 @@ impl World {
     /// `GetSpellManaCost_6D710` (L:1714): the tier's `manaCost_6`;
     /// the castle spell (2) rescales to the upgrade ladder at the
     /// OWN castle's current entity level (L:1729-55 — the verbatim
-    /// table, default rung 300M). The `byte_0x1BE_446` +3000 arm
-    /// (castle-less surcharge, L:1723-26) is OPEN — field meaning
-    /// untraced; omitted.
+    /// table, default rung 300M), plus the `byte_0x1BE_446` +3000
+    /// RE-CAST SURCHARGE (see [`World::mc2_recast_surcharge`]).
     pub(crate) fn mc2_spell_mana_cost(&self, spell: usize, tier: usize) -> i32 {
+        self.mc2_spell_mana_cost_at(spell, tier, self.player_castle())
+    }
+
+    /// [`Self::mc2_spell_mana_cost`] against an EXPLICIT castle —
+    /// retail's `CastleEntityIndex_0x3A_58` as it stood when the
+    /// pricing ran. The ladder-sync drain passes the castle whose
+    /// stamp mailed it, because by drain time that castle may already
+    /// carry `0x400` and vanish from `player_castle()` (the DYING
+    /// level-0 castle — see the drain's own note in world.rs).
+    pub(crate) fn mc2_spell_mana_cost_at(
+        &self,
+        spell: usize,
+        tier: usize,
+        castle: Option<usize>,
+    ) -> i32 {
         let Some(row) = self.g.assets.spells.get(spell) else {
             return 0;
         };
         let base = row.tiers[tier.min(2)].mana_cost;
         if spell == 2 {
+            // THE +3000 RE-CAST SURCHARGE (L:1723-26 / L:1776-79) —
+            // UNCONDITIONAL, and deliberately NOT on the
+            // `castle_recast_cost` toggle (player-ruled 2026-08-23c,
+            // reversing the initial ruling once the provenance was
+            // understood). That toggle relieves MC1's first-castle
+            // LOCKOUT, which is an unpatched retail BUG: MC1 never
+            // re-stamps the cached price on castle death, so ANY loss
+            // prices the rebuild at CAP[0] = 5,000 against a 1,000
+            // purse. THIS is not a bug — it is MC2's DESIGNED
+            // replacement for that accident: the base drops to 1,000,
+            // a destroyed castle is immediately rebuildable, and the
+            // +3,000 lands only when the latch is set, which only a
+            // VOLUNTARY level-1 demolish can do (`PlayerAction 0x2A`,
+            // EF:37993-95 — no other writer exists). Suppressing
+            // designed behaviour under a bug-relief switch would make
+            // the patched arm LESS faithful for no gameplay reason.
+            // `MGC_NO_MC2_RECAST_SURCHARGE=1` remains the A/B arm.
+            let surcharge =
+                self.mc2_recast_surcharge && !crate::engine::world::mc2_recast_surcharge_off();
             // `GetSpellManaCost_6D710` (L:1714-85): the castle upgrade
             // cost is the OWN castle level's ladder rung times the
             // spell-LEVEL (tier) multiplier — this is why a fire/
@@ -522,23 +555,17 @@ impl World {
             // but-uncollected mana than the pool can hold, so you
             // can't over-build (docs/spell-audit/castle-and-cost.md).
             // With no own castle, retail returns the tier's base
-            // manaCost (L:1717-21). The `byte_0x1BE_446` +3000
-            // rebuild surcharge is still OPEN (field untraced).
-            let Some(c) = self.player_castle() else {
-                return base;
+            // manaCost — NOT a ladder rung, and with NO tier multiply
+            // (L:1717-21); the surcharge still applies on top.
+            let Some(c) = castle else {
+                return base.saturating_add(if surcharge { 3000 } else { 0 });
             };
-            const LADDER: [i64; 8] = [
-                1000,
-                10000,
-                20000,
-                40000,
-                80000,
-                160000,
-                320000,
-                300_000_000,
-            ];
+            // The MC2 PRICE ladder — its own per-game definition, see
+            // [`crate::mc2::castle::MC2_CASTLE_COST`]. NOT MC1's
+            // `Gen::CASTLE_CAP` (which fuses price and capacity) and
+            // NOT MC2's own `MC2_CASTLE_CAP` (capacity).
             let lvl = self.g.ent[c].f26.clamp(0, 7) as usize;
-            let mut result = LADDER[lvl];
+            let mut result = crate::mc2::castle::MC2_CASTLE_COST[lvl];
             if lvl < 7 {
                 // The tier multiplier (L:1725-33): ×1.25 / ×1.5 via the
                 // 320/256 · 384/256 fixed-point idiom (round toward
@@ -549,6 +576,16 @@ impl World {
                     2 => (result * 384) >> 8,
                     _ => result,
                 };
+            }
+            // AFTER the multiply, and at LEVEL 0 ONLY. Retail's
+            // `add3000` local is provably still false on the level-≥7
+            // and level-≠0 returns (L:1758-72) — it is set only in the
+            // castle-less arm (L:1723-26) and in the level-0 tail
+            // (L:1776-79). Measured: galore t=32600, L0 at tier 2,
+            // retail 4500 = (1000·384>>8) + 3000, which is what pins
+            // the multiply as preceding the add.
+            if lvl == 0 && surcharge {
+                result += 3000;
             }
             return result.clamp(0, i32::MAX as i64) as i32;
         }
@@ -583,6 +620,12 @@ impl World {
     /// manifestation. Mid-cast, the change is deferred (`word_0x2C_44
     /// = tier+1`, applied by `sub_6D880` when the timer expires).
     pub(crate) fn mc2_set_spell(&mut self, m: usize, tier: u8) {
+        self.mc2_set_spell_at(m, tier, self.player_castle());
+    }
+
+    /// [`Self::mc2_set_spell`] pricing against an EXPLICIT castle —
+    /// the ladder-sync drain's entry point (see world.rs's drain).
+    pub(crate) fn mc2_set_spell_at(&mut self, m: usize, tier: u8, castle: Option<usize>) {
         let spell = self.g.ent[m].model65 as usize;
         let Some(row) = self.g.assets.spells.get(spell) else {
             return;
@@ -594,7 +637,7 @@ impl World {
             return;
         }
         let sub = row.tiers[t];
-        let cost = self.mc2_spell_mana_cost(spell, t);
+        let cost = self.mc2_spell_mana_cost_at(spell, t, castle);
         let e = &mut self.g.ent[m];
         e.f71 = t as u8;
         e.f30 = sub.sub_spell.clamp(0, u16::MAX as i32) as u16;
@@ -709,6 +752,20 @@ impl World {
         if owner != PLAYER_TARGET {
             return; // the model-0 guard — rivals never accrue
         }
+        // THE CASTLE-LEVEL-UP LATCH CLEAR (`sub_60480` EF:61593).
+        // Retail's clear and this award sit three lines apart, and the
+        // ONLY producer of a `(PLAYER_TARGET, 2, 1)` award is
+        // `Gen::mc2_castle_upgrade`'s own `sub_6D8B0` mail
+        // (mc2/castle.rs:302) — a DOWNGRADE awards nothing, and no
+        // projectile can forge it: `f40` is stamped from the spell
+        // index by `mc2_launch` alone, which spell 2 never reaches
+        // (the castle dispatches to `cast_castle`). So the join is
+        // exact. ABOVE the life gate on purpose — retail's clear is
+        // unconditional, and a castle finishing its level-up while the
+        // wizard is dead must not strand the latch set forever.
+        if spell == 2 && amount == 1 {
+            self.mc2_recast_surcharge = false;
+        }
         if self.player.state != LifeState::Alive {
             return;
         }
@@ -796,18 +853,33 @@ impl World {
     /// apply via SetSpell, sound 14. `hand`: 0 = left, 1 = right.
     /// The select-time hint text (`hintText_0x16x`) is the app's
     /// concern (it owns the notification surface).
+    /// ⭐⭐ **THE TWO HANDS ARE ONE LANE, AND EVERY WRITER OWES THE
+    /// MIRROR.** `SpellIndexLeft_0x451_1105` / `..Right_0x453_1107`
+    /// live once in retail; the port keeps the cast machine's copy in
+    /// `mc2_book` and the import/obs copy in `Player`, so a writer
+    /// that touches only the book projects a STALE hand. The equip
+    /// path learned this in 2026-08-22 (mc2l3 t=108) and got the
+    /// mirror inline; the other five writers did not, and the pickup
+    /// was the one the corpus caught next — mc2l0 t=3919, the scroll
+    /// at slot 114 binds spell 2 into a left hand whose book says 2
+    /// and whose obs still said 0. Route every hand write here.
+    pub(crate) fn mc2_set_hand(&mut self, right: bool, spell: i8) {
+        let mirror = (spell >= 0).then(|| crate::mc1::spells::SpellId(spell as u8));
+        if right {
+            self.mc2_book.right = spell;
+            self.player.right = mirror;
+        } else {
+            self.mc2_book.left = spell;
+            self.player.left = mirror;
+        }
+    }
+
     pub fn mc2_select_spell(&mut self, spell: u8, tier: u8, hand: u8) {
         let s = spell as usize;
         if s >= 26 {
             // Unbind semantic (spell out of range clears the hand —
             // the pane's empty-slot commit).
-            if hand == 0 {
-                self.mc2_book.left = -1;
-                self.player.left = None;
-            } else {
-                self.mc2_book.right = -1;
-                self.player.right = None;
-            }
+            self.mc2_set_hand(hand != 0, -1);
             return;
         }
         // Dev instrument: selecting an unowned spell under the
@@ -838,13 +910,7 @@ impl World {
         // it into the book (the cast machine's read) and the Player
         // mirror (the import/obs lane) — keep both in step, or an
         // equip pair's obs projects the stale hand (mc2l3 t=108).
-        if hand == 0 {
-            self.mc2_book.left = spell as i8;
-            self.player.left = Some(crate::mc1::spells::SpellId(spell));
-        } else {
-            self.mc2_book.right = spell as i8;
-            self.player.right = Some(crate::mc1::spells::SpellId(spell));
-        }
+        self.mc2_set_hand(hand != 0, spell as i8);
         let m = self.mc2_book.ent[s] as usize;
         self.mc2_set_spell(m, t);
         self.g.snd_player(14);
@@ -902,10 +968,10 @@ impl World {
             }
         }
         if (0..26).contains(&(left as i32)) && self.mc2_book.ent[left as usize] != 0 {
-            self.mc2_book.left = left;
+            self.mc2_set_hand(false, left);
         }
         if (0..26).contains(&(right as i32)) && self.mc2_book.ent[right as usize] != 0 {
-            self.mc2_book.right = right;
+            self.mc2_set_hand(true, right);
         }
     }
 
@@ -982,15 +1048,14 @@ impl World {
         // (EF:55735-49).
         let hint = self.g.ent[m].f36;
         self.g.ent[m].f36 = 0;
-        if hint == 2 {
-            self.mc2_book.left = spell as i8;
+        let to_left = if hint == 2 {
+            true
         } else if hint == 1 {
-            self.mc2_book.right = spell as i8;
-        } else if self.mc2_book.left == -1 || self.mc2_book.right != -1 {
-            self.mc2_book.left = spell as i8;
+            false
         } else {
-            self.mc2_book.right = spell as i8;
-        }
+            self.mc2_book.left == -1 || self.mc2_book.right != -1
+        };
+        self.mc2_set_hand(!to_left, spell as i8);
         self.mc2_relevel(spell, false, false);
         self.mc2_set_spell(m, self.mc2_book.sel[spell]);
     }
@@ -1043,11 +1108,11 @@ impl World {
         // EF:55814-24 — independent ifs, verbatim).
         self.g.ent[m].f36 = 0;
         if self.mc2_book.right == spell {
-            self.mc2_book.right = -1;
+            self.mc2_set_hand(true, -1);
             self.g.ent[m].f36 = 1;
         }
         if self.mc2_book.left == spell {
-            self.mc2_book.left = -1;
+            self.mc2_set_hand(false, -1);
             self.g.ent[m].f36 = 2;
         }
         self.entities_dirty = true;
@@ -1136,7 +1201,7 @@ impl World {
             // spend it on a re-fire.
             1 if armed > 0 => {
                 self.g.ent[m].f56 = 1;
-                self.g.ent[m].f50 = if right { 512 } else { 256 };
+                self.mc2_stamp_hand(right);
                 self.mc2_arm_invis_break(spell);
                 return;
             }
@@ -1163,28 +1228,41 @@ impl World {
         }
         // THE MANA GATE (EF:60953): caster mana vs the tier's full
         // cost. Insufficient → UI flash + sound 29 (EF:60964-67).
-        // Reads the PRE-apply purse: retail's gate tail sits before
-        // the wizard body's mana block (`mc2_gate_purse`), so a
-        // dry-out tick still re-arms and the manifestation's own
-        // post-apply first-tick re-check collapses the window the
-        // same tick — regen resumes immediately, not f26 ticks late.
+        // Reads the PRE-apply purse — retail's gate tail (`sub_5F380`)
+        // sits before the wizard body's mana block, and so does this
+        // now that the block runs at the carpet's own dispatch, so
+        // the LIVE purse is that value and the `mc2_gate_purse` stash
+        // it used to need is gone. A dry-out tick still re-arms and
+        // the manifestation's own post-apply first-tick re-check
+        // collapses the window the same tick — regen resumes
+        // immediately, not f26 ticks late.
         let cost = self.g.ent[m].max_life;
-        if !self.dev_spells && (self.mc2_gate_purse as u64) < cost as u64 {
+        if !self.dev_spells && (self.player.mana as u64) < cost as u64 {
             self.g.snd_player(29);
             return;
         }
         // `sub_5F7B0`: ARM — timer = duration; the effect state now
         // fires. A zero-duration row still casts for one tick. The
-        // firing button is recorded (retail: `dword |= a3` 256/512
-        // on the CASTER, EF:60973-82; ours rides the manifestation,
-        // same information) — the launch reads it for the hand
-        // muzzle.
+        // firing button is recorded ON THE CASTER, where retail puts
+        // it (`byte[1] &= 0xFC; …dword |= a3`, a3 = 256/512,
+        // EF:60973-82) — the launch reads it back exactly as
+        // `sub_68E50` does.
         self.g.ent[m].f26 = self.g.ent[m].f28.max(1) as i16;
-        self.g.ent[m].f50 = if right { 512 } else { 256 };
+        self.mc2_stamp_hand(right);
         // A release signal left over from the marker's last tick
         // must not refire into the fresh arm.
         self.g.ent[m].f56 = 0;
         self.mc2_arm_invis_break(spell);
+    }
+
+    /// `sub_5F7B0`'s hand stamp (EF:60977-78):
+    /// `caster->byte[1] &= 0xFC; caster->dword |= a3` with `a3` =
+    /// 256 for the left button (EF:60852) / 512 for the right
+    /// (EF:60855) — the SAME storage and the SAME constants as MC1's
+    /// `:55894-95`, so the shared `hand_bits` register holds it and
+    /// the conformance import can seed it off the recorded carpet.
+    fn mc2_stamp_hand(&mut self, right: bool) {
+        self.hand_bits = (self.hand_bits & !0x300) | if right { 0x200 } else { 0x100 };
     }
 
     /// The Invisibility per-tier break-on-self-cast law (`sub_5F7E0`
@@ -1292,22 +1370,6 @@ impl World {
                 }
                 return;
             }
-            // The below-carpet suppression's pay-back (see the
-            // suppression note below): retail's wizard body applies
-            // the fresh delta on the token's first INERT frame, but
-            // the port's pre-walk apply already ran this frame with
-            // the value last frame's suppression zeroed — restore it.
-            // A still-live (or re-triggered) window never reaches
-            // this: f26 > 0 re-suppresses instead, and the stale
-            // stash was dropped by this tick's hand-over.
-            if self.g.ent[m].f26 == 0
-                && let Some((om, amt)) = self.mc2_regen_owed_prev
-                && om as usize == m
-            {
-                self.mc2_regen_owed_prev = None;
-                let stepped = self.player.mana as i64 + amt as i64;
-                self.player.mana = stepped.clamp(0, self.player.mana_max as i64) as u32;
-            }
             if self.g.ent[m].f26 > 0 {
                 // `sub_68DE0` (EF:55569) has two halves keyed on the
                 // FIRST burst tick (`word_0x2E_46 == word_0x30_48`):
@@ -1318,12 +1380,25 @@ impl World {
                 // Read `first` before the countdown.
                 let first = self.g.ent[m].f26 as u16 == self.g.ent[m].f28.max(1);
                 let afford = self.mc2_afford(m);
-                if afford {
+                // ⭐ SPEED's `word_0xe_14` COLLAPSE IS THE SAME ARM AS
+                // THE UNAFFORDABLE ONE. Retail's shape is
+                // `if (!afford || v14) { if (v14) counter = 1 }` with
+                // the ENTIRE effect body — boost write, puff, and
+                // `sub_68DE0` — in the `else` (EF:56216-19). So a brake
+                // tick skips the regen suppression exactly the way a
+                // broke tick does, which is what the entry below
+                // already says about the afford arm: the wizard's fresh
+                // recompute stands on the very tick the window dies
+                // (galore t=6279, `player.mana` off by one +1153 regen
+                // step when the collapse suppressed it anyway).
+                let v14_collapse = spell == 3 && self.mc1_v14;
+                if v14_collapse {
+                    self.g.ent[m].f26 = 1;
+                } else if afford {
                     if first {
                         self.mc2_spell_fire(spell, m, p, ctx);
                         let cost = self.g.ent[m].max_life;
                         self.mana_debit(cost);
-                        self.mc2_same_frame_debit(m);
                     } else if self.g.ent[m].f56 != 0 {
                         // The possess re-press RELEASE SIGNAL
                         // (`byte_0x3C_60`, raised by the cast gate's
@@ -1348,7 +1423,6 @@ impl World {
                             self.mc2_spell_fire(spell, m, p, ctx);
                             let cost = self.g.ent[m].max_life;
                             self.mana_debit(cost);
-                            self.mc2_same_frame_debit(m);
                         }
                     }
                 } else {
@@ -1374,22 +1448,60 @@ impl World {
                 // wizard body (above the token) is about to apply
                 // THIS frame — so the clamped applies run exactly
                 // while the token still SEES a live window, and regen
-                // pays on the token's first INERT frame. The port
-                // applies the wizard delta pre-walk, so a suppression
-                // here poisons NEXT frame's apply instead: one extra
-                // frozen tick per window end (mc2l3 t=9037-9055, the
-                // possession spam — token slot 109 < carpet 167, one
-                // +100 row per cast cycle). Stash what the
-                // suppression takes; the token's next INERT tick pays
-                // it back (`mc2_manifestation_tick` head) — the
-                // suppression half of `mc2_same_frame_debit`'s
-                // ordering law, same strict-import gate. A skip on
-                // the f26==1 tick is NOT equivalent: the retrigger
-                // family (shield/invis re-presses, EF:60914-28) pins
-                // f26 at 1 for the whole hold and retail clamps every
-                // one of those ticks.
-                if !first && afford {
-                    self.suppress_regen_owed(m);
+                // pays on the token's first INERT frame. That falls
+                // out on its own now that the wizard body's mana
+                // block runs at the carpet's walk slot instead of
+                // pre-walk; the stash-and-pay-back window this used
+                // to need (mc2l3 t=9037-9055, the possession spam —
+                // token slot 109 < carpet 167, one +100 row per cast
+                // cycle) is gone with it. ⚠ A skip on the f26==1 tick
+                // is still NOT equivalent: the retrigger family
+                // (shield/invis re-presses, EF:60914-28) pins f26 at
+                // 1 for the whole hold and retail clamps every one of
+                // those ticks.
+                if !first && afford && !v14_collapse {
+                    self.suppress_regen();
+                }
+                // ⭐⭐ SPEED'S OWN REGISTER WRITE (`GetScroll_69DB0`
+                // EF:56230-40), the thing that makes it a spell and not
+                // a thrust model:
+                //
+                //     v2 = sign(carpet->speed_0xc_12)
+                //     if (counter == max)  speed = v2*minSpeed*(sub+1)
+                //     else                 speed = v2*minSpeed* sub
+                //     carpet->actSpeed = speed
+                //
+                // ⭐ THE FIRST TICK OF EVERY WINDOW IS ONE FACTOR
+                // HOTTER. `subSpellIndex_2` is {2,3,4} by tier, so the
+                // sustained speeds are 160/240/320 and each arm — or
+                // RE-arm, since a re-press reloads the counter to its
+                // max — spikes 240/320/400 for exactly one tick. That
+                // is not cosmetic: the spike is the value the NEXT
+                // tick's `sub_5D530` polar-steps on, so it moves the
+                // carpet a whole 240-unit stride. galore records the
+                // full matrix (sustained 160×371 / 240×295 / 320×200
+                // and backward −240/−320/−400), and every one of its
+                // ~300 spike ticks is a `move_bits & 0x10` re-press.
+                //
+                // The port had the sustained magnitude right (the
+                // baked `sub_spell`, cached on the token as `f30`) but
+                // synthesised it inside the mover from a `speed_boost`
+                // recomputed at the PREVIOUS tick's tail, so it had
+                // neither the spike nor the walk-order phase.
+                // docs/spell-audit/speed.md §5 had already written the
+                // spike down and filed it as an "optional fidelity
+                // nicety".
+                //
+                // ⚠ The direction is retail's `sign(speed_0xc_12)` —
+                // the COMMAND. The carpet is out of pool here, so the
+                // pose's `speed` (`actSpeed`) stands in; the two agree
+                // on every tick of a live window (the token writes both
+                // from the same value) and on the arm tick they differ
+                // only while a decelerating carpet crosses zero.
+                if spell == 3 && afford && !v14_collapse {
+                    let sign = if p.speed >= 0 { 1i16 } else { -1 };
+                    let factor = self.g.ent[m].f30 as i16 + i16::from(first);
+                    self.pending_speed_base = Some(sign * 80 * factor);
                 }
                 // SPEED's slipstream trail (`GetScroll_69DB0`
                 // EF:56251-59): every 4th tick of the live window
@@ -1405,6 +1517,7 @@ impl World {
                 // every 4 ticks marching along the boosted flight
                 // path, 175 of them across the take.
                 if spell == 3
+                    && !v14_collapse
                     && self.g.ent[m].f63 & 3 == 0
                     && let Some(s) = self.g.mc2_spawn_speed_puff(p.x, p.y, p.z)
                 {
@@ -1428,6 +1541,15 @@ impl World {
                 }
                 self.g.ent[m].f26 -= 1;
                 if self.g.ent[m].f26 == 0 {
+                    // The window's LAST act is to hand the carpet back
+                    // its 1× base, sign kept (EF:56266-68) — retail's
+                    // restore is this write, at the token's own slot,
+                    // not an expiry edge the carpet notices a tick
+                    // later. MC1's `pending_speed_base` mail is the
+                    // same seam and needed no new machinery.
+                    if spell == 3 {
+                        self.pending_speed_base = Some(if p.speed >= 0 { 80 } else { -80 });
+                    }
                     self.mc2_cast_expire(spell, m);
                 }
             }
@@ -1460,7 +1582,6 @@ impl World {
                 self.mc2_spell_fire(2, m, p, ctx); // cast_castle: spawns the ball
                 let cost = self.g.ent[m].max_life;
                 self.mana_debit(cost);
-                self.mc2_same_frame_debit(m);
             } else {
                 self.g.ent[m].f26 = 0;
                 return;
@@ -1779,7 +1900,7 @@ impl World {
                 // The hand pick feeds MC1's muzzle anchor only; the
                 // MC2 lane always spawns at the carpet (cast_castle's
                 // mc2 gate), so the side is inert here.
-                self.cast_castle(p, false);
+                self.cast_castle(p, false, Some(m));
                 self.g.snd_player(15);
             }
             // speed_up: the accelerate channel (`GetScroll_69DB0`
@@ -1959,9 +2080,8 @@ impl World {
     /// (docs/spell-audit/fools-mana.md). The trap machinery is the
     /// (10,57) TICK's, not a cast flag: the authored ground spheres run
     /// the identical path off their NewEvent defaults.
-    fn mc2_cast_fools_mana(&mut self, m: usize, p: PlayerPose, sub: Mc2SubSpell) -> bool {
-        let right = self.g.ent[m].f50 == 512;
-        let (mx, my, _mz) = self.muzzle(p, right);
+    fn mc2_cast_fools_mana(&mut self, _m: usize, p: PlayerPose, sub: Mc2SubSpell) -> bool {
+        let (mx, my, _mz) = self.muzzle_side(p, self.mc2_hand_side());
         let payload = sub.sub_spell.clamp(0, u16::MAX as i32) as u16;
         let tier = sub.life.clamp(0, 3) as u8;
         let mut spawned = false;
@@ -1984,6 +2104,12 @@ impl World {
             e.f30 = yaw; // launch heading (fallback retaliation aim)
             e.dest_x = pos.0.wrapping_sub(mx);
             e.dest_y = pos.1.wrapping_sub(my);
+            // The spawn banks the caster's cast-charge meter into the
+            // decoy's @0x10 and zeroes it INSIDE the loop
+            // (EF:57825-26): the first decoy reads the meter, the
+            // other five read 0.
+            e.f26 = self.wiz_charge[0] as i16;
+            self.wiz_charge[0] = 0;
             spawned = true;
         }
         spawned
@@ -2056,11 +2182,14 @@ impl World {
         sub: Mc2SubSpell,
         p: PlayerPose,
     ) -> Option<usize> {
-        // Hand muzzle: launch from the firing hand's side (recorded
-        // at arm time; the MC1 lateral-step law stands in until the
-        // retail hand-offset trace lands).
-        let right = self.g.ent[m].f50 == 512;
-        let (mx, my, mz) = self.muzzle(p, right);
+        // Hand muzzle — `sub_68E50` (EF:55595), called right after
+        // every retail cast spawn: step the spawn point 256 units to
+        // the firing hand's side (`caster.yaw ∓ 512`, pitch 0, so the
+        // muzzle LIFT below is untouched), revert if that point sits
+        // inside terrain, then copy it onto the projectile. The side
+        // is the CASTER's own flag bits, which is why `hand_bits`
+        // rather than a token register carries it.
+        let (mx, my, mz) = self.muzzle_side(p, self.mc2_hand_side());
         let Some(i) = self.g.mc2_spawn_cast_proj(arm.subtype, mx, my, mz) else {
             return None; // pool full: no projectile, NO cast sound
             // (retail gates the sound on the spawn, EF:44224-39)
@@ -2097,6 +2226,16 @@ impl World {
         // purse; the class-9 ctor default 50 must not survive).
         let token_mana = self.g.ent[m].f140;
         self.g.ent[i].f140 = token_mana;
+        // The fire block banks the caster's cast-charge meter into
+        // the projectile's @0x10 scratch home and ZEROES the meter
+        // (`v6x->dword_0x10_16 = wizext->byte_0x154; … = 0`,
+        // EF:55869-70). The lightning T3 fan banks per spawn
+        // (EF:56620) — the twins read meter/0 exactly like retail's
+        // loop — and the possession arms overwrite the bank with
+        // their own @0x10 law after this helper returns while
+        // keeping the zero (EF:56058/55975).
+        self.g.ent[i].f26 = self.wiz_charge[0] as i16;
+        self.wiz_charge[0] = 0;
         // Back-ref for the impact XP award (`word_0x26_38` → the
         // spell entity; ours carries the spell INDEX in f40 — a
         // projectile never uses the attacker latch).
@@ -2236,16 +2375,16 @@ impl World {
     /// (12) / Possession (1) instead of Fireball / Possession. The
     /// pickup law is right for actual pickups and is unchanged.
     pub(crate) fn mc2_rebind_hands_canonical(&mut self) {
-        self.mc2_book.left = -1;
-        self.mc2_book.right = -1;
+        self.mc2_set_hand(false, -1);
+        self.mc2_set_hand(true, -1);
         for s in 0..26usize {
             if self.mc2_book.ent[s] == 0 {
                 continue;
             }
             if self.mc2_book.left == -1 {
-                self.mc2_book.left = s as i8;
+                self.mc2_set_hand(false, s as i8);
             } else if self.mc2_book.right == -1 {
-                self.mc2_book.right = s as i8;
+                self.mc2_set_hand(true, s as i8);
                 break;
             }
         }
@@ -2276,18 +2415,43 @@ impl World {
     /// mc2l3 t=15300 keeps all 26 seeds at their allocation values).
     /// OPEN: import `carpet.rand` and roll the real stream.
     pub(crate) fn mc2_scatter_spells(&mut self, p: PlayerPose) {
+        // ⭐⭐ ONE RUNNING STREAM, THE DYING CARPET'S OWN (`sub_5E310`
+        // EF:60153-61): three draws per scattered token, CONTINUING
+        // across all 26 — not each token's private seed restarted 26
+        // times, which is what the port did while the human had no
+        // pool record to keep a stream in. `apply_player_damage` now
+        // advances that stream once per intake and the importer seeds
+        // it, so the value standing here is the one retail scatters
+        // with. mc2l0 t=11192: twelve draws, three each for the four
+        // owned spells.
+        let cs = self.mc2_carpet_slot as usize;
+        let mut carpet_rand = if cs != 0 && cs < self.g.ent.len() {
+            self.g.ent[cs].rand
+        } else {
+            0
+        };
         for spell in 0..26usize {
             let m = self.mc2_book.ent[spell] as usize;
             if m == 0 {
                 continue;
             }
             self.mc2_book.ent[spell] = 1; // the boolean "still known" marker
-            let mut r = self.g.ent[m].rand;
-            let r1 = lcg32(&mut r);
-            let r2 = lcg32(&mut r);
+            // ⚠ SIXTEEN-BIT STEPS. `rand_0x14_20` is a `uint16_t`
+            // (global_types.h:331), so every store truncates — and
+            // while `& 0x1FF` cannot tell the widths apart, `% 0x5A`
+            // very much can (90 is not a power of two, so it reads the
+            // whole word). Running the shared 32-bit helper here put
+            // the scatter's x/y exactly right and its life lane
+            // exactly wrong.
+            let mut draw = || {
+                carpet_rand = carpet_rand.wrapping_mul(9377).wrapping_add(9439) & 0xFFFF;
+                carpet_rand
+            };
+            let r1 = draw();
+            let r2 = draw();
             let x = p.x.wrapping_add((r1 & 0x1FF) as u16).wrapping_sub(256);
             let y = p.y.wrapping_add((r2 & 0x1FF) as u16).wrapping_sub(256);
-            let life = (lcg32(&mut r) % 0x5A + 200) as i32;
+            let life = (draw() % 0x5A + 200) as i32;
             {
                 let e = &mut self.g.ent[m];
                 e.tick70 = (spell as u8).wrapping_mul(3).wrapping_add(1);
@@ -2296,6 +2460,9 @@ impl World {
                 e.flags &= !1;
             }
             self.g.move_relink(m, x, y, p.z);
+        }
+        if cs != 0 && cs < self.g.ent.len() {
+            self.g.ent[cs].rand = carpet_rand;
         }
         self.g.mc2_spell_tokens.0 = 0;
     }

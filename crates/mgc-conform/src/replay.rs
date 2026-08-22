@@ -35,14 +35,15 @@ use crate::verify::{
 };
 use crate::verify_mc2::{capture_clean_mc2, compare_mc2_gated, torn_slots};
 use mgc_formats::mgcr::{
-    ObsMc1, ObsMc2, Recording, RetailMc1, RetailMc2, decode_retail_mc1, decode_retail_mc2,
+    ObsMc1, ObsMc2, Recording, RetailEntMc1, RetailEntMc2, RetailMc1, RetailMc2, RetailPlayerMc2,
+    RetailWizardMc1, decode_retail_mc1, decode_retail_mc2,
 };
 use mgc_formats::recover::{self, consumed_knock};
 use mgc_sim::engine::world::conformance::{
-    PinnedMc1, PinnedMc2, integer_pose, mc1_state_from_retail, mc2_state_from_retail,
-    pose_lanes_mc1, pose_lanes_mc2,
+    PinnedMc1, PinnedMc2, emit_pose_window, integer_pose, mc1_state_from_retail,
+    mc2_state_from_retail, pose_all_mc1, pose_all_mc2, pose_lanes_mc1, pose_lanes_mc2, pose_window,
 };
-use mgc_sim::engine::world::{FlightDrive, PlayerCommand, PlayerPose, World};
+use mgc_sim::engine::world::{FlightDrive, Mc2Drive, PlayerCommand, PlayerPose, World};
 use mgc_sim::flight::{self, Mc1Input, Mc1State, Mc2Ext};
 use mgc_sim::mc1::spells::SpellId;
 use std::collections::BTreeMap;
@@ -168,6 +169,7 @@ fn step_mc1(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand
         over,
         falling,
         dead,
+        mc2: None,
     };
     world.tick_flight(&mut drive, cmd);
     // Respawn (sub_44D30 :54868-83): position at the castle one tile
@@ -228,9 +230,28 @@ fn step_mc2(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand
     let falling = world.player_falling();
     let dead = world.player_dead();
     let end_seized = world.mc2_end_pose().is_some();
+    // ⭐ THE STICK OUTLIVES THE COMMAND HANDLER ON THE DEATH FALL —
+    // MC2's `sub_5F380`/`sub_5D530` split is MC1's `sub_46840`/
+    // `sub_455D0` split (see `step_mc1`), and this arm had asserted the
+    // opposite. `PlayerEvents_51BB0` recomputes `rollDelta_0x4_4` /
+    // `pitchDelta_0x6_6` from the raw cursor every frame (EF:38060-63)
+    // with NO life or actionIndex guard anywhere on the path, and
+    // state 2's `sub_5E310` opens on `sub_5D530`, so the filters keep
+    // integrating all the way down. mc2l0 t=11191-11192: retail holds
+    // roll_acc 7 / pitch_acc −135 across both fall ticks because the
+    // player's cursor is parked at a FIXED POINT of the filter, where
+    // a zeroed stick decayed pitch_acc to −102 and dragged the whole
+    // aim_pitch → eff_pitch → polar-step cascade with it.
+    // The ending sequence keeps the full seizure: `sub_5E8C0` drives
+    // its own exponential decay on the accumulators (EF:60577-87).
     let (inp, cmd) = if falling || dead || end_seized {
         (
-            Mc1Input::default(),
+            Mc1Input {
+                stick_x: if end_seized { 0 } else { inp.stick_x },
+                stick_y: if end_seized { 0 } else { inp.stick_y },
+                no_command: true,
+                ..Mc1Input::default()
+            },
             PlayerCommand {
                 respawn: cmd.respawn,
                 ..PlayerCommand::default()
@@ -239,11 +260,11 @@ fn step_mc2(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand
     } else {
         (inp, cmd)
     };
-    if dead {
-        ch.s.act_speed = 0;
-        ch.s.tgt_speed = 0;
-        ch.s.strafe = 0;
-    }
+    // ⚠ The dead arm used to zero act/tgt/strafe here. Retail's state-3
+    // dispatch never reaches `sub_5F380` OR `sub_5D530`, so it touches
+    // none of them: mc2l0 records `16 / 16 / 0` unchanged from the
+    // landing tick t=11193 onward. `World::step_player_flight_mc2`
+    // carries the whole arm now.
     ch.ext.row = world.mc2_carpet_row();
     let thrust = if inp.speed_up {
         1.0
@@ -253,62 +274,48 @@ fn step_mc2(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand
         0.0
     };
     world.thrust_cancel(thrust);
-    // MC2's restore KEEPS the sign (GetScroll_69DB0 EF:56267-69).
+    // The whole move — Accelerate restore edge, knock, debuff drain,
+    // `sub_5D530`, the death fall and the grey-screen turn — runs
+    // INSIDE the turn now, at the carpet's own walk slot, exactly as
+    // the MC1 driver above does (`World::step_player_flight_mc2`).
+    // The tick-head sample here is only the input gate and the row.
     let over = world.accel_override();
-    if ch.accel_was_active && over.is_none() {
-        let sign = if ch.s.act_speed >= 0 { 1 } else { -1 };
-        ch.s.tgt_speed = 80 * sign;
-        ch.s.act_speed = 80 * sign;
-    }
-    ch.accel_was_active = over.is_some();
-    let knock = world.take_knock_step();
-    let (slow, stun) = world.take_mc2_debuffs();
-    for _ in 0..slow {
-        ch.ext.slow_hit();
-    }
-    for _ in 0..stun {
-        ch.ext.stun_hit();
-    }
-    let moved = {
-        let w: &World = world;
-        flight::mc2_move(
-            &mut ch.s,
-            &mut ch.ext,
-            &inp,
-            over,
-            knock,
-            &|x, y| w.ground_z_engine(x, y),
-            &|x, y| w.player_cave_ceiling(x, y),
-            &|cur, prop| w.player_mc2_gate(cur, prop),
-            &|pos, latched| w.player_mc2_stuck(pos, latched),
-        )
+    let mut drive = FlightDrive {
+        s: &mut ch.s,
+        inp,
+        over,
+        falling,
+        dead,
+        mc2: Some(Mc2Drive {
+            ext: &mut ch.ext,
+            accel_was_active: &mut ch.accel_was_active,
+        }),
     };
-    if moved.accel_cancel {
-        world.mc2_cancel_accel();
-        ch.accel_was_active = false;
+    world.tick_flight(&mut drive, cmd);
+    // The SPEED token's register write when its walk slot is ABOVE the
+    // carpet's — retail's write lands after `sub_5D530`, so the boost
+    // is recorded at this boundary but first MOVES the carpet next
+    // tick. (Below-carpet tokens are consumed inside the walk, at the
+    // carpet's own dispatch, and this take finds nothing.)
+    if let Some(base) = world.take_speed_base() {
+        ch.s.tgt_speed = base;
+        ch.s.act_speed = base;
     }
-    if falling {
-        let dz = world.death_fall_step();
-        let g = world.ground_z_engine(ch.s.x, ch.s.y);
-        ch.s.z = (ch.s.z as i32 + dz as i32)
-            .max(g as i32 + 128)
-            .min(i16::MAX as i32) as i16;
-    }
-    if dead && let Some((kx, kz)) = world.killer_pos() {
-        let tx = (kx.rem_euclid(256.0) * 256.0) as u16;
-        let ty = (kz.rem_euclid(256.0) * 256.0) as u16;
-        let target = flight::angle_between(ch.s.x, ch.s.y, tx, ty);
-        let mut d = (target as i32 - ch.s.yaw as i32) & 0x7FF;
-        if d > 1024 {
-            d -= 2048;
-        }
-        ch.s.yaw = ((ch.s.yaw as i32 + d.clamp(-16, 16)) & 0x7FF) as u16;
-    }
-    world.tick(ch.pose(), cmd);
     if let Some((x, z, alt)) = world.take_respawn() {
-        let yaw = ch.s.yaw;
-        ch.s = Mc1State::from_tiles(x, z, alt, 0.0);
-        ch.s.yaw = yaw;
+        // ⭐ A RESPAWN MOVES THE CARPET, IT DOES NOT REBUILD IT — the
+        // MC1 arm's law (`step_mc1`: position, then EXACTLY the target
+        // speed and strafe cleared) one game over. Rebuilding through
+        // `from_tiles` zeroed lanes retail carries straight across the
+        // death: mc2l0 t=11219 resumes with `eff_pitch` STILL 1913,
+        // the value stranded before the fall because only `sub_5D530`
+        // writes it and the corpse never ran one, and with roll/pitch
+        // integrating out of the state-3 wipe on the live stick
+        // (1 and −33 = the cursor's own delta from 0).
+        ch.s.x = (x.rem_euclid(256.0) * 256.0) as u16;
+        ch.s.y = (z.rem_euclid(256.0) * 256.0) as u16;
+        ch.s.z = (alt * 256.0) as i16;
+        ch.s.tgt_speed = 0;
+        ch.s.strafe = 0;
     }
     if let Some((x, z, alt)) = world.take_teleport() {
         ch.s.x = (x.rem_euclid(256.0) * 256.0) as u16;
@@ -320,17 +327,14 @@ fn step_mc2(world: &mut World, ch: &mut Chain, inp: Mc1Input, cmd: PlayerCommand
     if world.take_speed_zero() {
         ch.s.tgt_speed = 0;
     }
-    // The ending sequence mirrors its scripted pose onto the carpet.
-    if let Some((x, alt, z, yaw)) = world.mc2_end_pose() {
-        ch.s.x = (x.rem_euclid(256.0) * 256.0) as u16;
-        ch.s.y = (z.rem_euclid(256.0) * 256.0) as u16;
-        ch.s.z = (alt * 256.0) as i16;
-        ch.s.yaw = ((yaw.rem_euclid(std::f32::consts::TAU) / std::f32::consts::TAU * 2048.0)
-            as u16)
-            & 0x7FF;
-        ch.s.act_speed = 0;
-        ch.s.tgt_speed = 0;
-    }
+    // The ending sequence used to be mirrored onto the carpet HERE,
+    // from the float `mc2_end_pose`, with both speed registers forced
+    // to 0. It is written at the carpet's own walk slot now
+    // (`World::mc2_carpet_dispatch`, the actionIndex-11/12 table
+    // entry) in engine units and with the scripted `actSpeed` intact —
+    // retail's sequence bleeds and re-accelerates that register (4/tick
+    // down, +8/tick up to 200) and the recorder captures every value,
+    // while `speed_0xc_12` it never touches at all.
 }
 
 // ------------------------------------------------------- input recovery
@@ -350,6 +354,151 @@ fn mc1_mover_input(mb: u32, stick: (i16, i16)) -> Mc1Input {
         // (`World::step_player_flight`).
         no_command: false,
         mc2_park: false,
+    }
+}
+
+// ------------------------------------------------------------ traces
+//
+// Game-agnostic instruments, shared by both replay arms. They were
+// MC1-only until the MC2 phase dig needed them (the carpet lagging a
+// mid-walk terrain raise, mc2l3 t=244) — nothing in either is MC1
+// specific, and an instrument that exists for one game and silently
+// no-ops for the other reads as "the port is clean here".
+
+/// `MGC_POSE_WINDOW=<t0>-<t1>` at an MC1 grade site — see
+/// [`emit_pose_window`]. The window is deliberately shared with the
+/// app's `--replay-check`: its whole reason for existing is putting the
+/// two retail drivers' carpets side by side on the same ticks.
+fn pose_window_mc1(t: u64, s: &Mc1State, e: &RetailEntMc1, w: &RetailWizardMc1) {
+    if pose_window().is_none() {
+        return;
+    }
+    emit_pose_window(t, &pose_all_mc1(s, e, w), &[]);
+}
+
+/// The MC2 twin. `extras` are the death column's two retail-only tells.
+fn pose_window_mc2(t: u64, s: &Mc1State, e: &RetailEntMc2, p: &RetailPlayerMc2) {
+    if pose_window().is_none() {
+        return;
+    }
+    emit_pose_window(
+        t,
+        &pose_all_mc2(s, e, p),
+        &[("f2c", e.f2c as i64), ("action45", e.action45 as i64)],
+    );
+}
+
+/// `MGC_CELL_TRACE=<x>,<y>[;<x>,<y>…]:<t0>:<t1>` — the terrain-drift
+/// microscope: the port's live height/type/angle planes beside the
+/// truth channel at the watched cells, printed on change. Terrain is
+/// invisible to grading until something stands on it — this is how a
+/// plant tick is found (the spurious castle-paint apron dip, mc1l0
+/// t=3856; the fire-cell angle split, t=4290).
+#[derive(Default)]
+struct CellTrace {
+    cells: Vec<(u8, u8)>,
+    window: (u64, u64),
+    last: Vec<Option<((u8, u8, u8), (u8, u8, u8))>>,
+}
+
+impl CellTrace {
+    fn from_env() -> Self {
+        let parsed = std::env::var("MGC_CELL_TRACE").ok().and_then(|v| {
+            let (cells, ts) = v.split_once(':')?;
+            let (a, b) = ts.split_once(':')?;
+            let cells: Vec<(u8, u8)> = cells
+                .split(';')
+                .filter_map(|c| {
+                    let (x, y) = c.split_once(',')?;
+                    Some((x.parse::<u8>().ok()?, y.parse::<u8>().ok()?))
+                })
+                .collect();
+            Some((cells, a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
+        });
+        let Some((cells, t0, t1)) = parsed else {
+            return Self::default();
+        };
+        let last = vec![None; cells.len()];
+        Self {
+            cells,
+            window: (t0, t1),
+            last,
+        }
+    }
+
+    fn emit(&mut self, world: &World, timg: &Option<mgc_formats::mgcr::TerrainImage>, t: u64) {
+        if self.cells.is_empty() || t < self.window.0 || t > self.window.1 {
+            return;
+        }
+        for (k, &(cx, cy)) in self.cells.iter().enumerate() {
+            let idx = ((cy as usize) << 8) | cx as usize;
+            let p = world.planes();
+            let port = (p.height[idx], p.tile_type[idx], p.angle[idx]);
+            let plane = |name: &str| {
+                timg.as_ref()
+                    .and_then(|i| i.plane(name))
+                    .map_or(0, |v| v[idx])
+            };
+            let truth = (plane("height"), plane("type"), plane("angle"));
+            if self.last[k] == Some((port, truth)) {
+                continue;
+            }
+            self.last[k] = Some((port, truth));
+            println!(
+                "CELL t={t} ({cx},{cy}) port h/ty/an={}/{}/{:#04x} truth={}/{}/{:#04x}{}",
+                port.0,
+                port.1,
+                port.2,
+                truth.0,
+                truth.1,
+                truth.2,
+                if port != truth { "  <-- DRIFT" } else { "" }
+            );
+        }
+    }
+}
+
+/// `MGC_KNOCK_TRACE=<t0>:<t1>` — the knock PHASE probe. Prints what
+/// the mover consumed this tick vs what the world tick armed for the
+/// next, beside retail's own recorded `+22`/`+24` pair. The whole
+/// question the MC2 in-walk mover answers ("does a hit posted at a
+/// LOWER slot shove THIS tick's move?") is one line of this trace.
+struct KnockTrace {
+    window: Option<(u64, u64)>,
+    pre: (u16, i16),
+}
+
+impl KnockTrace {
+    fn from_env() -> Self {
+        Self {
+            window: std::env::var("MGC_KNOCK_TRACE").ok().and_then(|v| {
+                let (a, b) = v.split_once(':')?;
+                Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
+            }),
+            pre: (0, 0),
+        }
+    }
+
+    /// Sample the armed knock BEFORE the driver steps the pair.
+    fn arm(&mut self, world: &World) {
+        if self.window.is_some() {
+            self.pre = world.debug_player_knock();
+        }
+    }
+
+    /// `pt`/`t` are the pair's endpoints; `rec` is retail's recorded
+    /// (dir, mag) at each of them.
+    fn emit(&self, world: &World, pt: u64, t: u64, rec_pt: (u16, i16), rec_t: (u16, i16)) {
+        let Some((t0, t1)) = self.window else { return };
+        if pt < t0 || pt > t1 {
+            return;
+        }
+        let post = world.debug_player_knock();
+        println!(
+            "KNOCK pair {pt}->{t}  port consumed=({},{}) armed=({},{})  \
+             retail rec@{pt}=({},{}) @{t}=({},{})",
+            self.pre.0, self.pre.1, post.0, post.1, rec_pt.0, rec_pt.1, rec_t.0, rec_t.1
+        );
     }
 }
 
@@ -929,27 +1078,8 @@ fn run_mc1(
             b.parse::<u64>().ok()?,
         ))
     });
-    // MGC_CELL_TRACE=<x>,<y>[;<x>,<y>…]:<t0>:<t1> — the terrain-drift
-    // microscope: the port's live height/type/angle planes beside the
-    // truth channel at the watched cells, printed on change. Terrain
-    // is invisible to grading until something stands on it — this is
-    // how a plant tick is found (the spurious castle-paint apron dip,
-    // t=3856; the fire-cell angle split, t=4290).
-    let celltrace = std::env::var("MGC_CELL_TRACE").ok().and_then(|v| {
-        let (cells, ts) = v.split_once(':')?;
-        let (a, b) = ts.split_once(':')?;
-        let cells: Vec<(u8, u8)> = cells
-            .split(';')
-            .filter_map(|c| {
-                let (x, y) = c.split_once(',')?;
-                Some((x.parse::<u8>().ok()?, y.parse::<u8>().ok()?))
-            })
-            .collect();
-        Some((cells, a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
-    });
-    #[allow(clippy::type_complexity)]
-    let mut celltrace_last: Vec<Option<((u8, u8, u8), (u8, u8, u8))>> =
-        vec![None; celltrace.as_ref().map_or(0, |(c, _, _)| c.len())];
+    let mut celltrace = CellTrace::from_env();
+    let mut ktrace = KnockTrace::from_env();
     // `--segmented`: the boundary grade sets this, and the re-anchor
     // runs after the tick body so the break's own diagnostics (traces,
     // CSV) still see the DIVERGED state that produced them.
@@ -1106,11 +1236,7 @@ fn run_mc1(
             // MGC_KNOCK_TRACE=<t0>:<t1> — the knock PHASE probe. Prints
             // what the mover consumed this tick vs what the world tick
             // armed for the next, beside retail's recorded +22/+24.
-            let ktrace = std::env::var("MGC_KNOCK_TRACE").ok().and_then(|v| {
-                let (a, b) = v.split_once(':')?;
-                Some((a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
-            });
-            let pre = world.debug_player_knock();
+            ktrace.arm(&world);
             mgc_sim::DEBUG_TICK.store(tick.t, std::sync::atomic::Ordering::Relaxed);
             // `--port --at-slot <n>`: arm the mid-walk pool snapshot
             // for the tick INTO the dump boundary.
@@ -1128,63 +1254,16 @@ fn run_mc1(
                 render_port_dump(&world, &st, slot, spec, tick.t, false);
                 return Ok(true);
             }
-            if let Some((t0, t1)) = ktrace
-                && pt >= t0
-                && pt <= t1
-            {
-                let post = world.debug_player_knock();
-                let pw = &pst.wizards[pst.local_player as usize];
-                println!(
-                    "KNOCK pair {pt}->{}  port consumed=({},{}) armed=({},{})  \
-                     retail rec@{pt}=({},{}) @{}=({},{})",
-                    tick.t,
-                    pre.0,
-                    pre.1,
-                    post.0,
-                    post.1,
-                    pw.knock_dir,
-                    pw.knock_mag,
-                    tick.t,
-                    cw.knock_dir,
-                    cw.knock_mag
-                );
-            }
+            let kw = &pst.wizards[pst.local_player as usize];
+            ktrace.emit(
+                &world,
+                pt,
+                tick.t,
+                (kw.knock_dir, kw.knock_mag),
+                (cw.knock_dir, cw.knock_mag),
+            );
             stats.seg().stepped += 1;
-            if let Some((cells, t0, t1)) = &celltrace
-                && tick.t >= *t0
-                && tick.t <= *t1
-            {
-                for (k, &(cx, cy)) in cells.iter().enumerate() {
-                    let idx = ((cy as usize) << 8) | cx as usize;
-                    let p = world.planes();
-                    let port = (p.height[idx], p.tile_type[idx], p.angle[idx]);
-                    let truth = (
-                        timg.as_ref()
-                            .and_then(|i| i.plane("height"))
-                            .map_or(0, |h| h[idx]),
-                        timg.as_ref()
-                            .and_then(|i| i.plane("type"))
-                            .map_or(0, |t| t[idx]),
-                        timg.as_ref()
-                            .and_then(|i| i.plane("angle"))
-                            .map_or(0, |a| a[idx]),
-                    );
-                    if celltrace_last[k] != Some((port, truth)) {
-                        celltrace_last[k] = Some((port, truth));
-                        println!(
-                            "CELL t={} ({cx},{cy}) port h/ty/an={}/{}/{:#04x} truth={}/{}/{:#04x}{}",
-                            tick.t,
-                            port.0,
-                            port.1,
-                            port.2,
-                            truth.0,
-                            truth.1,
-                            truth.2,
-                            if port != truth { "  <-- DRIFT" } else { "" }
-                        );
-                    }
-                }
-            }
+            celltrace.emit(&world, &timg, tick.t);
             if let Some((t0, t1)) = ctrace
                 && tick.t >= t0
                 && tick.t <= t1
@@ -1239,10 +1318,10 @@ fn run_mc1(
                     let p = world.debug_mob_machine(s);
                     let pf = p.map_or_else(
                         || "  port <none>".to_string(),
-                        |(t70, f52, f63, f34, f146, f126, rand)| {
+                        |(t70, f52, f63, f34, f146, f126, rand, f71)| {
                             format!(
                                 "  port f70={t70} f52={f52} f63={f63} f34={f34} \
-                                 f146={f146} f126={f126} rand={rand}"
+                                 f146={f146} f126={f126} rand={rand} f71={f71}"
                             )
                         },
                     );
@@ -1424,6 +1503,7 @@ fn run_mc1(
             // snapshot grades nothing, the chain runs on regardless).
             if capture_clean(&pst, &obs) {
                 let pose = pose_lanes_mc1(&ch.s, &st.ents[slot as usize], cw);
+                pose_window_mc1(tick.t, &ch.s, &st.ents[slot as usize], cw);
                 let pin = PinnedMc1 {
                     slot,
                     local: pst.local_player,
@@ -1655,6 +1735,7 @@ fn pose_only_pair_mc1(
         &|cur, prop| w.player_wall_gate_fixed(cur, prop),
     );
     let pose = pose_lanes_mc1(&ch.s, e1, w1);
+    pose_window_mc1(pt + 1, &ch.s, e1, w1);
     stats.fold_pose_only(pt + 1, &pose, csv)
 }
 
@@ -1674,8 +1755,11 @@ fn run_mc2(
             if args.pose_only { ", pose-only" } else { "" }
         );
     }
-    let (mut world, pristine, things) = crate::verify_mc2::build_world_mc2(&args.baked, level)?;
+    let replayed = crate::verify_mc2::mc2_take_replayed(path)?;
+    let (mut world, pristine, things) =
+        crate::verify_mc2::build_world_mc2(&args.baked, level, replayed)?;
     let mut csv = open_csv(args)?;
+    let mut shadow = crate::shadow::Shadow::from_env()?;
     // `MGC_STATE_DUMP=<t>:<path>` — the MC1 arm's INHERITED-head
     // instrument, same semantics (see run_mc1): one sectioned
     // whole-world dump at the first tick at or after `t`; an anchored
@@ -1716,6 +1800,16 @@ fn run_mc2(
         .flatten();
 
     let mut stats = RStats::default();
+    let mut celltrace = CellTrace::from_env();
+    let mut ktrace = KnockTrace::from_env();
+    // MGC_MOB_TRACE=<slot>[;<slot>…]:<t0>:<t1> — see the emission site
+    // below; same spelling as the MC1 arm's.
+    let mtrace = std::env::var("MGC_MOB_TRACE").ok().and_then(|v| {
+        let (slots, ts) = v.split_once(':')?;
+        let (a, b) = ts.split_once(':')?;
+        let slots: Vec<usize> = slots.split(';').filter_map(|s| s.parse().ok()).collect();
+        Some((slots, a.parse::<u64>().ok()?, b.parse::<u64>().ok()?))
+    });
     let mut st_prev: Option<(u64, RetailMc2)> = None;
     let mut chain: Option<(Chain, u16)> = None;
     // The respawn-press dating witness (mgc_formats::recover law).
@@ -1829,15 +1923,47 @@ fn run_mc2(
         }
         let mut inp = mc1_mover_input(rec.move_byte, rec.stick());
         inp.mc2_park = rec.mc2_park;
-        // The MC2 speed command is the recovered per-player cmd_speed
-        // lane (mouse-proportional), not the ±16 key servo — feed it
-        // as the pair's target the way the stick lanes feed the
-        // filters, and keep the key bits out of the integrator.
-        if let Some(v) = rec.mc2_cmd_speed {
-            ch.s.tgt_speed = v;
-            inp.speed_up = false;
-            inp.speed_down = false;
-        }
+        // ⭐⭐ THE SPEED COMMAND IS NOT AN INPUT, IT IS A REGISTER —
+        // AND IN A PURE INPUT REPLAY IT CARRIES ITSELF. This arm used
+        // to pin `tgt_speed` from the recovered `cmd_speed` lane every
+        // tick and hold the key bits out of the integrator, on the
+        // reading that MC2's command is "mouse-proportional, not the
+        // ±16 key servo". Measured: mc2l3's entire take takes exactly
+        // eleven values, every multiple of 16 in ±80 and nothing else
+        // — the key servo's own output set. The port ports `sub_5F380`
+        // verbatim, so replaying the KEYS reproduces the register, and
+        // that is the only form that also reproduces what the register
+        // does NOT hold.
+        //
+        // The pin cost two whole families. It fed the mover values
+        // retail's mover never saw, because a recorded command is the
+        // SETTLED one: the wall dead-stop zeroes it after the servo ran
+        // (which is why `recover::mc2_pair_cmd_speed` has to un-do it
+        // for PAIR mode, where N+1 is all there is), and the SPEED
+        // token writes it from a walk slot above the carpet — galore
+        // t=5890's 240 landed after `sub_5D530`, and pinning it at the
+        // tick head sent the port flying while retail stood still. And
+        // suppressing the keys erased `word_0xe_14`, so the brake
+        // could not cancel a boost at all (t=6278: the down key clamps
+        // 160 → 80 in `sub_5F380` and the token restores on the same
+        // tick).
+        //
+        // ⭐ SO THE FREE RUN SEEDS THE REGISTER FROM THE PREVIOUS
+        // BOUNDARY AND LETS THE KEYS INTEGRATE IT. The record at N is
+        // by definition the register as tick N+1 STARTS — after the
+        // dead-stop, after the token's write — which is precisely the
+        // value `sub_5F380` opens on. Every family then falls out of
+        // one line: an ordinary tick integrates to the value N+1
+        // records; a blocked tick integrates and the port's own
+        // dead-stop re-zeroes it; a boost tick integrates nothing
+        // (`move_bits 0x10` holds no speed key) and the token writes
+        // afterwards; and a brake tick clamps 160 → 80 and arms
+        // `word_0xe_14` on the way past.
+        //
+        // Pair mode keeps the reconstruction: it re-imports both
+        // endpoints every tick and never carries a register across, so
+        // N+1 is all it has.
+        ch.s.tgt_speed = pst.players[pst.local_player as usize].cmd_speed;
         if rec.rebind_dropped {
             stats.rebind_dropped += 1;
         }
@@ -1873,6 +1999,7 @@ fn run_mc2(
                 world.arm_walk_probe(n);
             }
             book_cheat(&world, rec.cheat, &mut stats);
+            ktrace.arm(&world);
             step_mc2(&mut world, ch, inp, cmd);
             if let Some(spec) = port_dump
                 && tick.t >= spec.t
@@ -1880,9 +2007,61 @@ fn run_mc2(
                 render_port_dump_mc2(&world, &st, slot, spec, tick.t, false);
                 return Ok(true);
             }
+            let kp = &pst.players[pst.local_player as usize];
+            ktrace.emit(
+                &world,
+                pt,
+                tick.t,
+                (kp.knock_dir, kp.knock_mag),
+                (cp.knock_dir, cp.knock_mag),
+            );
+            celltrace.emit(&world, &timg, tick.t);
+            // `MGC_MOB_TRACE` — the MC1 arm has carried the creature-
+            // machine microscope since 19c, and on MC2 it silently
+            // no-opped, which reads as "this take has no state drift"
+            // (the instrument-asymmetry trap, 4th occurrence). The
+            // homes are re-mapped, not renamed: retail's TARGET-YAW
+            // channel is `roll` @0x20 and the port keeps it in `f34`,
+            // so a raw `f34`-vs-`f34` print would have compared
+            // @0x34 (the subentity chain) against it.
+            if let Some((slots, t0, t1)) = mtrace.as_ref()
+                && tick.t >= *t0
+                && tick.t <= *t1
+            {
+                for &s in slots {
+                    let re = &st.ents[s];
+                    let p = world.debug_mob_machine(s);
+                    let pf = p.map_or_else(
+                        || "  port <none>".to_string(),
+                        |(t70, f52, f63, f34, f146, f126, rand, f71)| {
+                            format!(
+                                "  port a45={t70} f32={f52} f3e={f63} roll={f34} \
+                                 t96={f146} speed={f126} rand={rand} f46={f71}"
+                            )
+                        },
+                    );
+                    println!(
+                        "MOB t={} slot {s} ({},{}) retail a45={} f32={} f3e={} roll={} \
+                         t96={} speed={} rand={} f46={}\nMOB t={} slot {s}{pf}",
+                        tick.t,
+                        re.class3f,
+                        re.model40,
+                        re.action45,
+                        re.f32,
+                        re.phase3e,
+                        re.roll,
+                        re.target96,
+                        re.speed,
+                        re.rand,
+                        re.b46,
+                        tick.t,
+                    );
+                }
+            }
             stats.seg().stepped += 1;
             if capture_clean_mc2(&pst, &st) {
                 let pose = pose_lanes_mc2(&ch.s, &st.ents[slot as usize], cp);
+                pose_window_mc2(tick.t, &ch.s, &st.ents[slot as usize], cp);
                 let mut castles = [0i16; 8];
                 for (i, p) in pst.players.iter().take(8).enumerate() {
                     castles[i] = p.castle;
@@ -1896,6 +2075,16 @@ fn run_mc2(
                 };
                 let port = world.obs_project_mc2(&pin);
                 let torn = torn_slots(&pst, &st);
+                // THE RAW SHADOW, free-run half. Unlike pair mode the
+                // port has been carrying its OWN state since the
+                // anchor, so the first tick a raw lane parts is the
+                // first tick the port's HISTORY parts from retail's —
+                // the only instrument that can explain a `--segmented`
+                // break whose pair diff at the same tick is CLEAN.
+                if let Some(sh) = shadow.as_mut() {
+                    sh.compare_ents_mc2(&world, &st, slot, &torn, tick.t);
+                    sh.compare_free_mc2(&world, &st, slot, tick.t);
+                }
                 let pd = compare_mc2_gated(&obs, &port, slot, &torn);
                 let dump = args.dump == Some(pt)
                     || (args.dump_first
@@ -1923,8 +2112,11 @@ fn run_mc2(
                         let cw = match classify_world.as_mut() {
                             Some(w) => w,
                             None => {
-                                let (w, _, _) =
-                                    crate::verify_mc2::build_world_mc2(&args.baked, level)?;
+                                let (w, _, _) = crate::verify_mc2::build_world_mc2(
+                                    &args.baked,
+                                    level,
+                                    replayed,
+                                )?;
                                 classify_world = Some(w);
                                 classify_world.as_mut().expect("just built")
                             }
@@ -2002,6 +2194,11 @@ fn run_mc2(
         );
     } else {
         print!("{}", stats.render(mode));
+    }
+    if let Some(sh) = shadow.as_ref() {
+        // The free run's question is "what broke FIRST", so the lanes
+        // are ordered by the tick they part, not by family.
+        print!("{}", sh.render(true));
     }
     Ok(stats.clean())
 }
@@ -2088,6 +2285,7 @@ fn pose_only_pair_mc2(
         &|pos, latched| w.player_mc2_stuck(pos, latched),
     );
     let pose = pose_lanes_mc2(&ch.s, e1, p1);
+    pose_window_mc2(pt + 1, &ch.s, e1, p1);
     stats.fold_pose_only(pt + 1, &pose, csv)
 }
 

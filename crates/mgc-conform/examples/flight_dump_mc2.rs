@@ -10,7 +10,7 @@ fn main() {
     let t1: u64 = args.next().and_then(|v| v.parse().ok()).unwrap_or(u64::MAX);
     let mut rec = Recording::open(std::path::Path::new(&path)).expect("open");
     println!(
-        "t\tact45\tmb\ttgt\tact\tstrafe\troll\tpitch\teffp\tx\ty\tz\tyaw\taimp\tkmag\tkdir\tms\tmob\twater\tnudge"
+        "t\tact45\tmb\ttgt\tact\tstrafe\troll\tpitch\teffp\tx\ty\tz\tyaw\taimp\tkmag\tkdir\tms\tmob\twater\tnudge\trand\tlife"
     );
     while let Some(r) = rec.next_tick() {
         let tick = r.expect("tick");
@@ -26,7 +26,7 @@ fn main() {
             continue;
         };
         println!(
-            "{}\t{}\t{:#x}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{:#x}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
             tick.t,
             e.action45,
             p.move_bits,
@@ -46,7 +46,9 @@ fn main() {
             p.move_speed,
             p.mobilize,
             p.water_ctr,
-            p.nudge_latch
+            p.nudge_latch,
+            e.rand,
+            e.life
         );
     }
 }

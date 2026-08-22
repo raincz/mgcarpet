@@ -813,7 +813,15 @@ fn mc2_speed_window_interrupts_on_brake() {
     );
 
     // A FORWARD press does not cancel the boost (only a brake does).
-    w.thrust_cancel(1.0);
+    //
+    // ⚠ These worlds run the PINNED-pose `tick`, so no mover runs and
+    // nothing arms `word_0xe_14`. The faithful path's cancel is now
+    // retail's own two-step (the mover raises the flag, the token
+    // collapses its window and restores the base) and is unit-tested
+    // where it lives, in `flight::mc2_move`. What this exercises is the
+    // ALTERNATE-mover entry point, which keeps the immediate form for
+    // exactly the movers that never run a carpet dispatch.
+    w.accel_brake_immediate(1.0);
     w.tick(pose, PlayerCommand::default());
     assert!(
         w.mc2_book_view().armed[3],
@@ -823,7 +831,7 @@ fn mc2_speed_window_interrupts_on_brake() {
     // Braking INTERRUPTS the window. The window clears, the boost
     // drops, and because the burst timer `f26` is zeroed the mana-regen
     // suppression lifts with it (armed==false ⇒ f26==0).
-    w.thrust_cancel(-1.0);
+    w.accel_brake_immediate(-1.0);
     w.tick(pose, PlayerCommand::default());
     assert!(
         !w.mc2_book_view().armed[3],
@@ -871,14 +879,14 @@ fn mc2_speed_direction_follows_current_velocity() {
     );
 
     // A further BACKWARD press does not cancel it...
-    w.thrust_cancel(-1.0);
+    w.accel_brake_immediate(-1.0);
     w.tick(back, PlayerCommand::default());
     assert!(
         w.mc2_book_view().armed[3],
         "backward thrust rides along with a backward boost"
     );
     // ...the resisting (forward) input does.
-    w.thrust_cancel(1.0);
+    w.accel_brake_immediate(1.0);
     w.tick(back, PlayerCommand::default());
     assert!(
         !w.mc2_book_view().armed[3],

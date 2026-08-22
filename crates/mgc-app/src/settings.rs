@@ -794,7 +794,7 @@ pub fn registry() -> Vec<Spec> {
             // Purely visual smoothing (the sim is untouched, nothing
             // interactable changes) — Preference, not a fidelity
             // event: cleanup/visual preferences never flag the run
-            // (prune_owned_jars, fog_distance). Lives in the
+            // (fog_distance). Lives in the
             // enhancement group + cfg segment (legacy placement).
             class: Preference,
             key: None,
@@ -1605,35 +1605,6 @@ pub fn registry() -> Vec<Spec> {
         Spec {
             domain: Gameplay,
             group: "gameplay · enhancement",
-            label: "prune_owned_jars",
-            // A cleanup routine, not a fidelity event: removing jars
-            // you can never pick up changes nothing you could ever
-            // interact with, so it does not flag the run.
-            class: Preference,
-            key: None,
-            cli: Some("--no-prune-owned-jars"),
-            cfg_path: "gameplay.enhancement.prune_owned_jars",
-            // Faithful = OFF (retail leaves owned jars forever); ships
-            // ON as a deliberate default-on deviation (as does render
-            // smooth_motion).
-            read: |c| Val::Toggle {
-                on: c.gameplay.enhancement.prune_owned_jars,
-                faithful: false,
-            },
-            desc: "Remove any spell jar whose spell you already own — and \
-                   therefore can never pick up. Retail leaves such jars in \
-                   the world forever as permanent, unidentifiable clutter.",
-            ctl: Ctl::Toggle {
-                set: |c, v| c.gameplay.enhancement.prune_owned_jars = v,
-                descs: [
-                    "Owned jars linger forever, as retail.",
-                    "Owned jars vanish — less clutter (default).",
-                ],
-            },
-        },
-        Spec {
-            domain: Gameplay,
-            group: "gameplay · enhancement",
             label: "wheel_spells",
             // Purely additive input (retail has no wheel binding at
             // all), so it does not flag the run.
@@ -2114,8 +2085,8 @@ mod tests {
 
     #[test]
     fn stock_run_is_faithful() {
-        // The deliberate default deviations (prune_owned_jars ON, fog
-        // 50, hud opaque) are all Preference-class, so a stock run
+        // The deliberate default deviations (fog 50, hud opaque) are
+        // all Preference-class, so a stock run
         // rolls up FAITHFUL (cleanup/visual preferences must not flag
         // the run).
         let (verdict, enh, modi, patches) = rollup(&Config::default());

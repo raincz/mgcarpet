@@ -40,8 +40,9 @@ pub(crate) mod tokens;
 /// COLOR SLOT (the `playersColors_E88E0x` table row — map dots,
 /// nameplates, bars) and the index of his ART FAMILY (the pre-colored
 /// sprite bands: mana spheres 105+8k, castle/dwelling flags 177+k,
-/// balloons 169+k, carpets 272+k, minimap castle/balloon stamps
-/// 58+k/66+k). The art was authored in THIS order — verified
+/// balloons 169+k, carpets 272+k for k>=1 (see
+/// [`carpet_sprite_row`] — k=0 is NOT 272), minimap castle/balloon
+/// stamps 58+k/66+k). The art was authored in THIS order — verified
 /// empirically against the baked atlases: art k=2 is Jark's plum,
 /// k=4 is Rahn's green (exact table RGB matches), k=6/7 swap
 /// Prish/Yragore. Indexing art by the RAW slot hands Rahn purple
@@ -57,6 +58,28 @@ pub const COLOR_ART: [u8; 8] = [0, 1, 4, 3, 2, 5, 7, 6];
 /// beyond 7 clamp to the identity, matching retail's `default` arm.
 pub fn color_art(slot: u8) -> u8 {
     COLOR_ART.get(slot as usize).copied().unwrap_or(slot)
+}
+
+/// The wizard-carpet sprite-param row for a player's COLOR SLOT —
+/// `AddPlayer_4A920`'s switch on [`color_art`] (remc2 EF:43732-59).
+///
+/// The family is a SWITCH, not a base+offset: art index 0 takes row
+/// **44**, and only 1..7 run 273..279. Row 272 belongs to the
+/// `(10,38)` lightning-storm cloud ([`Gen::mc2_spawn_lightning_burst`],
+/// sprite 202) — extrapolating "272 + k" onto k=0 draws a fat
+/// translucent ball where the wizard on his carpet belongs (it did,
+/// on the replay ghost: player-reported 2026-08-25).
+///
+/// Corroborated against the captures, not just the decompile: the
+/// human carpet's recorded `f5a` (+0x5A, the live sprite-param row)
+/// reads 44 in every state record of mc2l3 / mc2l0 /
+/// mc2l0-spells-galore — 83,244 records, no variation, deaths and
+/// respawns included.
+pub fn carpet_sprite_row(slot: u8) -> u16 {
+    match color_art(slot) {
+        0 => 44,
+        k => 272 + k as u16,
+    }
 }
 
 /// The retail sprite-extents derivation (`sub_718.. init pass`,

@@ -74,7 +74,21 @@ const MAGIC: u32 = 0x5343_474D;
 ///    knockback impulse (retail Type_160 v_24/v_22) joined the rival
 ///    record after `jink`. A live rival never spends it; its death
 ///    fall does.
-pub const SNAPSHOT_VERSION: u32 = 14;
+/// 15: `World::mc2_recast_surcharge` — the MC2 castle re-cast
+///    surcharge latch (`byte_0x1BE_446`) joined the World stream
+///    after `mc2_end_pending`. Retail saves the byte itself
+///    (`S164SC(byte_0x1BE_446, 1)`, engine_support.cpp:701), so a
+///    save taken inside a latched window must reload still owing the
+///    +3000 — carrying it is the faithful behaviour, not an extra.
+/// 16: `World::mc2_level_replayed` — the campaign REPLAY gate
+///    (`x_D41A0_BYTEARRAY_4_struct.setting_38545 & 4`) joined the World
+///    stream after `mc2_doom_level`. It is construction config, not
+///    evolving state, but it changes sim behaviour (a (14,5) XP scroll
+///    hides and soft-kills on its first dispatch, EF:41161-65), so a
+///    reloaded save must come back on the same arm it was taken on —
+///    otherwise a replayed level would start awarding scrolls after a
+///    save/load.
+pub const SNAPSHOT_VERSION: u32 = 16;
 
 /// Why a snapshot could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]

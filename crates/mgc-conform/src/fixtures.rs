@@ -295,7 +295,11 @@ fn for_each_pair_mc2(
     use mgc_formats::mgcr::{ObsMc2, RetailMc2, decode_retail_mc2};
     let mut rec = Recording::open(path)?;
     let level = rec.header.level.ok_or("recording has no level number")?;
-    let (mut world, pristine, things) = crate::verify_mc2::build_world_mc2(baked, level)?;
+    // The witness rides in the fixture file itself (a cut fixture keeps the
+    // pair's raw retail states), so this is derived, not declared — a
+    // scroll-birth fixture cut later gets the right arm automatically.
+    let replayed = crate::verify_mc2::mc2_take_replayed(path)?;
+    let (mut world, pristine, things) = crate::verify_mc2::build_world_mc2(baked, level, replayed)?;
 
     let _ = input_delay; // superseded by the latch-aligned cast phase
     let mut prev: Option<(u64, RetailMc2, PlayerCommand)> = None;
@@ -362,7 +366,7 @@ fn for_each_pair_mc2(
                 // record's aligned command, with the pair's START record
                 // as the edge predecessor.
                 if isolate_worlds() {
-                    world = crate::verify_mc2::build_world_mc2(baked, level)?.0;
+                    world = crate::verify_mc2::build_world_mc2(baked, level, replayed)?.0;
                 }
                 // The recovered PANE SELECT (verify_mc2's fold): a
                 // recorded hand change across the pair replays as the
@@ -377,6 +381,11 @@ fn for_each_pair_mc2(
                     );
                     c.mc2_select = rec.mc2_select;
                     c.cheat = rec.cheat;
+                    // The demolish witness travels with them — the
+                    // suite and `verify-deltas` must reconstruct input
+                    // IDENTICALLY or a fixture's verdict drifts from
+                    // the triage run that recorded it (CONFORMANCE.md).
+                    c.demolish = rec.demolish;
                     c
                 };
                 let (pd, _, _) = crate::verify_mc2::exec_pair_mc2(

@@ -602,17 +602,33 @@ fn mc2_castle_death_cost_arm(patched: bool) {
     }
     assert!(w.loadout().castle.is_none(), "the demolish razed it");
 
+    // THE +3000 RE-CAST SURCHARGE APPLIES ON BOTH ARMS. This harness
+    // demolishes at LEVEL 1 EXACTLY, the one gate that latches
+    // retail's `byte_0x1BE_446` (EF:37993-95), and the caster is now
+    // castle-less — so `GetSpellManaCost_6D710` (L:1723-26) adds 3000
+    // to the tier's base 1000.
+    // ⚠ The arms deliberately AGREE here (player-ruled 2026-08-23c).
+    // `castle_recast_cost` relieves MC1's first-castle LOCKOUT, which
+    // is an unpatched retail BUG; the MC2 surcharge is DESIGNED
+    // behaviour — MC2 re-prices an enemy-destroyed castle at 1000 and
+    // taxes only the demolish you chose. Putting design behind a
+    // bug-relief switch would make the patched arm less faithful for
+    // no gameplay reason, so the surcharge does not fork.
+    let want = 4_000;
     assert_eq!(
         w.mc2_book_view().cost[2],
-        1_000,
-        "the live law prices the castle-less rebuild at base"
+        want,
+        "the castle-less rebuild price ({} arm)",
+        if patched { "patched" } else { "retail" }
     );
     // Both arms: the death's own downgrade ladder stamped the level-0
     // rung through the suppressed re-sync (mc2l3 t=265: retail token
-    // 10000/99 -> 1000/9 the tick the castle fell).
+    // 10000/99 -> 1000/9 the tick the castle fell) — now priced
+    // against the MAILING castle, so the deferral to the post-walk
+    // drain no longer changes the rung.
     assert_eq!(
         w.debug_spell_gate_cost(2),
-        Some(1_000),
+        Some(want),
         "the death's downgrade ladder re-priced the token at the level-0 rung"
     );
 }
@@ -885,4 +901,84 @@ fn a_rising_castle_executes_what_stands_under_it() {
         alive(&w, friend),
         "the builder's OWN creature is spared (the owner compare)"
     );
+}
+
+/// ⭐⭐ THE MC2 CASTLE BALL MINTS THROUGH MC2's OWN CREATOR, UNARMED
+/// (`sub_69AB0`'s `_4A190(9,10)` tail EF:56127-58 → `sub_4D900`
+/// EF:34965). PAIR-BLIND by construction — `retail_import_mc2`
+/// stamps `F_MC2PROJ` on every class-9 and restores the behavior row
+/// off `ptr_a0`, so no fixture can hold any of this; the free run is
+/// the only witness (mc2l3 t=241-243) and this is its guard.
+///
+/// Three lanes, one mint:
+///   * behavior ROW 60 — MC1's `spawn_castle_ball` builds on row 1,
+///     whose turn authority swung the ball ~20 units of yaw per tick
+///     where retail eases 789 → 810;
+///   * the `F_MC2PROJ` routing marker — without it a NATIVE ball took
+///     the MC1 fallback flight while every IMPORTED one took MC2's;
+///   * UNARMED at birth (retail's flags byte0 = link alone), so the
+///     arm bit + the launch site test land on the ball's own FIRST
+///     dispatch a tick later and the first flight step the tick after
+///     that. Folding the head into the mint flew the ball a tick
+///     early and moved the landing tile.
+///
+/// Plus the cast-charge bank (`byte_0x154` → `@0x10`, EF:56153-54).
+#[test]
+fn the_mc2_castle_ball_mints_on_mc2s_own_creator_unarmed_and_banks_the_charge() {
+    let Some(root) = baked_root() else {
+        eprintln!("skipping: no baked data");
+        return;
+    };
+    let Some(mut w) = build_world(&root) else {
+        eprintln!("skipping: level-000 has no terrain");
+        return;
+    };
+    w.set_dev_spells(true);
+    let (cx, cy) = clear_spot(&w);
+    let px = cx as f32 + 0.5;
+    let pz = cy as f32 + 16.5;
+    let alt = w.ground_height_tiles(px, pz) + 2.0;
+    let pose = PlayerPose::from_tiles(px, alt, pz, 0.0, 0.0, 0.0);
+    w.mc2_select_spell(2, 0, 0);
+
+    // Idle well past the meter's 200 cap so the bank is unambiguous.
+    for _ in 0..240 {
+        w.tick(pose, PlayerCommand::default());
+    }
+    w.tick(
+        pose,
+        PlayerCommand {
+            fire_left: true,
+            ..Default::default()
+        },
+    );
+
+    let ball = w
+        .debug_pool()
+        .1
+        .into_iter()
+        .find(|e| e.class == 9 && e.model == 10)
+        .expect("the cast minted a (9,10) castle ball");
+    assert_eq!(ball.row, 60, "row 60 — sub_4D900's, not MC1 row 1");
+    assert_ne!(
+        ball.flags & (1 << 29),
+        0,
+        "F_MC2PROJ — the ball takes the MC2 flight, not the MC1 fallback"
+    );
+    assert_eq!(
+        ball.f26, 200,
+        "the cast banks the wizext charge meter at its 200 cap"
+    );
+
+    // ⚠ THE ARM BIT IS NOT ASSERTABLE HERE. The mint leaves it clear,
+    // but sub_66D00's head runs on the ball's own first DISPATCH —
+    // and whether that falls on the birth tick is walk-position
+    // dependent: a ball minted into a slot ABOVE the caster's takes
+    // its head the same tick (arm + site test, no move, all inside
+    // the birth boundary and so invisible from outside), while the
+    // mc2l3 recording's ball at slot 53 sits below the token at 170
+    // and takes it at the NEXT boundary. Both are the same law. Its
+    // witness is the corpus free run (mc2l3 t=241 unarmed at birth,
+    // 242 arms unmoved, 243 first flight step); folding the head into
+    // the mint flew the ball a tick early and moved the landing tile.
 }

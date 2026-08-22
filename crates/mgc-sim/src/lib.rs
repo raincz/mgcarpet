@@ -700,11 +700,16 @@ impl Simulation {
         // the camera along the terrain after touchdown.
         // FALLING is left alone either way: the death fall keeps its
         // horizontal glide down to touchdown.
-        let faithful_dead = self.thrust_model == ThrustModel::Mc1
-            && self
-                .world
-                .as_ref()
-                .is_some_and(|w| w.verbs().flight != verbs::FlightVerb::Mc2);
+        //
+        // ⚠ BOTH GAMES. This carried an `!= FlightVerb::Mc2` clause —
+        // true while MC2 had no state-3 arm of its own, stale the
+        // moment one landed (`sub_5E7C0` → `sub_5E6C0`, which likewise
+        // runs no move and likewise never zeroes the registers). The
+        // clause is why the app's `--replay` diverged at mc2l0 t=11193
+        // on `pose.act_speed` (retail 16, the pre-tick kill 0) while
+        // the conformance replay — same walk, no pre-tick kill — read
+        // the take bit-exact to its end.
+        let faithful_dead = self.thrust_model == ThrustModel::Mc1 && self.world.is_some();
         if dead {
             if !faithful_dead {
                 self.carpet.act_speed = 0;
@@ -807,60 +812,36 @@ impl Simulation {
             self.aim_lead = 0.0;
         }
 
-        // The faithful MC1/HW mover on a live world steps INSIDE the
-        // world turn, at the carpet's walk slot (World::tick_flight):
-        // its ground probe must read terrain the lower-slot painters
-        // stamped THIS tick — the t=563 replay-wall law. MC2 worlds,
-        // world-less sims and the enhanced flyer keep the pre-tick
+        // The faithful mover on a live world steps INSIDE the world
+        // turn, at the carpet's walk slot (World::tick_flight): its
+        // ground probe must read terrain the lower-slot painters
+        // stamped THIS tick (the t=563 replay-wall law) and the
+        // damage mailbox that arms its knock has to run in the same
+        // dispatch. BOTH games now — MC2 joined on the mc2l3 t=244 /
+        // mc2l0 t=4104 heads, which are those two facts exactly.
+        // World-less sims and the enhanced flyer keep the pre-tick
         // move.
-        let faithful_walk = self.thrust_model == ThrustModel::Mc1
-            && self
-                .world
-                .as_ref()
-                .is_some_and(|w| w.verbs().flight != verbs::FlightVerb::Mc2);
+        let faithful_walk = self.thrust_model == ThrustModel::Mc1 && self.world.is_some();
+        // The faithful mover is game-keyed by the world's flight
+        // verb: MC2 worlds fly sub_5D530, everything else (and
+        // world-less sims) the MC1 arm.
+        let walk_mc2 = self
+            .world
+            .as_ref()
+            .is_some_and(|w| w.verbs().flight == verbs::FlightVerb::Mc2);
         match self.thrust_model {
             ThrustModel::Mc1 => {
-                // The faithful mover is game-keyed by the world's
-                // flight verb: MC2 worlds fly sub_5D530, everything
-                // else (and world-less sims) the MC1 arm.
-                let mc2 = self
-                    .world
-                    .as_ref()
-                    .is_some_and(|w| w.verbs().flight == verbs::FlightVerb::Mc2);
-                if mc2 {
-                    self.move_mc2(input);
-                } else if !faithful_walk {
-                    self.move_mc1(input);
+                if !faithful_walk {
+                    if walk_mc2 {
+                        self.move_mc2(input);
+                    } else {
+                        self.move_mc1(input);
+                    }
+                } else if walk_mc2 {
+                    self.mc2_walk_prelude(input);
                 }
             }
             ThrustModel::Enhanced => self.move_enhanced(input),
-        }
-
-        // The barrel-roll driver runs after the move, like retail's
-        // per-player frame tail (sub_57B20 then sub_55C60,
-        // EF:38081-82). The tumble overrides the bank-derived flyer
-        // roll for the frame; the finishing tick skips the write
-        // (retail's phase-8 arm), so the normal bank publish resumes
-        // seam-free — the masked rest angle `(|bank|+2048) & 0x7FF`
-        // IS the live bank.
-        if self.broll.active() {
-            const ROLL_RAD: f32 = std::f32::consts::TAU / 2048.0;
-            let bank = match self.thrust_model {
-                ThrustModel::Mc1 => self.carpet.roll_f,
-                // The enhanced bank is a derived float — feed it back
-                // in angle units so the phase targets track it the
-                // same way.
-                ThrustModel::Enhanced => (self.flyer.roll / ROLL_RAD) as i16,
-            };
-            let out = self.broll.tick(bank, input.raw_dx);
-            if out.lock_break
-                && let Some(w) = &mut self.world
-            {
-                w.mc2_break_player_locks();
-            }
-            if let Some(v) = out.view {
-                self.flyer.roll = v as f32 * ROLL_RAD;
-            }
         }
 
         // The death fall (sub_45FC0 :55466-77): gravity −2/tick²
@@ -961,11 +942,20 @@ impl Simulation {
                 over,
                 falling,
                 dead,
+                mc2: walk_mc2.then(|| world::Mc2Drive {
+                    ext: &mut self.carpet_mc2,
+                    accel_was_active: &mut self.accel_was_active,
+                }),
             };
             w.tick_flight(&mut drive, pcmd);
             walked_prev = Some(prev);
         }
-        if let Some(prev) = walked_prev {
+        if let Some(prev) = walked_prev
+            && walk_mc2
+        {
+            self.mc2_walk_lift(input, falling, dead);
+            self.derive_flyer(prev);
+        } else if let Some(prev) = walked_prev {
             // Enhanced altitude: the desired-altitude law (deliberate
             // deviation), after the in-walk move — vertical only, the
             // z-floor stays (see move_mc1's pre-tick twin). Skipped
@@ -991,6 +981,36 @@ impl Simulation {
             }
             self.derive_flyer(prev);
         }
+        // The barrel-roll driver runs after the move AND after the
+        // flyer derives from it, like retail's per-player frame tail
+        // (sub_57B20 then sub_55C60, EF:38081-82) — under the
+        // faithful walk the move is inside the world turn above, so
+        // `derive_flyer` would otherwise republish the bank roll
+        // straight over the tumble. The tumble overrides the
+        // bank-derived flyer roll for the frame; the finishing tick skips the write
+        // (retail's phase-8 arm), so the normal bank publish resumes
+        // seam-free — the masked rest angle `(|bank|+2048) & 0x7FF`
+        // IS the live bank.
+        if self.broll.active() {
+            const ROLL_RAD: f32 = std::f32::consts::TAU / 2048.0;
+            let bank = match self.thrust_model {
+                ThrustModel::Mc1 => self.carpet.roll_f,
+                // The enhanced bank is a derived float — feed it back
+                // in angle units so the phase targets track it the
+                // same way.
+                ThrustModel::Enhanced => (self.flyer.roll / ROLL_RAD) as i16,
+            };
+            let out = self.broll.tick(bank, input.raw_dx);
+            if out.lock_break
+                && let Some(w) = &mut self.world
+            {
+                w.mc2_break_player_locks();
+            }
+            if let Some(v) = out.view {
+                self.flyer.roll = v as f32 * ROLL_RAD;
+            }
+        }
+
         if let Some(w) = &mut self.world {
             // The pinned-pose turn for the non-deferred paths (the
             // faithful walk already ticked above).
@@ -1037,6 +1057,41 @@ impl Simulation {
                     }
                 };
                 w.tick(pose, pcmd);
+            }
+            // ⭐⭐ THE SPEED TOKEN'S REGISTER WRITE when its walk slot
+            // is ABOVE the carpet's. `GetScroll_69DB0` (EF:56230-40)
+            // slams both `speed_0xc_12` and `actSpeed` from the
+            // MANIFESTATION's dispatch, so the phase is pure walk
+            // order: a token below the carpet lands before `sub_5D530`
+            // and is consumed inside the walk
+            // (`World::step_player_flight_mc2`); one above lands after,
+            // is recorded at THIS boundary and first moves the carpet
+            // next tick.
+            //
+            // ⚠ The conformance driver (`mgc-conform`'s `replay.rs`)
+            // has always taken this mail here and the app never did —
+            // the second half of the app/conform split that showed as
+            // mc2l0 t=22551. The two drivers' post-turn tails are ONE
+            // LAW (the respawn arm below says the same in its own
+            // comment); a channel added to one belongs in the other.
+            //
+            // ⚠ MC2 ONLY, exactly as in the conform driver, where this
+            // take lives in `step_mc2` and NOT in `step_mc1`. MC1's
+            // Accelerate mails the same channel but its burst-end
+            // restore is consumed at the carpet's own dispatch
+            // (`World::step_player_flight`) — taking it a second time
+            // out here re-slams ±80 a tick later, which is the very
+            // "compensation outlives what it compensated for" shape
+            // this seam already produced once on the MC2 side.
+            // Faithful tier only besides: the enhanced mover's speed
+            // state is its float velocity and it takes the boost
+            // through `accel_override`/`speed_boost` instead.
+            if walk_mc2
+                && self.thrust_model == ThrustModel::Mc1
+                && let Some(base) = w.take_speed_base()
+            {
+                self.carpet.tgt_speed = base;
+                self.carpet.act_speed = base;
             }
             // Respawn (sub_44D30): reposition at the castle's FULL
             // position (:54858-61), flight state zeroed (thrust
@@ -1151,7 +1206,22 @@ impl Simulation {
             // The MC2 ending sequence: mirror the scripted pose onto
             // the flyer (position + heading; the tail's roll/pitch
             // auto-level EF:60577-87 decays the visual bank here).
-            if let Some((x, alt, z, yaw)) = w.mc2_end_pose() {
+            //
+            // ⚠ ALTERNATE-MOVER ONLY. `sub_5E8C0_endGameSeq` is a
+            // class-3 dispatch entry in the same action table as
+            // `AddPlayer03_00_5E010`, so under the faithful walk it is
+            // written at the carpet's OWN walk slot
+            // (`World::mc2_carpet_dispatch`, the actionIndex-11/12
+            // arm), in engine units — including the scripted `actSpeed`
+            // that retail bleeds down 4/tick and re-accelerates 8/tick
+            // to 200. Re-mirroring the float pose over the carpet here
+            // undoes it: it re-quantizes yaw through a float round-trip
+            // (mc2l0 t=22595 read 450 for retail's 451) and forces both
+            // speed registers to 0 where retail scripts one and never
+            // touches the other. The conformance driver dropped this
+            // same block for the same reason; the flyer follows from
+            // `derive_flyer` above.
+            if !faithful_walk && let Some((x, alt, z, yaw)) = w.mc2_end_pose() {
                 let f = &mut self.flyer;
                 f.x = x;
                 f.z = z;
@@ -1323,17 +1393,78 @@ impl Simulation {
     /// arm (Phase 4.4, docs/traces/mc2-flight-model.md). Same
     /// boundary contract as [`Self::move_mc1`]: integer carpet state
     /// is authoritative, the flyer derives after.
+    /// The tick-head half of the MC2 mover, for the FAITHFUL WALK:
+    /// everything retail's input pass (`PlayerEvents`) settles before
+    /// the frame function, with the move itself left to the carpet's
+    /// own walk slot ([`world::World::step_player_flight_mc2`]). The
+    /// Accelerate restore edge, the knock and the debuff drain are
+    /// NOT here — those all belong to the dispatch.
+    fn mc2_walk_prelude(&mut self, input: &FlightInput) {
+        // The tuning row per map type (spawn-time in retail via
+        // AddPlayer_4A920; the map type never changes mid-level).
+        if let Some(w) = &self.world {
+            self.carpet_mc2.row = w.mc2_carpet_row();
+        }
+        // The tornado's forced turn (`sub_33340`'s wizard arm writes
+        // `yaw_0x1C_28` on every arm — see `Gen::player_spin`), ahead
+        // of the move so this tick's flight rides the imposed heading.
+        if let Some(w) = &mut self.world {
+            let spin = w.take_player_spin();
+            if spin != 0 {
+                self.carpet.yaw = (self.carpet.yaw as i32 + spin as i32) as u16 & 0x7FF;
+            }
+        }
+        // A replay-recovered speed command IS the target (the
+        // cmd_speed lane, mouse-proportional — the key servo stays
+        // out via `mc1_input`'s bit strip).
+        if let Some(v) = input.mc2_cmd_speed {
+            self.carpet.tgt_speed = v;
+        }
+    }
+
+    /// The ExtendedLift deviation's MC2 tail, after the in-walk move
+    /// — the `move_mc2` block verbatim, just relocated past the turn.
+    fn mc2_walk_lift(&mut self, input: &FlightInput, falling: bool, dead: bool) {
+        if self.altitude_model != AltitudeModel::ExtendedLift
+            || self.carpet_mc2.mobilize != 0
+            || falling
+            || dead
+        {
+            return;
+        }
+        let (cx, cy) = (self.carpet.x, self.carpet.y);
+        let row = self.carpet_mc2.row;
+        let Some(w) = self.world.as_ref() else { return };
+        let g = w.ground_z_engine(cx, cy);
+        let sink = row.buoyancy.unsigned_abs() as i16;
+        let (hi, cap) = self.lift_caps(g, row.band);
+        self.carpet.z = lift_desired_law(
+            self.carpet.z,
+            g,
+            &mut self.lift_desired,
+            input.lift,
+            row.clearance,
+            hi,
+            cap,
+            sink,
+            sink,
+        );
+        let w = self.world.as_ref().expect("checked above");
+        if let Some(c) = w.player_cave_ceiling(cx, cy) {
+            let c = c.max(g.saturating_add(row.clearance));
+            if self.carpet.z > c {
+                self.carpet.z = c;
+            }
+        }
+    }
+
     fn move_mc2(&mut self, input: &FlightInput) {
         if self.world.is_none() {
             // World-less sims have no MC2 gate/ceiling data.
             return self.move_mc1(input);
         }
 
-        // The tuning row per map type (spawn-time in retail via
-        // AddPlayer_4A920; the map type never changes mid-level).
-        if let Some(w) = &self.world {
-            self.carpet_mc2.row = w.mc2_carpet_row();
-        }
+        self.mc2_walk_prelude(input);
 
         // The speed-up (MC2 spell 3) rides the Accelerate channel —
         // the MC1-shaped expiry edge, but MC2's restore KEEPS the
@@ -1351,17 +1482,6 @@ impl Simulation {
         self.accel_was_active = over.is_some();
 
         let knock = self.world.as_mut().and_then(|w| w.take_knock_step());
-        // The tornado's forced turn (`sub_33340`'s wizard arm writes
-        // `yaw_0x1C_28` on every arm — see `Gen::player_spin`).
-        // Applied BEFORE the move, so this tick's flight rides the
-        // heading the funnel just imposed, exactly as retail's wizard
-        // pass precedes the wizard's own move in the entity walk.
-        if let Some(w) = &mut self.world {
-            let spin = w.take_player_spin();
-            if spin != 0 {
-                self.carpet.yaw = (self.carpet.yaw as i32 + spin as i32) as u16 & 0x7FF;
-            }
-        }
         // Debuff-stamp hits → the slow/stun web channels (§5c/5d).
         if let Some(w) = &mut self.world {
             let (slow, stun) = w.take_mc2_debuffs();
@@ -1374,12 +1494,6 @@ impl Simulation {
         }
 
         let inp = mc1_input(input);
-        // A replay-recovered speed command IS the target (the
-        // cmd_speed lane, mouse-proportional — the key servo stays
-        // out via `mc1_input`'s bit strip).
-        if let Some(v) = input.mc2_cmd_speed {
-            self.carpet.tgt_speed = v;
-        }
         let prev = self.carpet;
         let w = self.world.as_ref().expect("checked above");
         let moved = flight::mc2_move(
@@ -1412,38 +1526,11 @@ impl Simulation {
         // deviation can't pierce it, and the paralyze web keeps full
         // authority (no drift while mobilized — the −51 settle is the
         // faithful law). Skipped during the death fall/dead wait.
-        if self.altitude_model == AltitudeModel::ExtendedLift
-            && self.carpet_mc2.mobilize == 0
-            && !self
-                .world
-                .as_ref()
-                .is_some_and(|w| w.player_falling() || w.player_dead())
-        {
-            let (cx, cy) = (self.carpet.x, self.carpet.y);
-            let row = self.carpet_mc2.row;
-            let w = self.world.as_ref().expect("checked above");
-            let g = w.ground_z_engine(cx, cy);
-            let sink = row.buoyancy.unsigned_abs() as i16;
-            let (hi, cap) = self.lift_caps(g, row.band);
-            self.carpet.z = lift_desired_law(
-                self.carpet.z,
-                g,
-                &mut self.lift_desired,
-                input.lift,
-                row.clearance,
-                hi,
-                cap,
-                sink,
-                sink,
-            );
-            let w = self.world.as_ref().expect("checked above");
-            if let Some(c) = w.player_cave_ceiling(cx, cy) {
-                let c = c.max(g.saturating_add(row.clearance));
-                if self.carpet.z > c {
-                    self.carpet.z = c;
-                }
-            }
-        }
+        let (falling, dead) = self
+            .world
+            .as_ref()
+            .map_or((false, false), |w| (w.player_falling(), w.player_dead()));
+        self.mc2_walk_lift(input, falling, dead);
 
         self.derive_flyer(prev);
     }

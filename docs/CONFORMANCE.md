@@ -350,14 +350,19 @@ its note claims.
 | `conformance/mc1l0.json` | mc1l0 — CERTIFIED bit-exact (0..7097) | 18 |
 | `conformance/mc1l1.json` | mc1l1 — CERTIFIED bit-exact (0..10709) | 10 |
 | `conformance/mc1l2.json` | mc1l2 — CERTIFIED bit-exact (0..10588) | 16 |
-| `conformance/mc1l3.json` | mc1l3 — the scratch-record chase bearing | 1 |
-| `conformance/mc1l4.json` | mc1l4 — the rival speed-token + ball chain | 2 |
-| `conformance/mc1l5.json` | mc1l5 — hit-arm, `+144` census, soft-kill ×2 | 5 |
-| `conformance/mc1l32.json` | mc1l32 + the retired bee-height cut | 21 |
+| `conformance/mc1l3.json` | mc1l3 — CERTIFIED bit-exact (0..11992) | 13 |
+| `conformance/mc1l4.json` | mc1l4 — the rival speed-token + ball chain | 9 |
+| `conformance/mc1l5.json` | mc1l5 — hit-arm, `+144` census, soft-kill ×2 | 25 |
+| `conformance/mc1l32.json` | mc1l32 + the retired bee-height cut | 34 |
 | `conformance/mc1l42.json` | mc1l42 — CERTIFIED bit-exact (0..30878) | 17 |
+| `conformance/mc1hwl0.json` | mc1hwl0 — the HW on-ramp | 1 |
+| `conformance/mc2l0.json` | mc2l0 + mc2l0-spells-galore (two sources; horizon 7291) | 17 |
+| `conformance/mc2l3.json` | mc2l3 — the MC2 certification target (horizon 437) | 25 |
 
-90 fixtures, **0.3 s**. The three certified MC1 levels were
-mined in one pass (2026-08-17) by the reversion probe above; every
+185 fixtures. The MC2 suites are the live certification work and
+grow as laws land; their exemplars are cut against `rig-prev`, where
+each must be the ONLY regression in its suite. The three certified MC1
+levels were mined in one pass (2026-08-17) by the reversion probe above; every
 fixture cut there is measured non-vacuous against its level's own
 pre-fix binary. ⚠ Their files are ~120-180 KB each rather than
 mc1l32's ~13 KB, because these takes are FORMAT 2 and each fixture
@@ -659,6 +664,66 @@ specially and both are load-bearing: slot-valued fields
 are skipped, because the port's carpet is not a pool record and no
 chain of ours can match link-for-link there.
 
+**THE MC2 ARM (2026-08-24).** For a whole campaign the shadow was
+wired into the MC1 runners only, and `verify_mc2.rs` never mentioned
+it — an instrument asymmetry that is on record as *why* one decoded
+fix sat unlanded for an entire session. It is now wired into both MC2
+runners as well.
+
+⭐ The MC2 arm is a **NAME-CHECKED ZIP OF TWO TABLES THAT ALREADY
+EXISTED**, not a second field map: `retail_ent_lanes_mc2` and
+`World::port_ent_lanes_mc2` are 91 lanes, name-for-name *and*
+order-for-order identical, and are the same join `dump-state --port`
+renders. `None` on the port side is the `—` column — the port does
+not model that lane for this record's class — and is skipped, never
+counted as a mismatch. *A hand-rolled second copy of a table is the
+failure mode this campaign keeps finding; do not add one.*
+
+`EntObsMc2` carries 20 of those 91 lanes, so 71 are invisible to the
+graded diff. THREE of the twenty are graded only CONDITIONALLY and the
+condition matters — a flat exclusion list blinds the census exactly
+where the lane is NOT graded:
+
+| lane | graded when | ungraded when |
+|---|---|---|
+| `yaw` (@0x1C → obs `heading`) | class ≠ 15 | class 15 (manifestations repurpose the lane) |
+| `sv2` | class 5 | every other class (obs projects a hard 0) |
+| `owner28` | the four translated owner families | everything else (obs projects a hard 0) |
+
+`MGC_RAW_SHADOW_ALL=1` drops the graded exclusion entirely and reports
+every lane — the complete census in one run, and the way to see the
+`owner28` rows the conservative family test over-skips.
+
+Two gates the MC1 arm does not need. **Torn slots** are excluded:
+`torn_slots` drops any slot whose `phase3e` did not advance by exactly
+1 across the pair (a per-entity capture tear), and since
+`compare_mc2_gated` already skips them, counting them here would
+report the capture rather than the port. And the **free stack and the
+RECYCLE stack are compared separately**, because MC2 pops free first
+and falls back to recycle — merging them would measure the importer's
+composition instead of the port's allocator order.
+
+⚠ The **WIZEXT half is deliberately NOT watched on MC2** (there is no
+`wiz_shadow_mc2` and no port-side MC2 player-lane projection), so the
+whole per-player block is unchecked. The report now SAYS so instead of
+printing a silent `0 mismatches` — *an instrument that reports "clean"
+where nobody looked is worse than one that reports nothing.* Closing
+it is its own dig.
+
+**The per-entity TEAR census.** `torn_slots`' exclusion used to be
+completely silent: every field on an excluded slot was dropped from
+grading and nothing said so. `verify-deltas` on MC2 now prints the
+census — total slot-exclusions, pairs touched, distinct slots, and the
+`(class, model)` breakdown. It is not a small number (mc2l0 14,010
+exclusions across 5,073 pairs; galore 37,818), and it is a DIFFERENT
+number from the whole-pair `TORN` headline, which counts
+`capture_clean_mc2` rejections. A FAMILY CONCENTRATION in that
+breakdown is the tell that an exclusion is hiding a law rather than a
+capture artifact — mc2l0 t=1055 is the worked example, where retail
+recycles a castle piece, its phase byte goes 255 → 230, and the slot's
+real x/y divergence was silently skipped. *That absence read as
+evidence of correctness.*
+
 **`MGC_STATE_DUMP=<t>:<path>` on `replay` — the sectioned whole-world
 dump** (`World::debug_state_sections`). The shadow covers everything
 the RECORDING holds; this covers everything the PORT holds, which is
@@ -786,6 +851,49 @@ plus the named pre/post passes (`tick-top reap`, `awake_pass`,
 `carpet_dispatch`, `post-walk mail drains`, `tick tail`) — three of
 five digs in the bucket[0] session reduced to precisely this line.
 Zero cost when the variable is unset.
+
+**`MGC_POSE_WINDOW=<t0>-<t1>` — the cross-driver pose microscope.**
+Every graded lane at every tick in the window, retail beside port,
+printed by BOTH retail drivers — `mgc-conform replay` (free-run and
+`--pose-only`) and the app's `--replay-check`. Clean lanes print one
+value, parting lanes print `retail|port` and are named at the end of
+the line; the MC2 form appends the death column's two retail-only
+tells (`f2c`, `action45`):
+
+    POSE t=10253 x=43376 y=5432 z=2785 yaw=191 aim_pitch=99 … f2c=-44 action45=0
+    POSE t=10254 x=43286|43333 y=5536|5497 z=2802 yaw=191 … <-- DIRTY x,y
+
+It reads the SAME lane list the grader does (`pose_lanes_*` is
+`pose_all_*` filtered), so the microscope cannot drift from the
+verdict. Zero cost when unset.
+
+**`MGC_CARPET_PROBE=<t0>-<t1>` — the mover's own view of the tick**,
+emitted WORLD-SIDE at the carpet's dispatch in both games, so every
+driver inherits it:
+
+    CARPET t=10254 pre 43376,5432,2785 g=2166 floor=2422 ceil=2853 | post 43333,5497,2802 g=2189 floor=2445 ceil=2870 dz=17
+
+`g` is `ground_z_engine`, `floor` the z clamp it feeds (MC2's tuning-row
+clearance, MC1's half-tile), `ceil` the cave ceiling clamp (`-` off
+cave) — at BOTH the pre-move and post-move positions, because a clamp
+that fires on the position the move proposed is invisible at either one
+alone. The pose channel grades the BOUNDARY; this prints inside the
+tick, which is where a z that was computed and re-clamped away lives.
+
+**`MGC_PROBE_CELLS=<x>,<y>[;<x>,<y>…]`** appends the port's plane
+height/type at those cells to every `CARPET` line. This is the half of
+`MGC_CELL_TRACE` (below) that a world can serve, and therefore the half
+BOTH drivers get: it answers "do the two drivers agree about the
+terrain", which is the question that turned mc2l3 t=7367 from "a
+dropped z step" into a leaked-scroll world divergence (the app's
+`h(52,57)` read 68 against conform's 63). `MGC_CELL_TRACE` remains the
+richer conform-side instrument — it also diffs against the take's truth
+channel, which is driver-side data.
+
+⚠ All three label themselves from `DEBUG_TICK`, which **the app's
+replay driver now stamps too** — every shared `MGC_*` trace had read
+`t=0` under `--replay-check` because only the conform drivers stamped
+it.
 
 **`replay --brief` — the corpus regression sweep as one command.**
 One machine-readable line per take:

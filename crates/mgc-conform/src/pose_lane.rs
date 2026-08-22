@@ -373,8 +373,18 @@ impl PoseLane {
             eff_pitch: p0.eff_pitch & 0x7FF,
             act_speed: e0.speed,
             // The consumed speed COMMAND (the recovered cmd_speed
-            // lane at N+1 — mouse-proportional, not the key servo).
-            tgt_speed: p1.cmd_speed,
+            // lane at N+1 — mouse-proportional, not the key servo),
+            // un-done across a WALL DEAD-STOP
+            // ([`recover::mc2_pair_cmd_speed`], the shared law).
+            tgt_speed: mgc_formats::recover::mc2_pair_cmd_speed(
+                p0.cmd_speed,
+                p1.cmd_speed,
+                mb,
+                e0.x == e1.x && e0.y == e1.y
+                    || (e1.x.wrapping_sub(e0.x) as i16).unsigned_abs() > 2048
+                    || (e1.y.wrapping_sub(e0.y) as i16).unsigned_abs() > 2048,
+                e1.speed,
+            ),
             strafe: p0.strafe,
             tick_ctr: 0,
             rand: 0,

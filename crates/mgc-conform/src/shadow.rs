@@ -21,11 +21,76 @@
 //! Run both: pair mode names the guilty handler, the free run names the
 //! tick that mattered.
 
-use mgc_formats::mgcr::RetailMc1;
+use mgc_formats::mgcr::{RetailMc1, RetailMc2};
 use mgc_sim::engine::world::World;
-use mgc_sim::engine::world::conformance::norm_retail_ai_state_mc1;
-use std::collections::BTreeMap;
+use mgc_sim::engine::world::conformance::{norm_retail_ai_state_mc1, retail_ent_lanes_mc2};
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::Write as _;
+
+/// The seventeen MC2 raw lanes `EntObsMc2` carries UNCONDITIONALLY, so
+/// the graded diff already reports them and the shadow must not
+/// double-count. See [`mc2_lane_graded`] for the three conditional ones.
+const GRADED_MC2_ALWAYS: [&str; 17] = [
+    "class3f",
+    "model40",
+    "life",
+    "max_life",
+    "x",
+    "y",
+    "z",
+    "pitch",
+    "ayaw",
+    "apitch",
+    "speed",
+    "mana",
+    "mana_max",
+    "action45",
+    "sv1",
+    "player_ent",
+    "rand",
+];
+
+/// Is this raw lane already visible to `compare_mc2_gated`?
+///
+/// ⚠ THREE OF THE TWENTY GRADED LANES ARE GRADED ONLY CONDITIONALLY,
+/// and a flat name list blinds the census exactly where they are NOT
+/// graded (the trap an adversarial verifier caught in the first draft
+/// of this module):
+///
+/// - `yaw` (@0x1C → obs `heading`) is SKIPPED for class 15 by
+///   `compare_mc2_gated` — manifestations repurpose the world-yaw lane
+///   for the subSpellIndex payload — so raw `yaw` is UNGRADED there.
+/// - obs `sv2` projects `site_z` for class 5 and a hard `0` otherwise
+///   (`obs_project_mc2`), so raw `sv2` carries no graded information
+///   off class 5.
+/// - obs `owner` projects through the FOUR translated families
+///   (class-15 manifestation, (10,42) painter, (5,10) pyramid, and the
+///   pyramid-summoned (5,{0,19,21,25})) and a hard `0` everywhere else,
+///   so raw `owner28` is ungraded on every other record.
+///
+/// ⚠ The `owner28` test is deliberately the CONSERVATIVE half of
+/// `obs_project_mc2`'s predicate: that one additionally requires
+/// `id24 != slot` and, for the class-5 summons, that the referenced
+/// record really is a live (5,10). Reproducing it here would mean
+/// re-deriving the entity graph inside the instrument, so a WILD
+/// (5,0) multipart body — whose owner lane retail projects as 0, i.e.
+/// ungraded — is over-skipped. Bounded and documented; run with
+/// `MGC_RAW_SHADOW_ALL=1` to drop every exclusion and see it.
+fn mc2_lane_graded(name: &str, class: u8, model: u8) -> bool {
+    if GRADED_MC2_ALWAYS.contains(&name) {
+        return true;
+    }
+    match name {
+        "yaw" => class != 15,
+        "sv2" => class == 5,
+        "owner28" => {
+            class == 15
+                || (class == 10 && model == 42)
+                || (class == 5 && matches!(model, 10 | 0 | 19 | 21 | 25))
+        }
+        _ => false,
+    }
+}
 
 /// The six damage mailboxes as lane names — `{amount, source}` per
 /// channel (ch0 physical, ch1 mana-ball claim, ch3 mana steal, ch4
@@ -64,6 +129,21 @@ pub(crate) struct Shadow {
     /// Free-stack verdict: mismatched pairs / compared pairs / first
     /// example.
     pub(crate) free: (u64, u64, String),
+    /// The MC2 RECYCLE stack's own verdict — MC2 pops free first and
+    /// falls back to recycle, so the two stacks are separate
+    /// allocators and a single merged compare would measure the
+    /// importer's COMPOSITION rather than the port's order.
+    pub(crate) recycle: (u64, u64, String),
+    /// Set once [`Self::compare_wiz_mc1`] has run. MC2 has no WIZEXT
+    /// half yet (no `wiz_shadow_mc2` / port-side player-lane
+    /// projection), and a silent "0 mismatches" would read as "the
+    /// player block is clean" when it means "nobody looked".
+    pub(crate) wiz_fed: bool,
+    /// Retail lane names absent from the port's table (`?` in
+    /// `dump-state`): a table skew, reported once rather than per slot.
+    pub(crate) skew: BTreeSet<&'static str>,
+    /// `MGC_RAW_SHADOW_ALL=1` — report every lane, graded or not.
+    pub(crate) all_lanes: bool,
     /// Optional per-row TSV (`MGC_RAW_SHADOW_ROWS=<path>`). Wizard
     /// rows ride the same file with class 255, model = wiz, slot =
     /// array index.
@@ -141,6 +221,7 @@ impl Shadow {
             rows,
             watch,
             wiz_watch,
+            all_lanes: std::env::var_os("MGC_RAW_SHADOW_ALL").is_some(),
             ..Default::default()
         }))
     }
@@ -302,7 +383,133 @@ impl Shadow {
     /// retail's, which is the only instrument that can explain a
     /// carpet-motion break whose pair diff is CLEAN (the mc1l4 t=5378
     /// family this was built for).
+    /// The MC2 twin of [`Self::compare_ents_mc1`] — and a NAME-CHECKED
+    /// ZIP of the two lane tables, not a second field map.
+    ///
+    /// ⭐ `retail_ent_lanes_mc2` (conformance.rs) and
+    /// `World::port_ent_lanes_mc2` are 91 lanes, name-for-name AND
+    /// order-for-order identical, and are ALREADY the retail↔port join
+    /// that `dump-state --port` renders. Reusing them is the whole
+    /// reason this arm is short: a hand-rolled second table is exactly
+    /// the failure mode this campaign keeps finding ("ONE ladder, THREE
+    /// copies, TWO wrong"). `None` on the port side means the port does
+    /// not model the lane for this record's class — the `—` column —
+    /// and is skipped, never counted as a mismatch.
+    ///
+    /// Two gates the MC1 arm does not need:
+    /// - **TORN SLOTS.** `verify_mc2::torn_slots` drops any slot whose
+    ///   `phase3e` did not advance by exactly 1 across the pair — a
+    ///   per-entity capture tear, one pass early or late.
+    ///   `compare_mc2_gated` already skips them, so counting them here
+    ///   would report the capture, not the port.
+    /// - **CLASS/MODEL AGREEMENT**, read off the port's own table: a
+    ///   slot holding a different entity on the two sides is a
+    ///   missing/extra story the graded diff owns.
+    pub(crate) fn compare_ents_mc2(
+        &mut self,
+        world: &World,
+        st: &RetailMc2,
+        human_slot: u16,
+        torn: &BTreeSet<u16>,
+        t: u64,
+    ) {
+        for (slot, re) in st.ents.iter().enumerate() {
+            let slot = slot as u16;
+            if slot == 0 || slot == human_slot || re.class3f == 0 || torn.contains(&slot) {
+                continue;
+            }
+            let Some(port) = world.port_ent_lanes_mc2(slot, human_slot, false) else {
+                continue;
+            };
+            let port: BTreeMap<&'static str, Option<i64>> = port.into_iter().collect();
+            // The port's own class/model, read from the table it just
+            // handed us — no second source of truth.
+            let same = matches!(port.get("class3f"), Some(Some(c)) if *c == re.class3f as i64)
+                && matches!(port.get("model40"), Some(Some(m)) if *m == re.model40 as i64);
+            if !same {
+                continue;
+            }
+            for (name, rv) in retail_ent_lanes_mc2(re) {
+                if !self.all_lanes && mc2_lane_graded(name, re.class3f, re.model40) {
+                    continue;
+                }
+                // THE TILE LINKS are structural, not a lane: the port's
+                // carpet lives outside the pool, so a chain threading
+                // THROUGH the human can never agree link-for-link.
+                // Skip exactly those rows (MC1 does the same for
+                // next20/prev22) and keep the rest — chain ORDER is
+                // where every membership law this campaign has found
+                // landed first.
+                if matches!(name, "next16" | "prev18") && rv == human_slot as i64 {
+                    continue;
+                }
+                match port.get(name) {
+                    // The port models it and disagrees.
+                    Some(Some(pv)) if *pv != rv => {
+                        self.hit((re.class3f, re.model40, name), t, slot, rv, *pv);
+                    }
+                    Some(_) => {}
+                    // A lane in the retail table with no port twin —
+                    // the two tables have skewed. Report ONCE (the
+                    // render prints a ⚠ line) instead of flooding.
+                    None => {
+                        self.skew.insert(name);
+                    }
+                }
+            }
+        }
+    }
+
+    /// The MC2 allocator twin of [`Self::compare_free_mc1`]. Both
+    /// stacks, separately — MC2 pops FREE first and falls back to
+    /// RECYCLE, so merging them would measure the importer's
+    /// composition rather than the port's order. Filtered exactly the
+    /// way `dump-state --port` filters them, so a difference is the
+    /// port's own allocator.
+    pub(crate) fn compare_free_mc2(
+        &mut self,
+        world: &World,
+        st: &RetailMc2,
+        human_slot: u16,
+        t: u64,
+    ) {
+        let pool = st.ents.len();
+        let keep = |s: &u16| (*s as usize) < pool && *s != human_slot;
+        let want_free: Vec<u16> = st.free_stack.iter().copied().filter(keep).collect();
+        let want_rec: Vec<u16> = st.recycle_stack.iter().copied().filter(keep).collect();
+        let (got_free, got_rec) = world.free_stacks_mc2();
+        for (want, got, acc) in [
+            (want_free, got_free, &mut self.free),
+            (want_rec, got_rec, &mut self.recycle),
+        ] {
+            acc.1 += 1;
+            if want != got {
+                acc.0 += 1;
+                if acc.2.is_empty() {
+                    // Depth from the TOP is what matters: the next
+                    // spawn pops the end, so depth 0 diverging is a
+                    // slot handed out wrong THIS tick.
+                    let depth = want
+                        .iter()
+                        .rev()
+                        .zip(got.iter().rev())
+                        .position(|(a, b)| a != b);
+                    acc.2 = format!(
+                        "t={t} len retail {} port {}, top retail {:?} port {:?}, \
+                         first top-diff depth {}",
+                        want.len(),
+                        got.len(),
+                        want.last(),
+                        got.last(),
+                        depth.map_or("none (prefix)".into(), |d| d.to_string()),
+                    );
+                }
+            }
+        }
+    }
+
     pub(crate) fn compare_wiz_mc1(&mut self, world: &World, st: &RetailMc1, t: u64) {
+        self.wiz_fed = true;
         for ws in world.wiz_shadow_mc1() {
             let Some(w) = st.wizards.get(ws.wiz as usize) else {
                 continue;
@@ -448,6 +655,54 @@ impl Shadow {
                 lane.slots.len(),
                 lane.example
             );
+        }
+        if !self.skew.is_empty() {
+            // A retail lane with no port twin. Loud once, because the
+            // per-tick alternative is a flood and the silent
+            // alternative is an under-count nobody notices.
+            let _ = writeln!(
+                s,
+                "    ⚠ LANE TABLE SKEW — {} retail lane(s) absent from the port table \
+                 (extend BOTH): {:?}",
+                self.skew.len(),
+                self.skew
+            );
+        }
+        if !self.wiz_fed {
+            // MC2 has no WIZEXT arm. Say so — "0 mismatches" would read
+            // as "the player block is clean" when it means "nobody
+            // looked", which is the exact instrument asymmetry this
+            // module exists to end.
+            let _ = writeln!(
+                s,
+                "  WIZEXT SHADOW: NOT WATCHED on this game — no `wiz_shadow_mc2` and no \
+                 port-side MC2 player-lane projection exist, so the per-player block \
+                 (charge, knock_dir/mag, castle_ent, cmd_speed, strafe, menu_state, \
+                 ring_cursor, the spell-book arrays) is UNCHECKED. Its own dig."
+            );
+            let _ = writeln!(
+                s,
+                "    free stack: {} / {} boundaries mismatched{}",
+                self.free.0,
+                self.free.1,
+                if self.free.2.is_empty() {
+                    String::new()
+                } else {
+                    format!("  e.g. {}", self.free.2)
+                }
+            );
+            let _ = writeln!(
+                s,
+                "    recycle stack: {} / {} boundaries mismatched{}",
+                self.recycle.0,
+                self.recycle.1,
+                if self.recycle.2.is_empty() {
+                    String::new()
+                } else {
+                    format!("  e.g. {}", self.recycle.2)
+                }
+            );
+            return s;
         }
         let wiz_total: u64 = self.wiz_lanes.values().map(|l| l.rows).sum();
         let _ = writeln!(

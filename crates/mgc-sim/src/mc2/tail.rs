@@ -698,9 +698,30 @@ impl Gen {
         for i in 0..25u8 {
             let Some(s) = self.new_event() else { break };
             {
-                let (id, rand, life) = {
+                // `qmemcpy(entity2, entity, sizeof(type_entity_0x6E8E))`
+                // (EF:35967) — the satellite is a FULL STRUCT CLONE of
+                // the hub taken at CONSTRUCTION time, so it inherits
+                // the hub's actSpeed/minSpeed/maxSpeed triple
+                // (EF:35949-52 = 40/480/192) as well as maxLife and
+                // subSpell. The loop then overrides only model, action,
+                // the 0x32/0x34 links, 0x3E, 0x43 and 0x44.
+                // The trace bank's satellite bullet
+                // (docs/traces/mc2-class10-m76-fire-spheres.md:89) lists
+                // "maxLife 80 / subSpell 70 / extents / byte[0]" and
+                // omits the speed words; this ctor was built from that
+                // enumeration, so the satellites kept `new_event`'s
+                // defaults (+126 = 16, +128 = +130 = 0, features.rs:1723).
+                // Measured: mc2l0-spells-galore pair 4397->4398, 25
+                // (10,77) rows `speed retail 40 port 16` — the take's
+                // entire free-run break (horizon 4397).
+                // ⭐ Read the triple from the HUB rather than hardcoding
+                // 40/480/192: the caller overrides the hub's maxLife to
+                // 30 and subSpell to 180 AFTER this returns, which is
+                // itself the proof that the clone happens here and now,
+                // and the tier sweep in the take varies these values.
+                let (id, rand, life, act_spd, min_spd, max_spd) = {
                     let e = &self.ent[h];
-                    (e.id24, e.rand, e.act_life)
+                    (e.id24, e.rand, e.act_life, e.f126, e.f128, e.f130)
                 };
                 let e = &mut self.ent[s];
                 e.class64 = 10;
@@ -710,6 +731,9 @@ impl Gen {
                 e.act_life = life;
                 e.id24 = id;
                 e.rand = rand;
+                e.f126 = act_spd;
+                e.f128 = min_spd;
+                e.f130 = max_spd;
                 e.f140 = 70;
                 e.f56 = 1;
                 e.flags = (e.flags & !0x9) | 1;
@@ -1454,7 +1478,14 @@ impl Gen {
         }
         let ring = self.ent[i].f26 as i32;
         let grown = 768 * ring;
-        let shift = (grown - if grown > 0 { 5 } else { 0 }) >> 2;
+        // ⚠ `my_sign32` is −1/0, NEVER +1 (engine_support.cpp:2962) —
+        // so EF:23864's `- my_sign32(768*ring) * 5` is a no-op on the
+        // ONLY branch the ring counter ever takes (it cycles 0..10 via
+        // `(f26+2) % 11`) and an ADD of 5 on the negative one. Reading
+        // it as a signum cost the quad 2 units per ring step: mc2l3
+        // t=1341 slot 163 at ring 2 wants 768*2 >> 2 = 384, and the
+        // spurious −5 published 382 in BOTH the apitch and aroll lanes.
+        let shift = (grown - 5 * if grown < 0 { -1 } else { 0 }) >> 2;
         self.mc2_shift_rot(i, shift as u16, 512);
         let amt = (self.ent[i].f140 / self.ent[i].max_life as i32) as u32;
         let hits = self.area_write(i, 0, amt, ctx, false, false);
@@ -1630,12 +1661,16 @@ impl Gen {
     /// pull speed (`word_0x76_118 = min(dist, 42)`) which the ball
     /// tick (EF:26369) flies in, merging coincident balls into one.
     ///
-    /// The port reuses the established magnet path: [`Self::ball_tick`]
-    /// already consumes `dest_x/dest_y` as a decaying drift AND merges
-    /// overlapping balls, so the aura writes the pull velocity onto
-    /// each ball's dest exactly like [`Self::magnet_tick`] — the
-    /// homing triplet collapses to the same observable motion
-    /// (deliberate). Only the TARGET half (`word_0x7A_122`) keeps a
+    /// ⚠ The SCAN SOURCE is retail's (the tick-top `dword_38523`
+    /// chain — see the loop). What is still collapsed is the WRITE:
+    /// [`Self::ball_tick`] already consumes `dest_x/dest_y` as a
+    /// decaying drift AND merges overlapping balls, so the aura writes
+    /// the pull velocity onto each ball's dest exactly like
+    /// [`Self::magnet_tick`] instead of stamping retail's speed word
+    /// and letting the sphere derive its own heading (deliberate —
+    /// and note that it is why the port never writes the sphere's
+    /// `yaw`, which retail's own consume-side does).
+    /// Only the TARGET half (`word_0x7A_122`) keeps a
     /// field home of its own, the aura claim map, because retail's
     /// handshake is load-bearing on BOTH sides: the aura re-stamps
     /// EVERY tick (`if (!w7A)`, EF:28364) and the sphere clears the
@@ -1657,16 +1692,35 @@ impl Gen {
         let r = (self.ent[i].f26 as i32) << 8;
         let range_sq = r * r;
         let (ax, ay) = (self.ent[i].x, self.ent[i].y);
-        for j in 1..self.ent.len() {
+        // ⭐⭐⭐ THE SCAN IS `dword_38523`, THE TICK-TOP SPHERE CHAIN —
+        // NOT THE LIVE POOL (EF:28362). This was a registered
+        // approximation ("a pool slot-order list standing in for
+        // retail's `dword_38523` list") until mc2l3 t=9816 demanded
+        // it, and **membership sampled ONCE AT THE TOP is the whole
+        // point**: a sphere born MID-TICK is not in this tick's chain,
+        // so retail cannot pull it until the NEXT tick.
+        //
+        // mc2l3 t=9816 is that tick exactly — the player's cast borns
+        // a (10,54) aura plus eleven (10,39) spheres in one frame, and
+        // the aura dispatches at its own ascending slot afterwards.
+        // Retail's newborn spheres sit still (`dest` 0/0, `yaw` 0);
+        // the port's pool walk saw them immediately and pulled them a
+        // tick early, so **the port's whole sphere grid was one tick
+        // ahead of retail's forever after** — measured: the port's
+        // t=9816 x/y/dest_x/dest_y for slot 170 ARE retail's t=9817
+        // values. Same family as the ball chain's own law (mc1l4
+        // t=5377, the mid-tick ball the tick-top scan cannot hold).
+        //
+        // ⚠ The chain's membership is retail's verbatim (models 39,
+        // 40, 57 for MC2), but the model filter below is KEPT as it
+        // was: retail's `sub_38D80` has no model test and therefore
+        // pulls the (10,40) claim totem too, which the port has never
+        // done. That is a separate pre-existing residual, and changing
+        // the scan source and the pulled set in one step would make
+        // neither attributable.
+        for k in 0..self.ball_chain.visible_len() {
+            let j = self.ball_chain.list[k] as usize;
             let c = &self.ent[j];
-            // Retail walks `dword_38523` with NO model test
-            // (EF:28362-64), and that chain carries models 39, 40 and
-            // 57 (EF:40023-40062) — so a fool's sphere is dragged by
-            // the magnet exactly like real mana, which is precisely
-            // the disguise the spell is selling. (Model 40, the claim
-            // totem, rides retail's chain too; the port has never
-            // pulled it and this dig does not change that — a
-            // separate, pre-existing residual.)
             if c.class64 != 10 || !matches!(c.model65, 39 | 57) || c.flags & 0x400 != 0 {
                 continue;
             }

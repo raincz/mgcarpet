@@ -1104,10 +1104,14 @@ pub struct RetailWizardMc1 {
 }
 
 /// A wizard/player on-screen message: the text and the countdown that
-/// ages it out. A countdown that went UP across a pair means the slot
-/// was re-armed — i.e. a message FIRED on that tick, even when the
-/// text is identical to the last one (retail re-arms to a fixed
-/// per-message-kind value: 100 cheat, 200 level-up, 20 spell-select).
+/// ages it out. Retail re-arms the counter to a fixed per-message-kind
+/// value (100 cheat, 200 level-up, 50 assorted, 20 spell-select) and
+/// steps it down from there, so the counter — not the text — is what
+/// dates a repeat of a message already on screen.
+///
+/// ⚠⚠ HOW AN EXPIRED SLOT BEHAVES IS PER-GAME, so the fire edge has
+/// two rules and no shared one: [`Notify::fired_since_mc1`] (clamps at
+/// 0) and [`Notify::fired_since_mc2`] (wraps to 0xFFFF and parks).
 ///
 /// The text is kept as raw NUL-padded bytes so the whole retail
 /// closure stays `Copy`.
@@ -1153,11 +1157,62 @@ impl Notify {
     }
 
     /// True when `self` was re-armed relative to `prev` — the fire
-    /// edge. The counter decrements once per tick, so a snapshot taken
-    /// after the firing tick reads one BELOW the reset value; any
-    /// increase is a fresh `ShowMessage`.
-    pub fn fired_since(&self, prev: &Notify) -> bool {
-        self.ticks > prev.ticks
+    /// edge, and the witness the cheat and spell-select recovery both
+    /// run on. THE MC2 RULE; MC1 expires a toast differently and has
+    /// its own twin ([`Self::fired_since_mc1`]) — do not unify them.
+    ///
+    /// ⭐ THE MC2 COUNTER PARKS ON 0xFFFF, IT DOES NOT SATURATE OR CLEAR.
+    /// Measured tick by tick (mc2l0-spells-galore t=3000-3025): a
+    /// `ShowMessage` sets a small reset value and every later tick
+    /// steps it down by one — 19, 18, … 1, 0 — and the step off 0
+    /// WRAPS to 65535, where the slot then sits untouched with its
+    /// text intact. A plain `ticks > prev.ticks` test therefore got
+    /// this wrong in BOTH directions: it read the `0 → 65535` wrap as
+    /// a fresh fire (so an expiring cheat toast re-fired the cheat),
+    /// and it read a genuine fire out of an expired slot — `@65535 →
+    /// @99`, which is what EVERY press after the previous message has
+    /// faded looks like — as no fire at all. mc2l0-spells-galore
+    /// t=909 is the corpus row: `"Lightning Tower"@65535 → ".. CHEAT:
+    /// more mana"@99`, dropped, so the port never applied the cheat.
+    ///
+    /// So: a different message is always a fire, and for a repeat of
+    /// the SAME text only the counter can say — anything plain decay
+    /// cannot explain is a re-arm.
+    pub fn fired_since_mc2(&self, prev: &Notify) -> bool {
+        if self.text() != prev.text() {
+            return true;
+        }
+        let decayed = self.ticks == prev.ticks.wrapping_sub(1);
+        let parked = self.ticks == u16::MAX && prev.ticks == u16::MAX;
+        !(decayed || parked)
+    }
+
+    /// The MC1 twin of [`Self::fired_since_mc2`].
+    ///
+    /// ⚠⚠ THE TWO ENGINES EXPIRE A TOAST DIFFERENTLY, SO THE RULE IS
+    /// NOT SHARED. remc1's draw loop steps `periods_13415` only from
+    /// INSIDE `if (periods > 0)` — all three drawing arms do
+    /// (:26526/:26531 drawType 0, :26540/:26545 type 2, :26549/:26563
+    /// type 3) — so an MC1 counter CLAMPS at 0 and sits there with its
+    /// text intact, where MC2's steps off 0 and WRAPS to 65535.
+    /// Running the MC2 rule on MC1 reads that stationary `0 → 0` as a
+    /// fresh fire on EVERY tick: an expired `.. CHEAT: more mana`
+    /// re-applies its cheat forever, starting ~100 ticks (the handler's
+    /// re-arm value, :48925) after the one real press.
+    ///
+    /// A counter that only falls or holds makes any INCREASE a re-arm
+    /// and nothing else one. That also absorbs the draw-path cadence:
+    /// retail ages the slot in the RENDER loop, not the sim tick, so a
+    /// boundary the recorder took without an intervening draw leaves
+    /// the counter unmoved — a hold, not a fire.
+    ///
+    /// ⚠ A re-press that lands on the counter's CURRENT value is
+    /// invisible in this lane. That hole is in both engines' rules and
+    /// has no other in-closure witness (the 10-byte control command
+    /// carrying the opcode is memset before the capture window opens,
+    /// :49044).
+    pub fn fired_since_mc1(&self, prev: &Notify) -> bool {
+        self.text() != prev.text() || self.ticks > prev.ticks
     }
 }
 
@@ -1367,52 +1422,57 @@ pub struct RetailEntMc2 {
     pub flags: u32,     // +0x0C (dw_w_b flag dword)
     pub scratch10: i32, // +0x10 (dword_0x10_16 — scratch/invis)
     pub rand: u16,      // +0x14 (u16 LCG stream)
-    pub f16: u16,       // +0x16
-    pub next18: u16,    // +0x18 (tile-chain next entity)
-    pub f1a: u16,       // +0x1A
-    pub yaw: i16,       // +0x1C (world yaw — the live facing)
-    pub pitch: i16,     // +0x1E
-    pub roll: i16,      // +0x20 (target-yaw channel)
-    pub f22: i16,       // +0x22
-    pub f24: i16,       // +0x24 (killer)
-    pub f26: i16,       // +0x26 (hit source)
-    pub owner28: u16,   // +0x28 (parentId — WHO OWNS ME)
-    pub f2a: u16,       // +0x2A (subSpellIndex)
-    pub f2c: i16,       // +0x2C
-    pub f2e: i16,       // +0x2E
-    pub f30: u16,       // +0x30
-    pub f32: u16,       // +0x32 (pack leader)
-    pub f34: u16,       // +0x34 (subentity chain)
-    pub f36: u16,       // +0x36
-    pub b38: i8,        // +0x38
-    pub b39: i8,        // +0x39 (awake; 0xFA dead sentinel)
-    pub b3a: i8,        // +0x3A (wake delay)
-    pub b3b: i8,        // +0x3B
-    pub b3c: i8,        // +0x3C
-    pub b3d: i8,        // +0x3D
-    pub phase3e: u8,    // +0x3E (per-handler-run phase byte)
-    pub class3f: u8,    // +0x3F (0 = free slot)
-    pub model40: u8,    // +0x40
-    pub b41: i8,        // +0x41 (xtype)
-    pub b42: i8,        // +0x42 (xsubtype)
-    pub b43: i8,        // +0x43
-    pub b44: i8,        // +0x44
-    pub action45: u8,   // +0x45 (state/actionIndex)
-    pub b46: i8,        // +0x46
-    pub b47: i8,        // +0x47
-    pub sv1: i8,        // +0x48 (StageVar1)
-    pub sv2: i8,        // +0x49 (StageVar2)
-    pub sv_timer: i16,  // +0x4A
-    pub x: u16,         // +0x4C (8.8)
-    pub y: u16,         // +0x4E
-    pub z: i16,         // +0x50
-    pub ayaw: i16,      // +0x52 (applied yaw)
-    pub apitch: i16,    // +0x54
-    pub aroll: i16,     // +0x56
-    pub afov: i16,      // +0x58
-    pub f5a: i16,       // +0x5A (sprite-param index)
-    pub b5c: i8,        // +0x5C (anim frame)
-    pub b5d: i8,        // +0x5D
+    pub next16: u16,    // +0x16 (tile-chain NEXT — the lane the cell
+    //                     walks follow: sub_108B0/sub_10780 iterate
+    //                     `oldMapEntity_0x16_22` from `mapEntityIndex`;
+    //                     measured mc2l3 t=268 cell (106,196):
+    //                     152→137→241, exactly the probe order)
+    pub prev18: u16, // +0x18 (tile-chain PREV — 0 at the chain head;
+    //                     the old "next" label was backwards)
+    pub f1a: u16,      // +0x1A
+    pub yaw: i16,      // +0x1C (world yaw — the live facing)
+    pub pitch: i16,    // +0x1E
+    pub roll: i16,     // +0x20 (target-yaw channel)
+    pub f22: i16,      // +0x22
+    pub f24: i16,      // +0x24 (killer)
+    pub f26: i16,      // +0x26 (hit source)
+    pub owner28: u16,  // +0x28 (parentId — WHO OWNS ME)
+    pub f2a: u16,      // +0x2A (subSpellIndex)
+    pub f2c: i16,      // +0x2C
+    pub f2e: i16,      // +0x2E
+    pub f30: u16,      // +0x30
+    pub f32: u16,      // +0x32 (pack leader)
+    pub f34: u16,      // +0x34 (subentity chain)
+    pub f36: u16,      // +0x36
+    pub b38: i8,       // +0x38
+    pub b39: i8,       // +0x39 (awake; 0xFA dead sentinel)
+    pub b3a: i8,       // +0x3A (wake delay)
+    pub b3b: i8,       // +0x3B
+    pub b3c: i8,       // +0x3C
+    pub b3d: i8,       // +0x3D
+    pub phase3e: u8,   // +0x3E (per-handler-run phase byte)
+    pub class3f: u8,   // +0x3F (0 = free slot)
+    pub model40: u8,   // +0x40
+    pub b41: i8,       // +0x41 (xtype)
+    pub b42: i8,       // +0x42 (xsubtype)
+    pub b43: i8,       // +0x43
+    pub b44: i8,       // +0x44
+    pub action45: u8,  // +0x45 (state/actionIndex)
+    pub b46: i8,       // +0x46
+    pub b47: i8,       // +0x47
+    pub sv1: i8,       // +0x48 (StageVar1)
+    pub sv2: i8,       // +0x49 (StageVar2)
+    pub sv_timer: i16, // +0x4A
+    pub x: u16,        // +0x4C (8.8)
+    pub y: u16,        // +0x4E
+    pub z: i16,        // +0x50
+    pub ayaw: i16,     // +0x52 (applied yaw)
+    pub apitch: i16,   // +0x54
+    pub aroll: i16,    // +0x56
+    pub afov: i16,     // +0x58
+    pub f5a: i16,      // +0x5A (sprite-param index)
+    pub b5c: i8,       // +0x5C (anim frame)
+    pub b5d: i8,       // +0x5D
     /// Damage mailboxes +0x5E..0x82: six {i32 amount, u16 source}
     /// (type_str_0x5E_94 — same 36-byte 6-channel shape as MC1's).
     pub mail: [(i32, u16); 6],
@@ -1434,6 +1494,17 @@ pub struct RetailEntMc2 {
     pub ptr_a4: u32,
 }
 
+/// The castle-guard register's 34 slots — a newtype only because
+/// `[u16; 34]` has no `Default` impl (the std blanket stops at 32).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct GuardReg(pub [u16; 34]);
+
+impl Default for GuardReg {
+    fn default() -> Self {
+        Self([0; 34])
+    }
+}
+
 /// One decoded MC2 per-player block (`type_str_0x2BDE`, 2124 B) — the
 /// slice the conformance importer consumes.
 #[derive(Debug, Clone, Copy, Default)]
@@ -1451,6 +1522,35 @@ pub struct RetailPlayerMc2 {
     /// READS this stored index (21 sites in the brain, EF:5396 down)
     /// where the port re-derives it by owner scan (`rival_castle`).
     pub castle_ent: i16,
+    /// THE MANA-BALLOON REGISTER `array_0x3C_60[0..3]` (+998+60, u16
+    /// ×3 — `array_0x5C_92` starts at +0x5C, so the fleet uses the
+    /// first three of sixteen). `sub_5FF50` (EF:61377-61431) drives
+    /// the WHOLE fleet pass from this array by INDEX: an empty slot
+    /// spawns (and skips the retarget), a dead one converts and
+    /// clears (replacement a pass late), and the two exclusions the
+    /// sphere pick receives are indices `(v1+1)%3` and `(v1+2)%3` —
+    /// so spawn order, not slot order, decides which balloon claims
+    /// which sphere. MC1's twin is `Type_160 +52/+54/+56`
+    /// (`RetailWizardMc1::balloon_reg`).
+    pub balloons: [u16; 3],
+    /// THE CASTLE-GUARD REGISTER `array_0x5C_92[0..34]` (+998+92,
+    /// `std::array<uint16_t, 103>` per global_types.h:242 — level 7's
+    /// quota of 34 is the most any castle indexes). `sub_5FF50`'s guard
+    /// tail (EF:61483-61508) drives the whole pass from it BY INDEX,
+    /// exactly like the fleet half above: an empty slot spawns one
+    /// (5,15) if the cooldown is down, and a STALE one — a slot naming
+    /// a record that is no longer a live (5,15) — is cleared and
+    /// RE-ARMS the 16-pass cooldown WITHOUT spawning.
+    ///
+    /// ⭐ It is imported rather than rebuilt precisely because of that
+    /// second arm: a stale entry is retail-only memory of a guard that
+    /// is already gone, so a census of the live roster cannot
+    /// reconstruct it (the MC1 twin says so in its own import comment
+    /// and eats a divergence at mc1l1 t=2571 for it). And the register
+    /// lives on the OWNER, so it outlives the castle: mc2l3's re-sited
+    /// castle inherits four dead guards from the one the player
+    /// demolished and pays a cooldown per rung to shed them.
+    pub guards: GuardReg,
     pub cmd_speed: i16, // type_str_164 (+998) +12
     pub strafe: i16,    // +998 +16
     // The pose channel's flight lanes (Type_str_164 offsets, all
@@ -1488,6 +1588,14 @@ pub struct RetailPlayerMc2 {
     /// (`byte_0x261_609`, EF:59869-81).
     pub water_ctr: u8, // +610
     pub nudge_latch: u8,  // +609
+    /// The CAST-CHARGE METER (`byte_0x154_340`, +998+340) — MC2's
+    /// twin of MC1's `u8_326`: +1 per live carpet tick saturating at
+    /// 200 (EF:5424-25), banked into a spawned entity's `@0x10` and
+    /// ZEROED by every cast site (EF:55869-70 and seventeen more).
+    /// It was never decoded, so the MC2 import used to seed the CAP
+    /// as a prior; the byte was in the capture the whole time — the
+    /// per-player block reaches +2103, so no re-record was needed.
+    pub charge: u8,
     /// Invulnerability-reset countdown (`word_0x159_345`, +998+345).
     pub invuln: i16,
     /// Life-regen stall (`dword_0x18D_397`, +998+397): every
@@ -1524,6 +1632,19 @@ pub struct RetailPlayerMc2 {
     pub ring: [u8; 26],
     pub levels: [u8; 26],
     pub sel: [u8; 26],
+    /// THE CASTLE RE-CAST SURCHARGE LATCH `byte_0x1BE_446` (+998+446
+    /// = player-block offset 0x5A4). Set by a level-1 demolish
+    /// (EF:37993-95), cleared by the castle level-up (EF:61593);
+    /// `GetSpellManaCost_6D710` (Level.cpp:1723-26/1776-79) adds
+    /// +3000 to Create Castle while it is up and the caster has no
+    /// castle or one at level 0. Three bytes below `ai_state` and
+    /// well inside the 2124-byte stride — it was ALWAYS in the
+    /// capture and only the decoder was missing it (the `charge` /
+    /// `+0x154` lesson again; no re-record needed).
+    /// ⚠ THE OFFSET IS `t + 446`, NOT `t + 1444` — `t` is ALREADY
+    /// `b + PP_FLIGHT`, so `t + 1444` would land in the NEXT
+    /// player's block (the ledger banked that arithmetic wrong).
+    pub recast_surcharge: u8,
     /// The AI brain state `byte_0x1C1_449` (+998+449) — the value the
     /// per-tick dispatch `sub_12910` switches on (EF:5252): 0 fresh,
     /// 1 upgrade, 3 build, 4/6 possess, 7 castle raid, 8 wizard, 9
@@ -1615,6 +1736,19 @@ pub struct RetailMc2 {
     /// `(ptr_a0 − base160)/34 + 59` (retail's own load fixup,
     /// Level.cpp:1255-57).
     pub base160: u32,
+    /// The per-player OBJECTIVE BOARD `struct_0x3659C[8]`
+    /// (`type_substr_3659C`, LevelStructs.h:190-196, stride 11):
+    /// `[0]` IsLevelEnd_0, `[1]` ObjectiveText_1 (the CURRENT row
+    /// cursor), `[2]` ObjectiveDone_2 (the one-pass pause), `[3..11]`
+    /// stage_0x3659F[8] (per-row state, 1 = active, 2 = done). These
+    /// are GLOBALS, not entity state — `sub_58F00_game_objectives`
+    /// (EF:40693) reads and writes them at the frame tail, and the
+    /// class-11 model-32 switches gate on `stage_0x3659F[par1] == 2`
+    /// (EF:54369). ⭐ The bytes were always in the capture:
+    /// `0x3659C + 8*11 == 0x365F4`, the stagevar base decoded right
+    /// below — the adjacency pins base AND stride, so this needed no
+    /// re-record (the `+0x154` lesson again).
+    pub objectives: [[u8; 11]; 8],
     /// The LIVE StageVar table `StageVars2_0x365F4[11]` (LS:249), raw
     /// 8-byte rows: [kind, flags, chain, cadence, payload×4]. Runtime
     /// lanes (FIRED &4, kind-7 arm &0x18, the cadence counter, kind-6
@@ -1637,8 +1771,8 @@ pub fn decode_retail_ent_mc2(d: &[u8], slot: u16) -> RetailEntMc2 {
         flags: u32_(d, o + 0x0C),
         scratch10: i32_(d, o + 0x10),
         rand: u16_(d, o + 0x14),
-        f16: u16_(d, o + 0x16),
-        next18: u16_(d, o + 0x18),
+        next16: u16_(d, o + 0x16),
+        prev18: u16_(d, o + 0x18),
         f1a: u16_(d, o + 0x1A),
         yaw: i16_(d, o + 0x1C),
         pitch: i16_(d, o + 0x1E),
@@ -1737,6 +1871,8 @@ fn decode_retail_player_mc2(d: &[u8], i: u16) -> RetailPlayerMc2 {
         turn: i32_(d, b + m2::PP_TURN),
         castle: i16_(d, b + m2::PP_CASTLE),
         castle_ent: i16_(d, b + m2::PP_CASTLE_TRUE),
+        balloons: [u16_(d, t + 60), u16_(d, t + 62), u16_(d, t + 64)],
+        guards: GuardReg(std::array::from_fn(|k| u16_(d, t + 92 + 2 * k))),
         cmd_speed: i16_(d, t + 12),
         strafe: i16_(d, t + 16),
         move_bits: u32_(d, t),
@@ -1753,6 +1889,7 @@ fn decode_retail_player_mc2(d: &[u8], i: u16) -> RetailPlayerMc2 {
         mobilize_ctr: u8_(d, t + 336),
         water_ctr: u8_(d, t + 610),
         nudge_latch: u8_(d, t + 609),
+        charge: u8_(d, t + 340),
         invuln: i16_(d, t + 345),
         regen_stall: i32_(d, t + 397),
         wanted: i16_(d, t + 584),
@@ -1767,6 +1904,7 @@ fn decode_retail_player_mc2(d: &[u8], i: u16) -> RetailPlayerMc2 {
         ring,
         levels,
         sel,
+        recast_surcharge: u8_(d, t + 446),
         ai_state: u8_(d, t + 449),
         burst: i16_(d, t + 418),
         poverty: i16_(d, t + 420),
@@ -1788,6 +1926,65 @@ fn decode_retail_player_mc2(d: &[u8], i: u16) -> RetailPlayerMc2 {
             u16_(d, b + m2::PP_NOTIFY_TICKS),
         ),
     }
+}
+
+/// Retail's campaign REPLAY gate (`x_D41A0_BYTEARRAY_4_struct.setting_38545
+/// & 4`), DERIVED FROM THE CAPTURE rather than declared.
+///
+/// The world map raises bit 2 when the chosen MAIN portal carries
+/// `activated_18 == 1` — i.e. this save has already completed the level
+/// (MenusAndIntros.cpp:3347-48; the secret-portal twin is :3372 on
+/// `activated_12 == 1`). It gates three in-sim behaviours: the (14,5) XP
+/// scroll's ctor pre-hide (EF:37371), the scroll tick's instant hide +
+/// soft-kill (EF:41161-65), and every entity XP award (`sub_6D8B0`,
+/// EF:58235).
+///
+/// ⚠ The byte itself is NOT in the recording — it lives in the separate
+/// `x_D41A0_BYTEARRAY_4_struct` block while the recorder captures only
+/// `D41A0_0` (tools/mc_dosbox_recorder.py). A full 224,790-byte scan of all
+/// seven MC2 takes finds no offset carrying its signature.
+///
+/// ⭐ But its EFFECT is in the capture, as a direct positive witness:
+/// `sub_514E0` (EF:37315) sets byte[0] bits 2 and 3 only, so for model 5 the
+/// SINGLE setter of byte[0] bit 0 is the gated ctor line EF:37371. A (14,5)
+/// born under the gate therefore reads `flags & 1`; one born without it does
+/// not. Measured: mc2l3's scrolls are born at 0xD, mc2l0's live at 0xC.
+/// Deriving the flag from that witness is strictly better than a
+/// hand-maintained per-take table, which would be a knob a human must set
+/// correctly and which `for_each_pair` could not set at all (it sees the
+/// FIXTURE path, not the take).
+///
+/// Scans until the first (14,5) and stops; takes with no scroll return false,
+/// which is correct because the gate has no other in-sim consumer here (the
+/// XP half is unreachable on this corpus — every spell is already at its
+/// level cap with `xp_vol` imported as 0).
+///
+/// ⚠ SIMPLIFICATION, deliberate: retail also CLEARS bit 2 in-sim at
+/// EF:60541 (`sub_5E8C0_endGameSeq` case 0xC, `actionIndex == 11`), i.e. at
+/// level completion. This derivation is a run-constant and is therefore
+/// correct only up to that event, which no take in the corpus reaches while
+/// still spawning scrolls.
+///
+/// ⭐⭐ IT LIVES HERE, BESIDE THE DECODER, BECAUSE EVERY RETAIL DRIVER NEEDS
+/// IT. It was a conformance-runner private for four sessions, so the app's
+/// own `--replay` ran every MC2 take ungated: mc2l3 (gate `true`) leaked all
+/// 26 XP scrolls from t=6444, and the pool drift moved a fireball crater
+/// enough to raise the mover's ground clamp 5 height units and hold `z` for
+/// a tick at t=7367 — the app-vs-conform fork banked across three sessions.
+/// mc2l0 hid it by being the one MC2 take whose gate is `false`.
+pub fn mc2_take_replayed(path: &std::path::Path) -> Result<bool, String> {
+    let mut rec = Recording::open(path)?;
+    while let Some(r) = rec.next_tick() {
+        let tick = r?;
+        let Some(state) = &tick.state else { continue };
+        let st = decode_retail_mc2(state)?;
+        for e in &st.ents {
+            if e.class3f == 14 && e.model40 == 5 {
+                return Ok(e.flags & 1 != 0);
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// Decode the full MC2 retail closure from a raw struct image.
@@ -1823,6 +2020,13 @@ pub fn decode_retail_mc2(d: &[u8]) -> Result<RetailMc2, String> {
         recycle_stack: mc2_stack(d, 0x11E6, 0x11EA, pool_base),
         level: u16_(d, m2::POOL + m2::ENT_COUNT * m2::ENT_STRIDE + 2),
         base160: u32_(d, 0x36DF6),
+        objectives: {
+            let mut ob = [[0u8; 11]; 8];
+            for (i, row) in ob.iter_mut().enumerate() {
+                row.copy_from_slice(&d[0x3659C + i * 11..0x3659C + i * 11 + 11]);
+            }
+            ob
+        },
         stagevars: {
             let mut sv = [[0u8; 8]; 11];
             for (i, row) in sv.iter_mut().enumerate() {

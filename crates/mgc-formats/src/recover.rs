@@ -143,20 +143,33 @@ const CHEAT_TOASTS: &[(&str, Cheat)] = &[
     (".. CHEAT: Invincability", Cheat::Invincible),
 ];
 
-/// The cheat fired across one recorded pair, from the caster's own
-/// message slot: the counter must have been RE-ARMED (it only counts
-/// down otherwise) and the text must name a cheat. Repeats of the
-/// same cheat are distinguished by the counter alone — the text does
-/// not change between them.
-pub fn cheat_fired(prev: &Notify, cur: &Notify) -> Option<Cheat> {
-    if !cur.fired_since(prev) {
-        return None;
-    }
+/// The cheat this toast NAMES, ignoring whether it just fired.
+fn cheat_named(cur: &Notify) -> Option<Cheat> {
     let text = cur.text();
     CHEAT_TOASTS
         .iter()
         .find(|(s, _)| text.starts_with(s))
         .map(|&(_, c)| c)
+}
+
+/// The cheat fired across one recorded MC1 pair, from the caster's own
+/// message slot: the counter must have been RE-ARMED (it only counts
+/// down otherwise) and the text must name a cheat. Repeats of the
+/// same cheat are distinguished by the counter alone — the text does
+/// not change between them.
+///
+/// ⚠⚠ THE FIRE EDGE IS PER-GAME — see [`Notify::fired_since_mc1`].
+/// MC1's counter clamps at 0 where MC2's wraps to 0xFFFF, so sharing
+/// one rule made every expired MC1 cheat toast re-fire its cheat on
+/// every subsequent tick.
+pub fn cheat_fired_mc1(prev: &Notify, cur: &Notify) -> Option<Cheat> {
+    cheat_named(cur).filter(|_| cur.fired_since_mc1(prev))
+}
+
+/// The MC2 twin of [`cheat_fired_mc1`], on MC2's own expiry rule
+/// ([`Notify::fired_since_mc2`]).
+pub fn cheat_fired_mc2(prev: &Notify, cur: &Notify) -> Option<Cheat> {
+    cheat_named(cur).filter(|_| cur.fired_since_mc2(prev))
 }
 
 /// Invert the stick filter across one recorded tick: find a stick
@@ -430,7 +443,7 @@ pub fn recover_pair_mc1(
         equip_right: equip(pw.hand_right, cw.hand_right),
         respawn: respawn_key(input_end),
         demolish,
-        cheat: cheat_fired(&pw.notify, &cw.notify),
+        cheat: cheat_fired_mc1(&pw.notify, &cw.notify),
         ..RecoveredPair::default()
     }
 }
@@ -440,6 +453,74 @@ pub fn recover_pair_mc1(
 /// (the witness folds EVERY record in stream order, anchors included,
 /// so its state machine lives outside the pair). `input_end` is the
 /// END record's raw input channel (the demolish key corroboration).
+/// ⭐ THE WALL DEAD-STOP IS A SIM EFFECT, NOT AN INPUT — so the
+/// capture's own speed command has to be un-done before it can be
+/// replayed as one.
+///
+/// A BLOCKED move restores the carpet's position and zeroes
+/// `speed_0xc_12` at the END of the frame (EF:59595-602) — after
+/// `sub_5D530`'s servo has already stepped `actSpeed` from the command
+/// as it stood mid-frame. The capture at N+1 therefore holds the
+/// POST-block 0, and handing that straight back as the pair's target
+/// applies the dead-stop a whole frame early. Consumers model the stop
+/// themselves (`flight::move_mc2`, `out.zero_speed`), so they re-zero
+/// on their own; what they need is the command the frame actually
+/// served.
+///
+/// That command is N's, advanced by the frame's OWN ±16 key
+/// integration (`sub_5F380`, EF:60748 — the guarded form: a key only
+/// steps while the target is inside ±80), which the move_bits lane
+/// still reports. mc2l3 t=3407: the carpet flies into a wall at 48
+/// with forward held, retail integrates the command to 64 and the
+/// servo lands actSpeed on 64 before the block wipes it — reading the
+/// wiped 0 back produced 48. mc2l3 t=2639 is the other branch: backing
+/// at −80 with the target already at the floor, the integration is a
+/// no-op and the servo holds −80 for the frame.
+///
+/// Witness (`pose_forced`) = the carpet's pose was NOT the mover's
+/// output this pair, with the command newly 0 while `actSpeed` is
+/// still RUNNING. Two shapes reach it and both zero the command from
+/// outside the servo:
+///   * FROZEN — the blocked move above. (The modal park is the
+///     `speed == 0` twin of the same freeze; the two stay disjoint.)
+///   * WARPED — the pose jumped further than any mover step could
+///     carry it, so a spell/pad placed it. mc2l3 t=3933: a Teleport
+///     lands the carpet 119 tiles away and clears the command; retail
+///     holds actSpeed at −16 for that frame and drops to 0 at 3934,
+///     where the port read the cleared command and dropped a tick
+///     early.
+///
+/// ⭐⭐ A BLOCK THAT LASTS MORE THAN ONE FRAME HAS N's COMMAND ALREADY
+/// WIPED. The two shapes above both entered the block from a live
+/// command, so the first draft also demanded `prev_cmd != 0` — an
+/// accidental property of its two exemplars, not part of the law. Hold
+/// a wall down and the stop fires EVERY frame: from the second one on
+/// the capture reads 0 at both ends while `sub_5F380` keeps re-adding
+/// its +16, so `actSpeed` STALLS at 16 instead of decaying. mc2l3
+/// t=6514..6516 is three such frames in a row — retail holds 16, 16,
+/// 16 with forward held and the pose pinned, then drops to 0 at 6517
+/// the moment the key releases. The integration is the law; the
+/// starting value is just its argument.
+pub fn mc2_pair_cmd_speed(
+    prev_cmd: i16,
+    cur_cmd: i16,
+    move_bits: u32,
+    pose_forced: bool,
+    cur_speed: i16,
+) -> i16 {
+    if !(cur_cmd == 0 && cur_speed != 0 && pose_forced) {
+        return cur_cmd;
+    }
+    let mut dir: i16 = 0;
+    if move_bits & 1 != 0 && prev_cmd < 80 {
+        dir = 1;
+    }
+    if move_bits & 2 != 0 && prev_cmd > -80 {
+        dir = -1;
+    }
+    (prev_cmd + 16 * dir).clamp(-80, 80)
+}
+
 pub fn recover_pair_mc2(
     pst: &RetailMc2,
     st: &RetailMc2,
@@ -469,35 +550,120 @@ pub fn recover_pair_mc2(
     };
     let left = rebind(0, pp.hand_left, cp.hand_left);
     let right = rebind(1, pp.hand_right, cp.hand_right);
+    // ⭐⭐ A TIER SWAP IS A SELECT THAT MOVES NO HAND POINTER. The
+    // pane commits every pick through the same handler (PlayerAction
+    // 0x1F/0x20, EF:37898-928: persist the tier, bind the quick-slot,
+    // SetSpell, sound 14) and TWO recorded shapes reach it — the
+    // pointer moves because a DIFFERENT spell was equipped, or the
+    // pointer stays and only `array_0x437[spell]` moves because the
+    // player picked a higher TIER of the spell already in that hand.
+    // Keying recovery on the pointer alone saw the first and dropped
+    // the second, which is how EVERY upgrade past level 0 arrives:
+    // mc2l0 t=7728 records `hand_pending 1 -> 0`, `sel[0] 0 -> 1` and
+    // the notification "FireBall" -> "Rapid Fire", with both hand
+    // pointers untouched — retail re-prices the held class-15 token
+    // (mana_max 100 -> 250, @0x2A 250 -> 160) and the port stayed on
+    // the base tier for the rest of the take. Every MC2 recording
+    // that uses a spell above level 0 breaks at its first swap.
+    //
+    // The hand is named by the pane's PENDING byte at the START
+    // record (`byte_0x457_1111`: 1 = a left equip mid-flight, 2 =
+    // right, PI:806-91), which the commit clears to 0. With no
+    // pending byte to read, fall back to whichever hand already holds
+    // the spell — the bind is a no-op there by definition.
+    let tier_swap = (0..26).find(|&s| pp.sel[s] != cp.sel[s]).and_then(|s| {
+        let hand = match pp.hand_pending {
+            1 => 0u8,
+            2 => 1u8,
+            _ if cp.hand_left == s as i16 => 0,
+            _ if cp.hand_right == s as i16 => 1,
+            _ => return None,
+        };
+        Some((s as u8, cp.sel[s], hand))
+    });
     let (mc2_select, rebind_dropped) = match (left, right) {
         (Some(l), Some(_)) => (Some(l), true),
-        (l, r) => (l.or(r), false),
+        (l, r) => (l.or(r).or(tier_swap), false),
     };
     // Demolish (Shift+L → `PlayerAction` 0x2A, EF:37991-96): MC2's
     // command never touches the move byte, so the witness is the own
-    // CASTLE at the END record carrying the demolish write — life
-    // exactly −1 in the destroy intake (action 6) — corroborated by
-    // the held Shift+L scancodes (L = 38, either shift 42/54;
-    // measured at mc2l24 t=41798). The write is idempotent, so a
-    // castle parked at −1 across records re-fires harmlessly.
+    // CASTLE's KILL EDGE — alive at the START record, exactly −1 at
+    // the END record — corroborated by the held Shift+L scancodes
+    // (L = 38, either shift 42/54; measured at mc2l24 t=41798).
+    //
+    // ⭐⭐⭐ THE ACTION IS NOT PART OF THE WITNESS. Retail's handler is
+    // three lines — `if (castle > Entities[0]) { if (level == 1)
+    // byte_0x1BE_446 = 1; castle->life_0x8 = -1; }` — and it tests
+    // NOTHING about the castle's state. An `action45 == 6` clause is
+    // therefore a test the PORT invented, and it only happens to hold
+    // for a demolish that lands on a castle standing at rest: the
+    // standing tick converts life < 0 into action 6 in the SAME tick,
+    // so the END record shows 6. A castle demolished again while it is
+    // still inside the previous rung's build state machine (action 5)
+    // never reaches the destroy intake that tick, so the clause
+    // silently dropped the press.
+    //
+    // mc2l3's self-destruct is exactly that case, and it is the level's
+    // certification blocker: the player HAMMERS Shift+L to walk the
+    // castle down rung by rung, and the second press lands at t=15910
+    // with the castle at action 5 / `word_0x2E_46` 3 (the repaint
+    // painter it just minted). Retail writes life −1 anyway; the port
+    // saw action 5 and replayed no press at all, so the whole rest of
+    // the demolish ladder — and the re-site that opens the sealed
+    // chamber — never happened.
+    //
+    // The kill EDGE (rather than `life == -1` outright) is what keeps
+    // the parked castle from re-firing for the ~45 ticks it sits dead
+    // at action 5 with the key still down; the write itself is
+    // idempotent, but the +3000 surcharge latch below is not.
     let demolish = {
-        let castle = cp.castle_ent;
-        castle > 0
+        let castle = cp.castle_ent as usize;
+        let alive_before = pst
+            .ents
+            .get(castle)
+            .is_some_and(|c| c.class3f == 3 && c.life >= 0);
+        cp.castle_ent > 0
+            && alive_before
             && st
                 .ents
-                .get(castle as usize)
-                .is_some_and(|c| c.class3f == 3 && c.life == -1 && c.action45 == 6)
+                .get(castle)
+                .is_some_and(|c| c.class3f == 3 && c.life == -1)
             && key_held(input_end, 38)
             && (key_held(input_end, 42) || key_held(input_end, 54))
     };
     // The modal park (big map / spell book): the game keeps running
     // but the carpet stops dead. Witness = the consumed command at 0
     // AND the carpet entity pinned in place at zero speed across the
-    // pair — a live zero-crossing never freezes the position too.
+    // pair.
+    //
+    // ⚠⚠ THE OLD WITNESS'S OWN JUSTIFICATION WAS FALSE — it read "a
+    // live zero-crossing never freezes the position too", and every
+    // zero-crossing freezes it. `sub_5D530` runs the ±16 servo BEFORE
+    // the polar step (EF:59636-44, then :59668), so on the very tick a
+    // braking command reaches 0 the step is taken at speed 0 and x/y
+    // do not move at all. mc2l3 t=605 is the counterexample: the down
+    // key walks the command 16 → 0, retail's carpet holds 25240/48943
+    // exactly, and all three park clauses fire on a carpet nobody
+    // parked. Harmless while the harness pinned the command every
+    // tick; fatal once the register carries itself, because the park
+    // arm zeroes BOTH registers ahead of `sub_5F380` and the next key
+    // press then integrates from 0 instead of 16.
+    //
+    // A held speed key is the discriminator: the modal screens eat the
+    // movement keys, so a real park never carries one.
     let ci = cp.play_index as usize;
     let mc2_park = cp.cmd_speed == 0
+        && mb & 3 == 0
         && matches!((pst.ents.get(ci), st.ents.get(ci)), (Some(p), Some(c))
             if c.speed == 0 && p.x == c.x && p.y == c.y);
+    // Pose NOT mover-driven this pair: frozen (a blocked move) or
+    // warped further than any mover step could carry it (2048 is the
+    // pose channel's own warp gate; the mover's reach is ~450).
+    let pose_forced = matches!((pst.ents.get(ci), st.ents.get(ci)), (Some(p), Some(c))
+        if (p.x == c.x && p.y == c.y)
+            || (c.x.wrapping_sub(p.x) as i16).unsigned_abs() > 2048
+            || (c.y.wrapping_sub(p.y) as i16).unsigned_abs() > 2048);
+    let cur_speed = st.ents.get(ci).map_or(0, |c| c.speed);
     RecoveredPair {
         stick_x: recover_stick(pp.roll_acc as i16, cp.roll_acc as i16),
         stick_y: recover_stick(pp.pitch_acc as i16, cp.pitch_acc as i16),
@@ -508,9 +674,15 @@ pub fn recover_pair_mc2(
         rebind_dropped,
         respawn,
         demolish,
-        mc2_cmd_speed: Some(cp.cmd_speed),
+        mc2_cmd_speed: Some(mc2_pair_cmd_speed(
+            pp.cmd_speed,
+            cp.cmd_speed,
+            mb,
+            pose_forced,
+            cur_speed,
+        )),
         mc2_park,
-        cheat: cheat_fired(&pp.notify, &cp.notify),
+        cheat: cheat_fired_mc2(&pp.notify, &cp.notify),
         ..RecoveredPair::default()
     }
 }
@@ -601,14 +773,77 @@ mod cheat_tests {
     /// The counter is what dates a cheat, not the text: retail re-arms
     /// it to 100 and it ticks DOWN, so a snapshot taken after the
     /// firing tick reads 99. Any INCREASE is a fresh `ShowMessage`.
+    /// Both engines agree on this much.
     #[test]
     fn a_repeat_of_the_same_cheat_is_a_fresh_fire() {
         let a = notify(".. CHEAT: more mana", 96);
         let b = notify(".. CHEAT: more mana", 99);
-        assert_eq!(cheat_fired(&a, &b), Some(Cheat::MoreMana));
         // …and the ordinary count-down in between is not.
         let c = notify(".. CHEAT: more mana", 98);
-        assert_eq!(cheat_fired(&b, &c), None);
+        for fired in [cheat_fired_mc1, cheat_fired_mc2] {
+            assert_eq!(fired(&a, &b), Some(Cheat::MoreMana));
+            assert_eq!(fired(&b, &c), None);
+        }
+    }
+
+    /// ⚠⚠ THE EXPIRED SLOT IS WHERE THE TWO ENGINES PART, AND GETTING
+    /// IT WRONG RE-FIRES THE CHEAT FOREVER.
+    ///
+    /// remc1 decrements only from inside `if (periods > 0)`
+    /// (:26526/:26531), so an MC1 toast CLAMPS at 0 and holds there
+    /// with its text intact. Applying MC2's rule — which expects the
+    /// step off 0 to wrap to 0xFFFF — reads every one of those
+    /// stationary boundaries as a fresh fire, which is exactly what
+    /// made an MC1 cheat take dispense mana on every tick from ~100
+    /// ticks after the single real press.
+    #[test]
+    fn an_expired_mc1_toast_clamps_at_zero_and_never_refires() {
+        let dead = notify(".. CHEAT: more mana", 0);
+        assert_eq!(cheat_fired_mc1(&dead, &dead), None);
+        // The last real step down, and the clamp it lands on.
+        assert_eq!(
+            cheat_fired_mc1(&notify(".. CHEAT: more mana", 1), &dead),
+            None
+        );
+        // NON-VACUITY: the MC2 rule is what got this wrong.
+        assert!(dead.fired_since_mc2(&dead));
+        assert!(!dead.fired_since_mc1(&dead));
+        // A genuine re-press out of the clamped slot still registers.
+        assert_eq!(
+            cheat_fired_mc1(&dead, &notify(".. CHEAT: more mana", 99)),
+            Some(Cheat::MoreMana)
+        );
+    }
+
+    /// MC1 ages the slot in the RENDER loop, so a recorded boundary
+    /// with no intervening draw leaves the counter unmoved. That is a
+    /// hold, not a fire — and unlike MC2 there is no `== prev - 1`
+    /// requirement to trip over.
+    #[test]
+    fn an_mc1_boundary_without_a_draw_is_a_hold_not_a_fire() {
+        let a = notify(".. CHEAT: heal", 57);
+        assert_eq!(cheat_fired_mc1(&a, &a), None);
+        // Two frames drawn inside one recorded boundary: still decay.
+        assert_eq!(cheat_fired_mc1(&a, &notify(".. CHEAT: heal", 55)), None);
+    }
+
+    /// The MC2 side of the same seam, kept pinned beside its twin: the
+    /// counter steps off 0 to 65535 and PARKS, and a real fire out of
+    /// that parked slot is the `@65535 -> @99` shape (the
+    /// mc2l0-spells-galore t=909 corpus row).
+    #[test]
+    fn an_expired_mc2_toast_parks_on_ffff() {
+        let zero = notify(".. CHEAT: more mana", 0);
+        let parked = notify(".. CHEAT: more mana", u16::MAX);
+        assert_eq!(cheat_fired_mc2(&zero, &parked), None);
+        assert_eq!(cheat_fired_mc2(&parked, &parked), None);
+        assert_eq!(
+            cheat_fired_mc2(
+                &notify("Lightning Tower", u16::MAX),
+                &notify(".. CHEAT: more mana", 99)
+            ),
+            Some(Cheat::MoreMana)
+        );
     }
 
     /// Non-cheat toasts share the lane (level-up re-arms to 200, the
@@ -616,11 +851,13 @@ mod cheat_tests {
     #[test]
     fn ordinary_toasts_are_not_cheats() {
         let a = notify("", 0);
-        assert_eq!(cheat_fired(&a, &notify("Lightning Tower", 19)), None);
-        assert_eq!(
-            cheat_fired(&a, &notify("has been banished from the realm.", 99)),
-            None
-        );
+        for fired in [cheat_fired_mc1, cheat_fired_mc2] {
+            assert_eq!(fired(&a, &notify("Lightning Tower", 19)), None);
+            assert_eq!(
+                fired(&a, &notify("has been banished from the realm.", 99)),
+                None
+            );
+        }
     }
 
     /// The ON/OFF toggles share a prefix — the recording says it
@@ -632,7 +869,8 @@ mod cheat_tests {
             ".. CHEAT: Free Spell Usage ON",
             ".. CHEAT: Free Spell Usage OFF",
         ] {
-            assert_eq!(cheat_fired(&a, &notify(s, 99)), Some(Cheat::FreeSpell));
+            assert_eq!(cheat_fired_mc1(&a, &notify(s, 99)), Some(Cheat::FreeSpell));
+            assert_eq!(cheat_fired_mc2(&a, &notify(s, 99)), Some(Cheat::FreeSpell));
         }
     }
 
@@ -642,8 +880,78 @@ mod cheat_tests {
     fn every_toast_maps_and_every_code_round_trips() {
         let a = notify("", 0);
         for &(text, want) in CHEAT_TOASTS {
-            assert_eq!(cheat_fired(&a, &notify(text, 99)), Some(want), "{text}");
+            assert_eq!(cheat_fired_mc1(&a, &notify(text, 99)), Some(want), "{text}");
+            assert_eq!(cheat_fired_mc2(&a, &notify(text, 99)), Some(want), "{text}");
             assert_eq!(Cheat::from_code(want.code()), Some(want), "{text}");
         }
+    }
+}
+
+#[cfg(test)]
+mod wall_stop_tests {
+    use super::mc2_pair_cmd_speed;
+
+    /// ⭐ THE WALL/WARP DEAD-STOP IS A SIM EFFECT, NOT AN INPUT
+    /// ([`mc2_pair_cmd_speed`]). Pair-BLIND by construction — the
+    /// recovery is harness machinery, so no `.mgcr` fixture can pin
+    /// it; all three rows below are measured off mc2l3.
+    #[test]
+    fn the_mc2_dead_stop_is_undone_before_the_command_is_replayed() {
+        // The ordinary pair: the capture's command IS what the frame
+        // served, whatever the carpet did.
+        assert_eq!(mc2_pair_cmd_speed(48, 64, 1, false, 64), 64, "live command");
+        assert_eq!(
+            mc2_pair_cmd_speed(48, 64, 1, true, 64),
+            64,
+            "a frozen carpet with a NONZERO command is not a dead-stop"
+        );
+        // mc2l3 t=2639 — backing into a wall at the floor. The command
+        // reads 0 at N+1 because the block wiped it; the frame served
+        // −80, and the guarded integration cannot step past ±80, so
+        // the servo holds actSpeed at −80 for that frame.
+        assert_eq!(
+            mc2_pair_cmd_speed(-80, 0, 2, true, -80),
+            -80,
+            "the wiped command is the pre-block one, and ±80 is a floor"
+        );
+        // mc2l3 t=3407 — flying into a wall at 48 with forward HELD:
+        // `sub_5F380` integrated the command to 64 before the mover,
+        // and only then did the block wipe it.
+        assert_eq!(
+            mc2_pair_cmd_speed(48, 0, 1, true, 48),
+            64,
+            "the frame's own ±16 key integration still applies"
+        );
+        // mc2l3 t=3933 — a Teleport places the carpet 119 tiles away
+        // and clears the command; `pose_forced` covers the warp too.
+        assert_eq!(
+            mc2_pair_cmd_speed(-16, 0, 16, true, -16),
+            -16,
+            "a warp clears the command the same way a wall does"
+        );
+        // The modal park is the `speed == 0` twin and must NOT be
+        // re-armed: it really did zero the command as an input.
+        assert_eq!(
+            mc2_pair_cmd_speed(-80, 0, 0, true, 0),
+            0,
+            "the modal park stays disjoint from the dead-stop"
+        );
+        // mc2l3 t=6514..6516 — the SECOND and later frames of one
+        // block: N's command is already wiped, forward is still held,
+        // and retail's servo stalls actSpeed at 16 rather than
+        // decaying to 0. Demanding `prev_cmd != 0` read this as an
+        // ordinary zero command and dropped the carpet a tick early.
+        assert_eq!(
+            mc2_pair_cmd_speed(0, 0, 1, true, 16),
+            16,
+            "a multi-frame block re-integrates from an already-wiped command"
+        );
+        // ...and with no key held the wiped command really is 0, so
+        // the widened gate stays a no-op on every quiet blocked frame.
+        assert_eq!(
+            mc2_pair_cmd_speed(0, 0, 0, true, 16),
+            0,
+            "no key, nothing to re-integrate"
+        );
     }
 }

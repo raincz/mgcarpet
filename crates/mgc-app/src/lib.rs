@@ -86,10 +86,6 @@ struct WorldInit {
     /// Draw stand-in art for unported models (deliberate: MC2 default
     /// until its roster closes; the ledger stays truthful either way).
     placeholders: bool,
-    /// Remove spell jars the local player already owns (deliberate:
-    /// P-class improvement, both games). Applied at every level load —
-    /// the sim self-culls owned jars on their next tick.
-    prune_owned_jars: bool,
     /// The chassis constant set: the game's pristine profile, or a
     /// deliberately deviating one (the limit-removing `--pool-slots`
     /// dev flag; G-class — a run under a bumped pool is not a
@@ -107,8 +103,6 @@ impl WorldInit {
             self.chassis.clone(),
             self.game,
         );
-        // Applies to BOTH games' jar systems (P-class improvement).
-        w.set_prune_owned_jars(self.prune_owned_jars);
         if matches!(self.game, mgc_sim::ids::GameId::Mc2) {
             w.set_placeholders(self.placeholders);
             w.set_mc2_night_shade(self.night_shade);
@@ -822,7 +816,6 @@ fn load_level(
     tileset: Option<u8>,
     terrain_features: bool,
     plausible_spellbook: bool,
-    prune_owned_jars: bool,
     pool_slots: Option<usize>,
     awake_range: Option<u32>,
 ) -> Result<LoadedLevel, String> {
@@ -1032,7 +1025,6 @@ fn load_level(
                     stages,
                     stage_vars,
                     placeholders: is_mc2,
-                    prune_owned_jars,
                     night_shade: is_mc2
                         && matches!(
                             package.header.as_ref().map(|h| h.map_type),
@@ -2679,15 +2671,6 @@ impl App {
                     w.set_invincible(self.cfg.gameplay.cheat.invincible);
                 }
             }
-            "gameplay.enhancement.prune_owned_jars" => {
-                if let Some(w) = self
-                    .session
-                    .as_deref_mut()
-                    .and_then(|s| s.sim.world.as_mut())
-                {
-                    w.set_prune_owned_jars(self.cfg.gameplay.enhancement.prune_owned_jars);
-                }
-            }
             // Live selector-surface switch: the pane/book resolve is
             // cheap to redo mid-run. Quickselect
             // digit binds survive a round trip — and enabling the map
@@ -3421,7 +3404,6 @@ impl App {
             self.launch.tileset,
             self.launch.terrain_features,
             false,
-            self.cfg.gameplay.enhancement.prune_owned_jars,
             self.launch.pool_slots,
             self.launch.awake_range,
         )?;
@@ -3537,7 +3519,6 @@ impl App {
             self.launch.tileset,
             self.launch.terrain_features,
             false, // the plausible instrument is off in campaign mode
-            self.cfg.gameplay.enhancement.prune_owned_jars,
             self.launch.pool_slots,
             self.launch.awake_range,
         ) {
@@ -7930,8 +7911,6 @@ struct Args {
     dev_spells: Option<bool>,
     /// CLI override of `dev.plausible_spellbook`.
     plausible_spellbook: Option<bool>,
-    /// CLI override of `gameplay.enhancement.prune_owned_jars`.
-    prune_owned_jars: Option<bool>,
     /// CLI override of `gameplay.enhancement.wheel_spells`.
     wheel_spells: Option<bool>,
     /// CLI override of `gameplay.cheat.invincible`.
@@ -8038,7 +8017,6 @@ fn parse_args() -> Result<Args, String> {
     let mut crosshair = None;
     let mut dev_spells = None;
     let mut plausible_spellbook = None;
-    let mut prune_owned_jars = None;
     let mut wheel_spells = None;
     let mut invincible = None;
     let mut expose_jar_spells = None;
@@ -8231,8 +8209,6 @@ fn parse_args() -> Result<Args, String> {
             "--no-dev-spells" => dev_spells = Some(false),
             "--plausible-spellbook" => plausible_spellbook = Some(true),
             "--no-plausible-spellbook" => plausible_spellbook = Some(false),
-            "--prune-owned-jars" => prune_owned_jars = Some(true),
-            "--no-prune-owned-jars" => prune_owned_jars = Some(false),
             "--wheel-spells" => wheel_spells = Some(true),
             "--no-wheel-spells" => wheel_spells = Some(false),
             "--invincible" => invincible = Some(true),
@@ -8379,7 +8355,6 @@ fn parse_args() -> Result<Args, String> {
                      [--health-bars|--no-health-bars] \
                      [--dev-spells|--no-dev-spells] \
                      [--plausible-spellbook|--no-plausible-spellbook] \
-                     [--prune-owned-jars|--no-prune-owned-jars] \
                      [--wheel-spells|--no-wheel-spells] \
                      [--invincible|--no-invincible] \
                      [--expose-jar-spells|--no-expose-jar-spells] \
@@ -8433,7 +8408,6 @@ fn parse_args() -> Result<Args, String> {
         crosshair,
         dev_spells,
         plausible_spellbook,
-        prune_owned_jars,
         wheel_spells,
         invincible,
         expose_jar_spells,
@@ -8630,7 +8604,6 @@ fn run_flock_probe(
             night_shade: init.night_shade,
             doom_level: init.doom_level,
             placeholders: init.placeholders,
-            prune_owned_jars: false,
             chassis: init.chassis.clone(),
         };
         world_init = i;
@@ -9639,9 +9612,6 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
     if let Some(v) = args.fps {
         cfg.render.debug.fps = v;
     }
-    if let Some(v) = args.prune_owned_jars {
-        cfg.gameplay.enhancement.prune_owned_jars = v;
-    }
     if let Some(v) = args.wheel_spells {
         cfg.gameplay.enhancement.wheel_spells = v;
     }
@@ -9753,7 +9723,6 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
         cfg.gameplay.cheat.dev_spells = false;
         cfg.gameplay.cheat.invincible = false;
         cfg.dev.plausible_spellbook = false;
-        cfg.gameplay.enhancement.prune_owned_jars = false;
         // The offline chassis params come FROM THE TAKE, not from this
         // run's CLI/config — the take's embedded start snapshot opens
         // its identity block with `chassis.pool_slots` and
@@ -9792,6 +9761,18 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
                 replay::ReplaySource::Port => "port (exact input channel)",
             }
         );
+        // The campaign REPLAY gate is derived from the capture, so it
+        // is a property of the run the banner must SHOW — it changes
+        // which entities live (the XP scrolls) and was invisible for
+        // four sessions precisely because nothing printed it.
+        if file.family == mgc_formats::mgcr::Family::Mc2
+            && file.source == replay::ReplaySource::Retail
+        {
+            println!(
+                "replay: campaign replay gate {} (the take's own (14,5) witness)",
+                if file.mc2_replayed { "SET" } else { "clear" }
+            );
+        }
         replay_boot = Some(file);
     }
     // --record: a recording is a conformance instrument — the whole
@@ -9839,7 +9820,6 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
             args.tileset,
             args.terrain_features,
             cfg.dev.plausible_spellbook,
-            cfg.gameplay.enhancement.prune_owned_jars,
             pool_slots,
             awake_range,
         ) {

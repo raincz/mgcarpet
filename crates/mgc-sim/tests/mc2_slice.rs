@@ -603,16 +603,31 @@ fn mc2_slice_behaviors_and_goldens() {
     // the pair: reverting dig_scorch to the single-cell zero-skipping
     // form restores all six. Behavior change toward retail by design.
     const GOLDEN: [u64; 6] = [
-        0x7633ac8b22e56968, // post-init (GenerateEvents + dis 0)
-        0xe98f413166ba5e72, // A: 64 idle ticks afield
-        0xffc80a25dbeb6580, // B: the type-5 fly-to latched
+        0x2caf2b26b31a754f, // post-init (GenerateEvents + dis 0)
+        0x3b1cc1c57a4237b4, // A: 64 idle ticks afield
+        0x21d8d1becd8f3c02, // B: the type-5 fly-to latched
         // C-E re-pinned for the mc2l0 on-ramp batch (2026-08-21f;
         // attribution in mc2_cave.rs): the fireball's terrain-contact
         // move REVERT (sub_65C20 v16x) + the universal token-mana
         // copy + the impact pitch stamp move the combat checkpoints;
         // the D fireball window is the first consumer.
-        0x71d2291ade3f15e3, // C: goat awake/flee window
-        0xf60ca6ccde0e6313, // D: fireball combat over the goat
+        0xb45ba7f41aed9cd5, // C: goat awake/flee window
+        // D re-pinned for the MC2 CAST-CHARGE BANK (`mc2_launch`;
+        // EF:55869-70 — every MC2 cast site copies the wizext
+        // `byte_0x154` meter into the projectile's @0x10 and zeroes
+        // it, exactly as MC1's sites already did): the fired
+        // fireball's f26 is a hashed lane, so the first cast in the
+        // window moves D. A/B-attributed by suppressing the single
+        // bank (D alone returns; E holds).
+        0x5d523a1d91169441, // D: fireball combat over the goat
+        // E re-pinned AGAIN for the MC2 BUILDING-ROSTER LAW
+        // (`area_write`'s ch0 footprint pass now walks the tick-top
+        // `dword_38527` chain, EF:4076 — a record that only becomes
+        // a building mid-tick takes no ch0 mail until the next tick
+        // top): the village buildings under the ambient fires take
+        // retail's deliveries, so their lives — and everything
+        // downstream — move. A/B-attributed by reverting the pass to
+        // its pool walk (E alone returns; D holds).
         // E re-pinned for the AREA-BROADCAST TILE ROUNDING
         // (`area_write` centers on the nearest tile — sub_120B0 /
         // EF:3750; corpus pins: mc1l0 t=91 tent claim, mc2l0 t=7257
@@ -630,12 +645,87 @@ fn mc2_slice_behaviors_and_goldens() {
         // stale amount regardless; only the hashed `player_mail` word
         // moves. (It is NOT inert in MC1, which is the whole point:
         // `mail_write_single` accumulates onto it.)
-        0x6ba8da4c55c391c2, // E: census + villager/archer provocation
+        // E re-pinned for the ARROW FLIGHT LAWS (`AddArcherArrow_672E0`
+        // EF:58870-96, corpus row mc2l0 t=4104): the arrow's victim
+        // probe runs at its CURRENT position — `MoveEntity_57FA0`
+        // fills the scratch axis and `sub_10780(a1x)` is called before
+        // any `CopyEntityPosition`, so the step endpoint is never
+        // probed — and the impact lands on the victim's RAISED
+        // position (`sub_65580`/`sub_655A0` bracket the copy, z + f78).
+        // The provocation window is all archers, so both move E.
+        // A/B-attributed: with the pre-move probe reverted and the
+        // raised snap still in, E reads 0x4e0cafcafefa7e46; reverting
+        // BOTH restores 0xbf1a74fbbf6021ea exactly, so the two arrow
+        // laws are the only contributors. A/B-EXCLUDED,
+        // each reverted alone and reproducing these hashes: the
+        // strict-gated projectile scan geometry (strict-only, so
+        // native goldens cannot see it), the flyer's identity-blind
+        // homing-target read, and the MC2 carpet half-width 121.
+        // E re-pinned for the M3 HEAD's PARTICLE-TABLE READ
+        // (`mc2_spawn_m3`, EF:33869-71): the head's pitch/roll box
+        // comes from the SAME `particlesParameters_D951C` rows its
+        // own child loop reads two lines above — the DERIVED pair,
+        // not the shipped static row whose `speed_6` column is zero
+        // almost everywhere. The head's collision box was 0 wide and
+        // is now `60 * speed_6 / 100`, so the multipart flyer in the
+        // provocation window becomes hittable. A/B-attributed:
+        // reverting this ONE read alone reproduces 0x1c89646ddf40f8cb
+        // exactly with every other law of this batch still in, and it
+        // is the only one of the round either MC2 world sees.
+        // A/B-EXCLUDED from the same round, each reverted alone and
+        // reproducing these hashes: the pack crowd-avoid's un-wrapped
+        // i16 gap, the XP-scroll `sub_106C0` collect, the MC2 fleet
+        // register, and the strict-only class-14 probe admission.
+        0x2a2c83cea42c3c5f, // E: census + villager/archer provocation
     ];
     // Checkpoints 4-6 re-pinned for the DISPOSITION-FIRE stack
     // rebuild (see mc2_cave.rs — sub_49F90 at sub_4A1E0's top,
     // EF:32966; checkpoints 1-3 hold, the first mid-run fire is
     // between 3 and 4).
+    // Re-pinned for the 2026-08-23c mc2l0 free-run sprint. SIX of the
+    // batch's nine laws move this world; each was A/B-isolated by
+    // reverting it alone with the other eight still in:
+    //   - the BUILDING `min_speed` shift `(w*h) >> 2`: ALL SIX.
+    //   - the HAND MIRROR reaching every writer (`mc2_set_hand`, the
+    //     load-time canonical rebind included): post-init..C.
+    //   - the MC2 STAGE ENGINE moving AFTER the entity walk: B..E.
+    //   - the ch0 FOOTPRINT MASK probe (retail's own cancelled
+    //     expression — every AABB-overlapping building takes the
+    //     mail): A..E.
+    //   - the ARCHER's phase-7 AIM TAIL (`AddScroll05_04_20140`): E.
+    //   - the arrow WHOOSH latch moving to retail's byte[0] bit 1: E.
+    // A/B-EXCLUDED, each reverted alone and reproducing these exact
+    // hashes: the (10,42) painter ctor, the switch mid-walk pose
+    // phase, and the arrow expiry freeze.
+    // Re-pinned (D AND E; A-C hold) for THE FIRING HAND MOVING TO THE
+    // CASTER — the same one-line delta as `mc2_cave`'s C/D re-pin.
+    // Retail keeps the hand in the CASTER's flag dword (`sub_5F7B0`
+    // EF:60977-78, 256 left / 512 right) and `sub_68E50` (EF:55595)
+    // reads it back there at every spawn; the port kept it on the
+    // class-15 MANIFESTATION as `f50`, a lane `import_ent_mc2` zeroes
+    // for class 15 — a port-only register writing into the hashed
+    // entity state. The muzzle now reads the shared `hand_bits` and
+    // the token write is gone; D/E move because they are the only
+    // checkpoints that cast. A/B-ATTRIBUTED: restoring ONLY
+    // `ent[m].f50 = 256/512` at the two arm sites reproduces the
+    // previous pin exactly with the muzzle rewire still in.
+    // Re-pinned (ALL SIX) 2026-08-25i for THE 77TH BLDGPRM RECORD —
+    // the same one-line delta as `mc2_cave`'s re-pin, and its comment
+    // carries the full attribution. Retail's buffer is
+    // `std::array<…, 77>` and its load fills only 76 records
+    // (EF:38328), so index 76 is the neighbouring static at 0xD94F0,
+    // `{0xAA,0x00,0x63,0x0D}`; the villager build lottery's
+    // `rand % 0x3C + 17` reaches exactly 76 and 0x63 carries the
+    // eligibility bit. ALL SIX move — including post-init, before a
+    // villager has built anything — because the table's own bytes are
+    // hashed world state, not merely what gets built from them. ⭐ And
+    // the layout-independent OBSERVABLE golden below HOLDS on all six,
+    // which is the corroboration: inside this slice's windows nothing
+    // is actually built differently, only the table moved.
+    // A/B-ATTRIBUTED: dropping the pushed record alone
+    // reproduces the previous pin exactly, with the session's other
+    // three laws (the m20 state-2 pointer test and `dword_38519`'s
+    // life-test entry condition at its three scan sites) still in.
     assert_eq!(
         got, GOLDEN,
         "the MC2 slice diverged from its goldens — if DELIBERATE, \
@@ -675,13 +765,34 @@ fn mc2_slice_behaviors_and_goldens() {
     // the provocation window's fireball lands one step short of the
     // old endpoint, so its fire/scorch — and everything downstream —
     // genuinely moves. Real behavior toward retail, not layout.
+    // Re-pinned (E ONLY; post-init..D hold) for the ARCHER's PHASE-7
+    // AIM TAIL — `AddScroll05_04_20140` (EF:11960-66) re-tests the
+    // action the `sub_1D5D0` legs just wrote, so the tick a held
+    // archer's wizard-watch promotes it to its attack state is the
+    // tick it stops dead, takes its aim sprite and locks its victim
+    // filter. A held archer that used to walk on now stands and
+    // shoots, which moves the provocation window for real.
+    // A/B-ISOLATED with the layout assert disabled so the observable
+    // one is reached at all: reverting this law ALONE restores
+    // 0x2914d2e5dab5b8d3, and reverting each of the other eight laws
+    // alone leaves this value standing. ⚠ the earlier attempt read
+    // "observable holds" for every mover — the layout assert panics
+    // first and the observable one never runs.
     const OBSERVABLE: [u64; 6] = [
         0x5951c95adf7436f9,
         0x3eaed2073972a99e,
         0x832f419cb3f9716b,
         0xad0f895abf178c2b,
         0x55dc4df57cc26a90,
-        0x2914d2e5dab5b8d3,
+        // E re-pinned with the ARROW FLIGHT LAWS (see the GOLDEN note)
+        // — and the OBSERVABLE moving is the point: an arrow now
+        // strikes the body it is LEVEL WITH instead of the one it is
+        // about to fly into, and comes to rest at that body's box
+        // centre rather than its feet. Real behaviour toward retail,
+        // not layout. E ONLY; post-init..D hold. ⚠ this A/B is only
+        // valid with the layout assert above disabled for the run —
+        // it panics first otherwise and the observable never runs.
+        0xe6f384e96ad04ee3,
     ];
     assert_eq!(
         obs, OBSERVABLE,

@@ -517,16 +517,168 @@ fn mc2_cave_behaviors_and_goldens() {
     // dis-fire sweep's kills scatter spheres inside the window.
     // A/B-attributed: suppressing the single f126 write restores the
     // old hash with every other law of the batch still in.
+    // Re-pinned for the 2026-08-23c mc2l0 free-run sprint. THREE of
+    // the batch's six laws move this world and each was A/B-isolated
+    // by reverting it alone with the rest still in:
+    //   - the BUILDING `min_speed` shift (`(w*h) >> 2`, not remc2's
+    //     `>> 4` — mc2l0's row-37 village reads 6 on a 5x5, and its
+    //     recorded extents invert to w = h = 5): moves ALL FOUR.
+    //   - the MC2 STAGE ENGINE moving AFTER the entity walk
+    //     (EF:31800-18): moves checkpoints 2-4; the first holds.
+    //   - the HAND MIRROR reaching every writer, `mc2_set_hand`
+    //     (the load-time `mc2_rebind_hands_canonical` now keeps the
+    //     hashed `Player` lane in step): moves ALL FOUR.
+    //   - the DRAGGED SPHERE WRITING ITS OWN HEADING at the mana
+    //     magnet (`yaw_0x1C_28 = tan2(sphere, aura)`, EF:26101 — the
+    //     MC2 half of a write the MC1 ch4 twin already had): moves
+    //     checkpoints 2-4; the first holds. A/B-ATTRIBUTED 2026-08-23
+    //     — suppressing this one write alone reproduces the PREVIOUS
+    //     pin exactly, and it is the ONLY law of that session's six
+    //     native-MC2 changes that this golden can see (`f30` on a
+    //     (10,39) is a hashed lane; the other five leave it untouched).
+    // A/B-EXCLUDED, each reverted alone and reproducing these exact
+    // hashes: the ch0 footprint mask probe, the (10,42) painter ctor,
+    // the switch mid-walk pose phase, and — from the same 2026-08-23
+    // round — the MC2 castle ctor's sprite-table swap, the
+    // m17/19/20/28 phase-7 sub-state reset, the pack scan's tick-top
+    // roster walk, the drowned-projectile position commit and the
+    // unmasked one-shot yaw.
+    // Re-pinned (LAST CHECKPOINT ONLY; 1-3 hold) for the AWAKE
+    // PRE-PASS DEAD ARM: `sub_68BF0`'s `byte_0x39_57 = 0xFA` stamp
+    // (EF:55484-85) is reachable only for a roster member that died
+    // BETWEEN the tick-top rebuild and the pre-pass, because the
+    // rebuild drops `life < 0` records (EF:39988) — so an
+    // already-dead creature's counter FREEZES at its last live value
+    // instead of being re-stamped 250 every tick of its death
+    // animation. NOT a presentation lane: `mc2/roster.rs` reads
+    // `f58 != 0` inside the creature's own handler with no life gate,
+    // which is why a cave full of dying creatures diverges only after
+    // the long disposition phase — the first three checkpoints are
+    // unmoved because the divergence needs deaths to accumulate.
+    // A/B-ATTRIBUTED 2026-08-23c: restoring that ONE arm reproduces
+    // the previous pin exactly with every other law of the batch
+    // still in, and it is the only one of the round this world sees.
+    // A/B-EXCLUDED from the same round, each reverted alone and
+    // reproducing these hashes: the ejected-sphere `ball_resize`
+    // deletion, the +3000 re-cast surcharge and its ladder-drain
+    // phase fix (also `MGC_NO_MC2_RECAST_SURCHARGE=1`), the type-0
+    // objective's castle-register gate, the balloon sphere-pick reap
+    // clause, the `sub_67CB0` tick-top acquisition rosters and the
+    // `sub_585D0` post-walk wizard re-floor.
+    // ALL FOUR re-pinned for the M3 HEAD's PARTICLE-TABLE READ
+    // (`mc2_spawn_m3`, EF:33869-71): the head takes its pitch/roll
+    // box from the SAME `particlesParameters_D951C` rows its own
+    // child loop reads two lines above — the DERIVED pair, not the
+    // shipped static row, whose `speed_6` column is zero almost
+    // everywhere (it is filled at load from the sprite bitmap's
+    // aspect). A zero-width head could not collide with anything;
+    // every checkpoint sees the cave's multipart flyer.
+    // A/B-ATTRIBUTED: reverting that ONE read alone reproduces the
+    // previous pin exactly with every other law of the batch still
+    // in. A/B-EXCLUDED from the same round, each reverted alone and
+    // reproducing these hashes: the pack crowd-avoid's un-wrapped
+    // i16 gap (`sub_5CFC0` EF:9473 — needs two same-model creatures
+    // straddling tile 128), the XP scroll's `sub_106C0` collect, the
+    // MC2 balloon-fleet REGISTER, and the strict-only class-14 probe
+    // admission (a NATIVE golden cannot see a `strict` gate).
+    // Re-pinned (LAST CHECKPOINT ONLY; 1-3 hold) for the MANA
+    // SPHERE'S CAVE-CEILING CLAMP (`TransformArcherToMana_35940`
+    // EF:26256-63): a sphere thrown up inside a cave stops at the
+    // rock, `ceiling − fov`, with its lift forced downward — the
+    // ceiling twin of the ground rebound the port already had, and
+    // MC2-only (MC1 has no ceiling plane). The first three hold
+    // because the divergence needs spheres to be launched high enough
+    // to reach the roof, which the disposition storm supplies.
+    // A/B-ATTRIBUTED: reverting that ONE clamp alone reproduces the
+    // previous pin exactly with every other law of the batch still in
+    // (and the observable assert below is reached under that arm).
+    // A/B-EXCLUDED from the same round, unmoved with it in: the
+    // CAVE-WALL ESCAPE fan in the same function (EF:26192-26239 — no
+    // sphere in this world wedges under rock), the class-10 dead-@0x90
+    // projection, `my_sign32` in the meteor quad, the launch aim
+    // measured from the caster, and the `sub_11900` point-write
+    // protocol.
+    // Re-pinned (ALL FOUR) 2026-08-25g for the MC2 MANA-SPHERE CTOR'S
+    // MAIL-CHANNEL ADMIT MASK. `CreateManaSphere_500C0` writes
+    // `byte_0x38_56 = 3` (EF:36617) and the shared `spawn_mana_ball`
+    // stamped only MC1's home (+28), leaving MC2's @0x38 — the port's
+    // `f56`, where the importer homes it for class 2/10 and the roster
+    // publishes it as the graded `b38` lane — at 0 on every free-run
+    // sphere. Corroborated ELEVEN TIMES in one tick: mc2l3 t=9816
+    // borns eleven spheres and `explain` shows all eleven taking
+    // `b38 0 -> 3`. `f56` is hashed `Ent` state, so EVERY checkpoint
+    // that has minted a sphere moves — which is why all four go, and
+    // why the move is uniform rather than confined to a window.
+    // A/B-ATTRIBUTED: reverting that ONE stamp alone reproduces the
+    // previous pin exactly with the aura's chain-walk law still in.
+    // ⚠ A/B-EXCLUDED, and this is the useful half: the (10,54) aura's
+    // move from a live-pool scan to the TICK-TOP `dword_38523` chain
+    // (the mc2l3 t=9816 law, worth +240 on that take) moves NOTHING
+    // here — reverting it alone still reproduces these hashes. A law
+    // that is worth 240 ticks on the corpus can be invisible to a
+    // golden, and a stamp worth 0 ticks can move every checkpoint.
+    // Re-pinned (ALL FOUR) 2026-08-25i for THE 77TH BLDGPRM RECORD,
+    // which is not in `BLDGPRM.DAT` at all: retail's buffer is
+    // `std::array<…, 77>` and its load fills `76 * sizeof(record)`
+    // (EF:38328), so index 76 reads the four bytes at 0xD93C0 + 76*4
+    // = 0xD94F0 — `str_D94F0_bldgprmbuffer`'s initialised
+    // `{0xAA,0x00,0x63,0x0D}`. The villager build lottery's
+    // `rand % 0x3C + 17` tops out at exactly 76 and 0x63 has the
+    // eligibility bit, so one build in sixty raises that phantom
+    // template; `MSPRD00.DAT` row 76 is a 0x0 footprint, so it also
+    // has the smallest site box in the game. mc2l3 t=14611 pins all
+    // four bytes on four separate graded lanes of one newborn
+    // (`b46` 76, `f2a` 170, `b38` 35, `b3d` 13) and the take goes
+    // 14610 -> 15418. Every checkpoint moves because a caves world
+    // runs villagers too, and the changed pick reshapes what they
+    // build from the first lottery on.
+    // A/B-ATTRIBUTED: the session's other three laws (the m20
+    // state-2 pointer test, and `dword_38519`'s life-test entry
+    // condition at its three scan sites) move NOTHING here —
+    // reverting the table push alone reproduces the previous pin
+    // exactly with all three still in.
     assert_eq!(
         got,
         vec![
-            0x30a7039ebee444b7u64,
-            0xeb019cfa3c5ee5d8,
-            0xd88a658d7922fa3d,
-            0x4055b3e543a00923,
+            0xfcd7cfe710ac9782u64,
+            0x12d87c9aa580b181,
+            0x737a0266e1a078a2,
+            0x06f065fe972116ca,
         ],
         "cave goldens moved — re-pin ONLY for an intended fidelity change"
     );
+    // Re-pinned (CHECKPOINTS C AND D; A/B hold) for THE FIRING HAND
+    // MOVING TO THE CASTER. Retail keeps it in the caster's own flag
+    // dword (`sub_5F7B0`: `byte[1] &= 0xFC; …dword |= 256|512`,
+    // EF:60977-78) and `sub_68E50` (EF:55595) reads it back there at
+    // every spawn; the port kept the same information on the class-15
+    // MANIFESTATION as `f50` = 256/512 — a field retail leaves dead
+    // for class 15 (`import_ent_mc2` zeroes it outright), so the port
+    // was writing a port-only register into the hashed entity lane.
+    // The muzzle now reads the shared `hand_bits`, and the token
+    // write is gone. NOTHING ELSE MOVED: the three launches this
+    // world makes all resolve to the same side before and after
+    // (traced: `f50=0 old_right=false`, `hand_bits=0x100
+    // side=Some(false)`), so the delta is exactly the dropped write.
+    // A/B-ATTRIBUTED: restoring ONLY `ent[m].f50 = 256/512` at the two
+    // arm sites reproduces the previous pin exactly with the muzzle
+    // rewire and the three-way `sub_68E50` side still in.
+    // Corpus receipt: mc2l3 pair-mode UNEXPLAINED pairs 567 → 90 (the
+    // whole (9,1) possession-birth lane, 479 pairs), every free-run
+    // horizon in the corpus byte-identical.
+    // RE-PINNED (checkpoint D only; A/B/C byte-identical): the
+    // (10,77) fire-sphere satellites now inherit the hub's
+    // actSpeed/minSpeed/maxSpeed triple, because retail builds each
+    // satellite with `qmemcpy(entity2, entity, sizeof(...))` —
+    // EF:35967, a full struct clone of the hub — where the port built
+    // them field-by-field and left `new_event`'s defaults
+    // (+126 = 16, +128 = +130 = 0). Level-014 authors two
+    // disposition-5 (10,76) firestorms and this test fires
+    // dispositions 1..=64, so 50 satellites × 3 hashed fields move.
+    // A/B-ATTRIBUTED: reverting ONLY those three writes reproduces the
+    // previous pin exactly, with the mc2l0 death-phase law of the same
+    // round still in — so that law is A/B-EXCLUDED here.
+    // Corpus receipt: mc2l0-spells-galore free horizon 4397 → 5889.
 
     // The layout-INDEPENDENT companion golden — see state_hash.rs:
     // survives hashed-layout re-pins; moves ONLY with real behavior.
@@ -594,11 +746,24 @@ fn mc2_cave_behaviors_and_goldens() {
     // disc (center, +x, +y) with the full cell update, so late-run
     // terrain, its ceiling counter-shifts and everything
     // ground-following them genuinely move. First three hold.
+    // LAST re-pinned again with the M3 HEAD PARTICLE-TABLE read: a
+    // real behavior change and the point of the law — a head whose
+    // pitch/roll box was 0 collided with nothing, so the cave's
+    // multipart flyer only becomes hittable at the last checkpoint's
+    // depth. First three hold, which is itself the attribution (the
+    // other four laws of the round move NOTHING here; each was
+    // reverted alone against the PREVIOUS layout pin, so the
+    // observable assert was actually reached — the 23c trap).
+    // The sphere cave-ceiling clamp (see the golden pin above) moves
+    // the LAST checkpoint only, on BOTH pins — the correct signal: a
+    // sphere's z under the rock is observable sphere state, and the
+    // divergence needs the disposition storm to throw one high enough
+    // to reach the roof. Same A/B attribution and same exclusions.
     const OBSERVABLE: [u64; 4] = [
         0xca0e5c449cf57b10,
         0x65bac868017c2757,
         0xdbbeee1a0bf108ce,
-        0x73367e42e9d447a8,
+        0x2e5b37d39fb619b2,
     ];
     assert_eq!(
         obs, OBSERVABLE,

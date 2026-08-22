@@ -403,9 +403,11 @@ impl World {
         // Carpet sprite by color: retail switches on
         // TransformPlayerColorIndex (EF:43732) -> models 273..279
         // (the human keeps 44) — the art families are authored in
-        // Transform order (crate::mc2::COLOR_ART).
+        // Transform order (crate::mc2::COLOR_ART). Rivals only ever
+        // take slots 1.., so this never reads the row-44 arm; the
+        // shared helper is what the replay ghost needs.
         self.g
-            .mc2_set_sprite(i, 272 + crate::mc2::color_art(slot) as u16);
+            .mc2_set_sprite(i, crate::mc2::carpet_sprite_row(slot));
         let mut r = Mc2Rival::new(slot, i as u16, &cfg);
         // Life scalar: wizard maxLife *= Life/256 (EF:43768-72).
         self.g.ent[i].max_life = ((10000u64 * r.life_scale as u64) >> 8).max(1) as u32;
@@ -483,12 +485,27 @@ impl World {
         let sub = row.tiers[t];
         let cost = if spell == 2 {
             // The castle upgrade ladder at the OWN castle's level
-            // (L:1729-55; castle-less = the first rung).
-            const LADDER: [i32; 8] = [1000, 10000, 20000, 40000, 80000, 160000, 320000, 0x3E8];
+            // (L:1729-55; castle-less = the first rung). ONE
+            // definition per game — see
+            // [`crate::mc2::castle::MC2_CASTLE_COST`]. This site and
+            // `mc2_castle_ladder_cost` below each carried a
+            // HAND-ROLLED copy whose rung 7 read `0x3E8` (= 1000)
+            // where Level.cpp:1753 has `default: result =
+            // 300000000` — three copies of one ladder, two of them
+            // wrong at the sentinel. Corpus-inert (no baked MC2 level
+            // ships a level-7 rival castle) but it would have made a
+            // maxed rival read its next upgrade as trivially
+            // affordable.
+            // ⚠ STILL NOT the full retail law: retail prices rivals
+            // through `GetSpellManaCost_6D710` itself (Level.cpp:1524
+            // via SetSpell), so it also applies the ×320>>8 / ×384>>8
+            // TIER MULTIPLY and the castle-less raw `manaCost_6`.
+            // Landing those moves rival castle TIMING and has
+            // measured mc2l4 exposure — banked, not landed here.
             let lvl = self
                 .rival_castle(own)
                 .map_or(0, |c| self.g.ent[c].f26.clamp(0, 7) as usize);
-            LADDER[lvl]
+            crate::mc2::castle::MC2_CASTLE_COST[lvl] as i32
         } else {
             sub.mana_cost
         };
@@ -1501,12 +1518,16 @@ impl World {
         self.mc2_rivals[ri].mana_max as i32 >= self.mc2_castle_ladder_cost(ri)
     }
 
+    /// The AI's castle affordability price. ONE definition per game —
+    /// [`crate::mc2::castle::MC2_CASTLE_COST`]; this was the second
+    /// hand-rolled copy whose rung 7 read `0x3E8` (= 1000) instead of
+    /// retail's 300,000,000 sentinel. See the note at
+    /// `mc2_rival_set_spell` for the tier-multiply scope still owed.
     fn mc2_castle_ladder_cost(&self, ri: usize) -> i32 {
-        const LADDER: [i32; 8] = [1000, 10000, 20000, 40000, 80000, 160000, 320000, 0x3E8];
         let lvl = self
             .rival_castle(self.mc2_rivals[ri].ent)
             .map_or(0, |c| self.g.ent[c].f26.clamp(0, 7) as usize);
-        LADDER[lvl]
+        crate::mc2::castle::MC2_CASTLE_COST[lvl] as i32
     }
 
     /// Castle-site scout (sub_13B00 EF:6056-6103): walk the 4x4

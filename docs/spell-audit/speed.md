@@ -7,13 +7,22 @@
 tiers 0/1/2 (with a one-tick spike of `subSpellIndex+1` → 240/320/400 on
 the first tick, then settle). It is a **fixed-duration armed window**
 (`word_0x18` = 301/451/501 ticks), **not** a held/released channel — MC2
-has no "hold the button for max speed" mechanic. The current port maps
-spell 3 onto MC1's Accelerate channel with a **fixed 3.0 (held) / 2.0
-(released) × 80** factor and **no tier scaling** — so the peak speed is
-identical at all three tiers (~240 held / 160 released). The DURATION is
-already tier-scaled correctly (port reads `word_0x18` into `f28`), which
-is what makes the spell "feel" progressive; the **magnitude is the bug**.
-Cast sound 19 is correct.
+has no "hold the button for max speed" mechanic — though a RE-PRESS
+reloads the counter to its max and so spikes again, which is what a
+recording of held fire looks like from the outside. Cast sound 19 is
+correct.
+
+⚠ **§3/§4 BELOW AND THE REST OF THIS TL;DR DESCRIBE A PORT THAT NO
+LONGER EXISTS** (kept for the record; they read "the current port maps
+spell 3 onto MC1's Accelerate channel with a fixed 3.0 (held) / 2.0
+(released) × 80 factor and no tier scaling … the magnitude is the bug").
+The tier scaling landed with `Player::accel_mc2_factor`, and **the rest
+landed 2026-08-25**: the first-tick spike, the write moving to the
+token's own walk slot, the `sign · minSpeed` restore on the expiry tick,
+and `word_0xe_14` as the brake — see §5 and DEVIATIONS.md
+(`World::thrust_cancel (MC2 Speed)`, retired). One stale citation to fix
+if this file is ever revised: §5 cites `crates/mgc-sim/src/mc1/world.rs`,
+a path that does not exist.
 
 ---
 
@@ -167,10 +176,23 @@ speed = sign(current_travel) · minSpeed(80) · subSpellIndex[tier]
 - Magnitude is **constant for the whole armed window** — drop the
   `accel_held` 3.0-vs-2.0 branch for the MC2 path (retail has no
   button-held distinction; it is purely time-driven).
-- Optional fidelity nicety: on the very first tick emit
-  `subSpellIndex+1` (spike 240/320/400) for one tick, then settle to
-  `subSpellIndex`. Low visual impact (1 tick); land the sustained value
-  first.
+- ~~Optional fidelity nicety~~ — **LANDED 2026-08-25, AND IT WAS NEVER
+  OPTIONAL.** On the first tick of every window emit `subSpellIndex+1`
+  (spike 240/320/400), then settle to `subSpellIndex`. Calling it "low
+  visual impact (1 tick)" mistook a REGISTER for a display value: the
+  spike is what `sub_5D530` polar-steps on the NEXT tick, so it moves
+  the carpet a full 240-unit stride, and since a re-press reloads the
+  counter to its max, every re-press spikes again — galore fires ~300
+  of them, one per `move_bits & 0x10`. It was also the first thing the
+  take diverged on (t=5890).
+- **And the write is the TOKEN's, not the mover's.** `GetScroll_69DB0`
+  slams both `speed_0xc_12` and `actSpeed_0x82_130` from the
+  manifestation's own walk slot, so the phase is walk order: on mc2l0
+  every manifestation sits ABOVE the carpet, the write lands after
+  `sub_5D530`, and the recorded boundary shows `tgt = act = 240` on a
+  carpet that has not moved an engine unit with `eff_pitch` left stale.
+  A `speed_boost` the mover consults — recomputed at the previous
+  tick's tail — can reproduce neither.
 - Restore to 1× `minSpeed` on window expiry (retail EF:56267; the port
   already zeroes `accel` at expiry — that reverts to normal thrust, which
   is close but not the explicit `speed = minSpeed` write).

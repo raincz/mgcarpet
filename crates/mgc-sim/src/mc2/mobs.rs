@@ -76,7 +76,17 @@ use crate::mc1::mobs::{MobCtx, PLAYER_TARGET};
 
 /// MC2-only flag bits on [`Ent::flags`] (high bits; MC1 owns the low
 /// ones — see the module doc mapping).
-pub(crate) const F_WHOOSH: u32 = 1 << 25; // byte[0] & 2 (arrow sound played)
+///
+/// ⚠ `F_WHOOSH` is NOT one of them: `AddArcherArrow_672E0` sets
+/// `struct_byte_0xc_12_15.byte[0] |= 2` — retail's byte[0] bit 1, the
+/// lane the obs projects as `flags.b0_done2` and the same seat every
+/// other MC2 projectile's one-shot whoosh already uses (`mc2/proj.rs`,
+/// `mc2/tail.rs`). Parking it in a private high bit cost two things:
+/// the obs lane read 0 on every arrow in flight (mc2l0 t=3988), and an
+/// IMPORTED mid-flight arrow — whose bit 1 the recording restores —
+/// failed the port's test and re-rolled the GLOBAL LCG for a sound it
+/// had already played.
+pub(crate) const F_WHOOSH: u32 = 1 << 1; // byte[0] & 2 (arrow sound played)
 pub(crate) const F_STOP: u32 = 1 << 26; // byte[1] & 8 (forced stop)
 pub(crate) const F_BLOCKED: u32 = 1 << 27; // byte[2] & 4 (move blocked)
 pub(crate) const F_NO_CORPSE: u32 = 1 << 28; // byte[2] & 0x10
@@ -430,7 +440,11 @@ impl Gen {
                 best = Some((slot, d2));
             }
         };
-        if !self.player_invisible {
+        // ⚠ `pdead` is the roster's ENTRY test, not a walk test — see
+        // [`Gen::mc2_wizard_scan`]. `dword_38519` only ever holds
+        // `life_0x8 >= 0` records (EF:39975); the pool arm below
+        // applies that itself, the out-of-pool human cannot.
+        if !self.player_invisible && !ctx.pdead {
             consider(ctx.px, ctx.py, PLAYER_TARGET);
         }
         for (j, c) in self.ent.iter().enumerate().skip(1) {
@@ -468,21 +482,64 @@ impl Gen {
                 *best = Some((slot, d2));
             }
         };
-        let human_skip = self.player_invisible || (wanted_only && self.player_aggro <= 0);
+        // ⭐⭐⭐ AND THE ROSTER'S OWN MEMBERSHIP TEST IS A LIFE TEST,
+        // WHICH THE OUT-OF-POOL HUMAN BYPASSES ENTIRELY. The case-3
+        // arm of the tick-top sweep is `if (jx->life_0x8 >= 0)`
+        // (EF:39975) — a DEAD wizard is simply not linked into
+        // `dword_38519`, which is exactly why the walk itself needs no
+        // mortality test. Retail's human is a pool record and gets
+        // that test for free; ours is a ctx pose, so it must take the
+        // roster's entry condition here or it stays scannable as a
+        // corpse. mc2l3 t=11757: the player has been dead since
+        // t≈11700 (life −720) and the (5,20) at slot 161 sits in idle
+        // 161 for the rest of the take; the port's scan handed back
+        // `PLAYER_TARGET`, took 162, and `m20_validate` zeroed
+        // `byte_0x46_70` on the way through.
+        //
+        // ⚠ NOT the invisibility bit: the dead carpet's record reads
+        // `flags` 269 at 11757, so bit 5 is CLEAR. 39's "the death
+        // touchdown raises the invisibility bit" is a different tick
+        // in the death sequence and does not cover this one.
+        let human_skip =
+            self.player_invisible || ctx.pdead || (wanted_only && self.player_aggro <= 0);
         consider(ctx.px, ctx.py, PLAYER_TARGET, human_skip, &mut best);
-        for (j, c) in self.ent.iter().enumerate().skip(1) {
-            if c.class64 == 3 && c.model65 <= 1 && c.act_life >= 0 && c.flags & 0x400 == 0 {
-                // Pool wizards carry no wanted timer yet (see
-                // mc2_arm_wanted) — under wanted_only they never
-                // qualify, faithful to an unarmed timer.
-                consider(
-                    c.x,
-                    c.y,
-                    j as u16,
-                    c.flags & 0x20 != 0 || wanted_only,
-                    &mut best,
-                );
-            }
+        // ⭐⭐⭐ THE TICK-TOP CLASS-3 ROSTER `dword_38519` (EF:9147), AND
+        // THE WALK RE-ASKS NOTHING BUT THE INVISIBILITY BIT. Retail's
+        // sweep is `while (v12x > Entities_EA3E4[0])` over `next_0`
+        // with exactly two tests before the cone — the squared range
+        // and `!(byte[0] & 0x20)` (EF:9154). Class, model, life and the
+        // reap flag were ALL settled when the case-3 arm of the tick-top
+        // sweep built the roster (EF:39972-85), so re-asking them here
+        // is wrong in both directions, like the pack scan below.
+        //
+        // ⭐⭐ AND THERE IS NO MODEL TEST — THE SCAN CAN RETURN A CASTLE.
+        // The port filtered `model65 <= 1` and so could never hand back
+        // a (3,2), which is precisely what the m20/m13 state-2 WRAPPERS
+        // exist to undo: `sub_25DE0` (EF:16637-42) re-reads the lock
+        // after `sub_1BF90` returns and clears it unless the record is
+        // class 3 AND model 0 or 1. A filter that makes a wrapper
+        // unreachable is a rewrite of the mechanism, not a shortcut for
+        // it — and it changes WHICH candidate wins, because the scorer
+        // is nearest-in-cone and a castle can be the nearest.
+        // mc2l3 t=10222: the (5,20) at slot 1 finds a castle first,
+        // takes state 162 with the lock cleared by the wrapper, and
+        // drops straight back to 161 at 10223. The port's filtered scan
+        // skipped the castle, locked the HUMAN (`word_0x96_150` 65535),
+        // survived the wrapper's wizard test and stayed in 162 chasing —
+        // yaw 563 against retail's 336.
+        for c in 0..self.wiz_chain.visible_len() {
+            let j = self.wiz_chain.list[c] as usize;
+            let w = &self.ent[j];
+            // Pool wizards carry no wanted timer yet (see
+            // mc2_arm_wanted) — under wanted_only they never
+            // qualify, faithful to an unarmed timer.
+            consider(
+                w.x,
+                w.y,
+                j as u16,
+                w.flags & 0x20 != 0 || wanted_only,
+                &mut best,
+            );
         }
         best.map(|(s, _)| s)
     }
@@ -499,15 +556,26 @@ impl Gen {
         let range = (row.v_28 as i32) * (row.v_28 as i32);
         let cone = row.v_30 as u16;
         let mut best: Option<(u16, i32)> = None;
-        for (j, c) in self.ent.iter().enumerate().skip(1) {
-            if j == i
-                || c.class64 != 5
-                || c.model65 != e.model65
-                || c.f52 != 0
-                || c.act_life < 0
-                || matches!(c.tick70, 0xB4 | 0xE8 | 0xEA)
-                || c.flags & 0x400 != 0
-            {
+        // ⭐⭐ THE SCAN WALKS THE TICK-TOP PER-MODEL ROSTER, NOT THE
+        // LIVE POOL — `bytearray_38403x[a1x->model_0x40_64]` chased
+        // through `next_0` (EF:9183), the same roster
+        // [`Gen::mc2_avoid_packmate`] already reads. Retail admits on
+        // exactly TWO conditions, `!jx->word_0x32_50` (leaderless) and
+        // `jx != a1x` (EF:9185); class, model, life and the reap flag
+        // were ALL settled when the roster was built at the top of the
+        // frame (EF:39987-40008), so re-asking them at the walk is
+        // wrong in both directions at once.
+        // mc2l3 t=356: the dis-6 wave mints six (5,20)s mid-tick, so
+        // model 20's roster is EMPTY for the rest of that frame —
+        // retail's first-ordinal newborn (slot 131, the only one whose
+        // `f63 % period` cadence gate opens on its birth tick) finds no
+        // leader and stays at action 161, where the live-pool walk saw
+        // its five just-minted siblings and promoted it to the
+        // pack-follow state 163.
+        for &s in self.mob_chains.visible(e.model65 as usize) {
+            let j = s as usize;
+            let c = &self.ent[j];
+            if j == i || c.f52 != 0 {
                 continue;
             }
             let d2 = Self::dist2_sq(e.x, e.y, c.x, c.y);
@@ -540,16 +608,37 @@ impl Gen {
         if pitch == 0 {
             return;
         }
-        for c in self.ent.iter().skip(1) {
-            if c.class64 == 5
-                && c.model65 == model
-                && c.id24 != id
-                // Retail iterates the LIVE per-model bucket — the
-                // dying never appear (EF:9641-50); the full-array
-                // walk needs the explicit life gate.
-                && c.act_life >= 0
-                && !matches!(c.tick70, 0xB4 | 0xE8 | 0xEA)
-                && c.flags & 0x400 == 0
+        // ⭐⭐ THE SCAN WALKS THE TICK-TOP PER-MODEL ROSTER, NOT THE
+        // LIVE POOL. `EF:9641-50` iterates `bytearray_38403[model]`
+        // via `next_0` and admits the first record on THREE
+        // conditions and no others — `id != self` and the two box
+        // tests. Every liveness question was already settled when the
+        // roster was BUILT, at the top of the frame (see the case-5
+        // arm in `World::tick_inner`'s sweep), so re-asking it here
+        // is wrong in both directions: a packmate that dies mid-tick
+        // still shoves its neighbour aside for the rest of the frame,
+        // and one that was already dead at the top stays invisible
+        // however intact its record looks.
+        //
+        // mc2l3 dates both halves on one creature. Firebug 160 holds
+        // life 600 at the t=252 boundary and −1 at t=253; at t=253
+        // retail's scan from firebug 132 at (27371, 50485) STILL
+        // takes it at (27354, 50421) and writes `roll` =
+        // `angle_of(17, 64)` = 940, which the heading servo chases by
+        // −113 the next tick (yaw 1771 → 1658). At t=257 the same
+        // record sits in the same place in the same state and retail
+        // does NOT take it — the roster rebuilt at the top of 254
+        // without it. A live-pool walk with a life test misses the
+        // first; a live-pool walk without one invents the second.
+        //
+        // ⚠ The `roll` lane is UNGRADED, so neither showed on its own
+        // tick: the report named `heading` a tick later, once the
+        // servo had something (or nothing) to chase. The divergence
+        // report shows what DIFFERS, never what CHANGED.
+        let roster: Vec<u16> = self.mob_chains.visible(model as usize).to_vec();
+        for &s in &roster {
+            let c = &self.ent[s as usize];
+            if c.id24 != id
                 && ((ex.wrapping_sub(c.x)) as i16 as i32).abs() < pitch
                 && ((ey.wrapping_sub(c.y)) as i16 as i32).abs() < pitch
             {
@@ -565,6 +654,25 @@ impl Gen {
     /// return the candidate; the caller then rejects dead/reaped).
     pub(crate) fn mc2_target(&self, slot: u16, ctx: &MobCtx) -> Option<(u16, u16, i16)> {
         if slot == PLAYER_TARGET {
+            // ⭐ THE CARPET IS A POOL RECORD IN RETAIL AND TAKES THE
+            // SAME LIFE TEST AS EVERY OTHER TARGET. Each caller guards
+            // the resolved pointer with `v7x->life_0x8 < 0 ||
+            // v7x->byte[1] & 4` (HitFirebug_25610 EF:16360), and
+            // nothing in that test knows or cares that the record is
+            // the human's. This arm returned unconditionally, so a
+            // creature kept attacking a corpse: mc2l3 t=7885, the tick
+            // the player dies, three (5,19) firebugs above the carpet's
+            // slot take retail's LABEL_92 — `actionIndex` 154 → 153
+            // (attack → idle) and `actSpeed` → `minSpeed` 76 — where
+            // the port held them all in the attack run.
+            // `pdead` is the ctx channel that already existed for
+            // exactly this ("our player lives outside the pool, so
+            // followers get the state through the ctx"); the MC2
+            // carpet dispatch refreshes it mid-walk so a creature
+            // ABOVE the carpet reads the death on its own tick.
+            if ctx.pdead {
+                return None;
+            }
             return Some((ctx.px, ctx.py, ctx.pz));
         }
         let j = slot as usize;
@@ -728,8 +836,18 @@ impl Gen {
                                         && c.id24 != id
                                         && !matches!(c.tick70, 0xB4 | 0xE8 | 0xEA)
                                         && c.flags & 0x400 == 0
-                                        && ((ex.wrapping_sub(c.x)) as i16 as i32).abs() < 256
-                                        && ((ey.wrapping_sub(c.y)) as i16 as i32).abs() < 256
+                                        // ⚠ NOT a wrapping delta. Retail
+                                        // sign-casts EACH position on its
+                                        // own and subtracts in 32 bits
+                                        // (:9473-74, no outer cast — its
+                                        // `ent_overlap` siblings at :3714
+                                        // and :3728 DO carry one and DO
+                                        // wrap). Two creatures straddling
+                                        // the 32768 (tile 128) line
+                                        // therefore read ~65k apart and
+                                        // the sidestep never fires there.
+                                        && ((ex as i16 as i32) - (c.x as i16 as i32)).abs() < 256
+                                        && ((ey as i16 as i32) - (c.y as i16 as i32)).abs() < 256
                                     {
                                         self.ent[i].f34 = Self::angle_between(c.x, c.y, ex, ey);
                                         break;
@@ -1361,7 +1479,7 @@ impl Gen {
     /// `sub_20060` (:11936): one LCG, stop, firing sprite 206 or 1
     /// by `% 0x14 <= 10`, shift-rot, record target class/model into
     /// the filter bytes.
-    fn archer_aim(&mut self, i: usize) {
+    pub(crate) fn archer_aim(&mut self, i: usize) {
         let d = self.mc2_rand(i);
         self.ent[i].f126 = 0;
         let sprite = if d % 0x14 <= 10 { 206 } else { 1 };
@@ -1458,7 +1576,28 @@ impl Gen {
         // mc2:04 war. (APPROX: the original keeps scanning the ring
         // past a non-matching body in the same tick; we let the
         // arrow fly on and re-probe next tick.)
-        let scanned = self.victim_scan_at(i, pos, ctx);
+        //
+        // ⚠⚠ THE ARROW PROBES ITS *CURRENT* POSITION, NOT THE STEP
+        // ENDPOINT. `AddArcherArrow_672E0` builds `predictedAxis` with
+        // `MoveEntity_57FA0` — which writes the SCRATCH axis, not the
+        // record — and only then calls `sub_10780(a1x)`, with `a1x`
+        // still standing where it started; the commit
+        // (`CopyEntityPosition_57CF0`) happens afterwards and only on
+        // the no-victim branch (EF:58870-83). This is the exact
+        // opposite of the fireball, whose `sub_65C20` commits FIRST
+        // and probes at the landed position (EF:63126-29) — the two
+        // must not be unified.
+        //
+        // mc2l0 t=4104 is the row: the arrow at (49664, 52830, 583)
+        // overlaps the carpet at (49500, 52705, 482) by ONE unit on x
+        // (|Δ| 164 < 44 + 121) where its 384-unit step lands it at
+        // (49686, 52453, 648), a clear miss. Retail hit and knocked
+        // the player; the port's endpoint probe flew past.
+        let cur = {
+            let e = &self.ent[i];
+            (e.x, e.y, e.z)
+        };
+        let scanned = self.victim_scan_at(i, cur, ctx);
         let hit = self.mc2_proj_filter(i, scanned);
         let above_ground = self.ground_z(pos.0, pos.1) as i16 <= pos.2;
         if above_ground {
@@ -1479,16 +1618,40 @@ impl Gen {
         }
         // Impact (LABEL_10 / the entity branch): move to the victim,
         // area-write ch0 with f44, despawn.
+        //
+        // ⚠ THE LANDING IS THE VICTIM'S *RAISED* POSITION. Retail
+        // brackets the copy in `sub_65580(v3x)` / `sub_655A0(v3x)`
+        // (EF:58894-96) — the same z += f78 box-centre lift the
+        // homing servo uses ([`Ent::aim_z`], MODEL 2 excepted) — so
+        // the arrow lands at the victim's middle, not its feet, and
+        // the ch0 area-write below is centred there. mc2l0 t=4104
+        // measures it: the carpet sits at z 482 with f78 = 100 and
+        // the recorded arrow lands at 582.
         match hit {
             Some(crate::mc1::combat::MailTarget::Pool(v)) => {
-                let (vx, vy, vz) = (self.ent[v].x, self.ent[v].y, self.ent[v].z);
+                let (vx, vy) = (self.ent[v].x, self.ent[v].y);
+                let vz = self.ent[v].aim_z();
                 self.move_relink(i, vx, vy, vz);
             }
             Some(crate::mc1::combat::MailTarget::Player) => {
                 let (px, py, pz) = (ctx.px, ctx.py, ctx.pz);
-                self.move_relink(i, px, py, pz);
+                self.move_relink(
+                    i,
+                    px,
+                    py,
+                    pz.wrapping_add(crate::mc1::combat::PLAYER_HH as i16),
+                );
             }
-            None => self.move_relink(i, pos.0, pos.1, pos.2),
+            // ⭐⭐ **THE EXPIRY PATH COMMITS NO MOVE.**
+            // `AddArcherArrow_672E0`'s only `CopyEntityPosition` on
+            // the no-victim branch is inside `if (life--)`, so the
+            // tick the countdown runs out the arrow falls straight to
+            // LABEL_10 and area-writes AT ITS UNMOVED POSITION. The
+            // port stepped it one last time first. mc2l0 t=3989 slot
+            // 147: retail freezes at the t=3988 (46561, 51321, 1740)
+            // and the port flew on to (46257, 51123, 1864) — and with
+            // it the ch0 blast landed a tile and a half downrange.
+            None => {}
         }
         let amt = self.ent[i].f44 as u32;
         self.area_write(i, 0, amt, ctx, false, false);
@@ -1983,7 +2146,17 @@ impl Gen {
             .unwrap_or_default();
         {
             let e = &mut self.ent[i];
-            e.f128 = ((w as u16 * h as u16) >> 4) as i16; // minSpeed_132
+            // ⭐ `minSpeed_0x84_132 = w * h >> 2`, NOT remc2's `>> 4`
+            // (EF:32769) — the same 4x slip MC1's dwelling cap carries
+            // (`a_dwelling_carries_the_z_center_marker_sprite_and_area_cap`).
+            // The corpus pins BOTH factors at once: mc2l0's village
+            // row 37 reads `min_speed = 6` in the recording, and its
+            // recorded extents `apitch = aroll = 1280` invert through
+            // `((w << 8) + 1280) >> 1` to w = h = 5 — so the row is 5x5
+            // un-halved and 25 >> 2 = 6, where 25 >> 4 would be 1.
+            // (10x10 with `>> 4` also lands on 6, which is why this
+            // needed the extents to arbitrate.)
+            e.f128 = ((w as u16 * h as u16) >> 2) as i16; // minSpeed_132
             // SetShiftByCastle_49EC0 (:32882): the footprint quad.
             e.f78 = 0;
             e.f80 = ((w as u16) << 8).wrapping_add(1280) >> 1;
@@ -2032,9 +2205,20 @@ impl Gen {
     }
 
     /// `sub_57390` (:39746): building placement clears its footprint
-    /// tile — scenery entities removed, creatures killed EXCEPT the
-    /// protected models {6, 8, 10, 16, 22, 23, 27} (+ 25 while in
-    /// action 200, retail's `actionIndex != -56`).
+    /// tile — scenery entities SOFT-KILLED (`byte[1] |= 4` = our
+    /// 0x400, :39765 → :40332-35; NEVER freed here — see the class-2
+    /// arm below), creatures killed EXCEPT the protected models
+    /// {6, 8, 10, 16, 22, 23, 27} (+ 25 while in action 200, retail's
+    /// `actionIndex != -56`).
+    ///
+    /// ⚠ This sentence used to read "scenery entities removed", and
+    /// that self-authored claim is exactly what hid the mc2l3 t=5614
+    /// allocation defect for four sessions.
+    ///
+    /// Retail call sites: :13834 `sub_22490`, :27102 `sub_36FC0` (the
+    /// instant-placement sibling, no ported caller — see below),
+    /// :27322 `ApplyTerrainModification_37240`, :27827
+    /// `AddTerrainMod0A_2A_37BC0`.
     ///
     /// `owner` is the caller's `id_0x1A_26` and the skip test is
     /// `victim.id24 != owner` — an OWNER compare, not a slot compare:
@@ -2054,7 +2238,26 @@ impl Gen {
             let next = self.ent[j].next20 as usize;
             if self.ent[j].id24 != owner {
                 match self.ent[j].class64 {
-                    2 => self.free_entity(j),
+                    // :39763-66 — the class-2 arm is
+                    // `DisableEntityDrawing04_57F10` (:40332-35), a
+                    // one-line `byte[1] |= 4` = our 0x400: a SOFT
+                    // KILL, not a free. The static stays a class-2
+                    // GHOST, still tile-linked and OFF the free
+                    // stack, until either the next tick-top reap or a
+                    // mid-tick disposition fire sweeps it through
+                    // `mc2_rebuild_free`'s ghost loop — which then
+                    // hands the slots back ASCENDING. Freeing here
+                    // put them on the stack immediately and every
+                    // later allocation in the same tick rotated:
+                    // mc2l3 t=5614, the (10,45)'s footprint clear
+                    // ghosts the (2,6)s at 92/96/97, and retail's
+                    // dis-9 payload takes 92 for its (11,22)
+                    // kill-watch where the port had already spent 92
+                    // on a mana sphere and 96 on a projectile.
+                    // MC1's twin `build_footprint_kill`
+                    // (features.rs, :51747) has carried the soft kill
+                    // since mc1l0 t=3855.
+                    2 => self.ent[j].flags |= 0x400,
                     5 => {
                         let m = self.ent[j].model65;
                         let protected = matches!(m, 6 | 8 | 10 | 16 | 22 | 23 | 27)
@@ -2070,6 +2273,41 @@ impl Gen {
             }
             j = next;
         }
+    }
+
+    /// `IsNextEvent0A_2A_37740` (EF:27437) — is a live (10,42) BUILD
+    /// PAINTER's 2-D box overlapping this record? `sub_37240`'s whole
+    /// body, `life_0x8--` included, sits inside `if (!…)` (EF:27237),
+    /// so a build whose plot a painter is working PAUSES its
+    /// countdown: retail raises them one at a time.
+    ///
+    /// ⭐⭐ THE WALK IS THE TICK-TOP ROSTER `dword_38535`
+    /// ([`Gen::paint_chain`]), and that is the load-bearing half. The
+    /// painter that freezes a plot is minted by the build that just
+    /// COMPLETED — galore t=6523: the (10,45) at slot 29 finishes
+    /// (life 1 → 20000, action 51 → 52) and borns the painter at slot
+    /// 194 — and slot 29 dispatches BELOW the four huts at 36/40/41/48
+    /// that share its plot. On a live-pool scan those four see the
+    /// newborn immediately and stall a tick early; on retail's chain
+    /// they cannot see it at all this frame, so they advance at 6523
+    /// (life 7 → 6, matching the capture) and stall from 6524 on.
+    /// *That is why implementing the gate alone made galore WORSE
+    /// (6523 → 6522) in 2026-08-25e — the gate was right and the
+    /// roster was the missing half.* A/B measured here, not inherited:
+    /// swap this walk for `1..ent.len()` and galore reads **6522**,
+    /// reproducing that session's regression to the tick; on the
+    /// chain it reads **7281**. The gate alone is worth −1, the gate
+    /// on the right roster +758.
+    ///
+    /// The class/model test is retail's own (EF:27442) and is kept:
+    /// the chain also carries 67/78 and the class-11 pair, and the
+    /// walk skips past them rather than stopping.
+    pub(crate) fn mc2_build_plot_frozen(&self, i: usize) -> bool {
+        (0..self.paint_chain.visible_len()).any(|c| {
+            let j = self.paint_chain.list[c] as usize;
+            let p = &self.ent[j];
+            p.class64 == 10 && p.model65 == 42 && self.mc2_overlap_xy(i, j)
+        })
     }
 
     /// `ApplyTerrainModification_37240` (:27181), the 30-tick build
@@ -3077,9 +3315,24 @@ impl Gen {
             if e.class64 != 5 || matches!(e.tick70, 0xB4 | 0xE8 | 0xEA) || e.flags & 0x400 != 0 {
                 continue;
             }
+            // ⭐⭐ A RECORD ALREADY DEAD AT THE TICK TOP IS NOT A
+            // ROSTER MEMBER, SO RETAIL NEVER STAMPS IT. The tick-top
+            // rebuild (EF:39988) drops anything with `life < 0` from
+            // `bytearray_38403x`, so `sub_68BF0`'s `= 0xFA` arm
+            // (EF:55484-85) can only ever reach a member that died
+            // BETWEEN the rebuild and this pre-pass — for everything
+            // else `byte_0x39_57` simply FREEZES at its last live
+            // countdown. The port re-stamped 250 every tick for the
+            // whole death animation and left 250 as freed-slot
+            // residue. mc2l3 slot 151: 14 at t=246, 13 at t=247 as it
+            // dies, and retail still reads 13 at t=248/249 where the
+            // port had written 250.
+            // ⚠ This is NOT a dead lane: `mc2/roster.rs` reads
+            // `f58 != 0` inside the creature's own handler with no
+            // life gate of its own, which is exactly how the MC1 twin
+            // bit (a creature that died asleep froze at 0 in retail
+            // while the port read back a nonzero counter).
             if e.act_life < 0 {
-                self.ent[i].f58 = 0xFA;
-                self.ent[i].f59 = 0;
                 continue;
             }
             self.mc2_awake_one(i, ctx);
@@ -3091,6 +3344,19 @@ impl Gen {
         // the chain itself is the filter, and it is built from models
         // 39, 40 AND 57 (EF:40023-40062), so a fool's sphere wakes
         // exactly like a real one.
+        //
+        // ⚠⚠ AND THE POOL WALK STAYS HERE, DELIBERATELY — this looks
+        // like the twin of the (10,54) aura's scan (`mc2_aura_tick`,
+        // moved to the chain 2026-08-25g for mc2l3 t=9816), and it is
+        // NOT. **`sub_68BF0` runs BEFORE the entity walk** (EF:40108
+        // vs the walk at EF:40118), so it has already returned by the
+        // time anything is born this tick — the newborn-invisibility
+        // that makes the chain load-bearing for the aura cannot arise
+        // here, which is exactly why swapping this one to the chain is
+        // INERT on mc2l3 (10055 either way). It is not free, though:
+        // it moved all four `mc2_cave` goldens, and an unattributable
+        // golden move with no corpus row demanding it is not a fix.
+        // Understand that delta before landing it.
         for i in 1..self.ent.len() {
             let e = &self.ent[i];
             if e.class64 == 10 && matches!(e.model65, 39 | 40 | 57) && e.flags & 0x400 == 0 {

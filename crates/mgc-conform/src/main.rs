@@ -435,6 +435,20 @@ fn dump_state(args: &Args) -> i32 {
                 st.recycle_stack.len(),
                 &st.recycle_stack[st.recycle_stack.len().saturating_sub(12)..],
             );
+            // The per-player fleet register (`array_0x3C_60`) beside
+            // the castle index it belongs to — the MC2 twin of MC1's
+            // `breg=` line. INDEX ORDER IS THE LAW (the sphere pick
+            // hands out targets in it), and it is not recoverable
+            // from a pool census, so this is the only way to read it.
+            for (pi, p) in st.players.iter().enumerate() {
+                if p.play_index == 0 {
+                    continue;
+                }
+                println!(
+                    "t={t} player {pi} carpet={} castle={} breg={:?}",
+                    p.play_index, p.castle_ent, p.balloons
+                );
+            }
             if all {
                 if let Some(p) = st.players.get(st.local_player as usize) {
                     for s in 0..26 {
@@ -822,7 +836,11 @@ fn terrain_diff_inner(path: &std::path::Path, args: &Args) -> Result<bool, Strin
     })?;
     let pristine = match family {
         mgc_formats::mgcr::Family::Mc1 => verify::build_world(&args.baked, &game, level)?.1,
-        mgc_formats::mgcr::Family::Mc2 => verify_mc2::build_world_mc2(&args.baked, level)?.1,
+        mgc_formats::mgcr::Family::Mc2 =>
+        // planes only — no entity dispatch, so the replay gate cannot apply
+        {
+            verify_mc2::build_world_mc2(&args.baked, level, false)?.1
+        }
     };
     println!(
         "== terrain-diff {} (game {game}, level {level}, base @t={})",

@@ -340,6 +340,19 @@ fn render(pst: &RetailMc1, st: &RetailMc1, t: u64, focus: &[u16], path: &std::pa
         arr!("spell_list", spell_list);
         arr!("owned_slots", owned_slots);
         arr!("blue", blue);
+        // The on-screen toast — the in-closure cheat witness, exactly
+        // as the MC2 arm prints it. It was MC2-ONLY until now, which
+        // made a toast sweep over an MC1 take read as "this take has
+        // no messages" rather than "this instrument does not look".
+        if wa.notify.ticks != wb.notify.ticks || wa.notify.text() != wb.notify.text() {
+            rows.push(format!(
+                "notify {:?}@{} -> {:?}@{}",
+                wa.notify.text(),
+                wa.notify.ticks,
+                wb.notify.text(),
+                wb.notify.ticks
+            ));
+        }
         if !rows.is_empty() {
             println!("  wiz {i} (ent {}): {}", wb.play_index, rows.join(", "));
         }
@@ -450,6 +463,7 @@ fn player_lanes_mc2(p: &RetailPlayerMc2) -> Vec<(&'static str, i64)> {
         ("mobilize_ctr", p.mobilize_ctr as i64),
         ("water_ctr", p.water_ctr as i64),
         ("nudge_latch", p.nudge_latch as i64),
+        ("charge", p.charge as i64),
         ("invuln", p.invuln as i64),
         ("regen_stall", p.regen_stall as i64),
         ("wanted", p.wanted as i64),
@@ -458,6 +472,7 @@ fn player_lanes_mc2(p: &RetailPlayerMc2) -> Vec<(&'static str, i64)> {
         ("menu_state", p.menu_state as i64),
         ("hand_pending", p.hand_pending as i64),
         ("ring_cursor", p.ring_cursor as i64),
+        ("recast_surcharge", p.recast_surcharge as i64),
         ("ai_state", p.ai_state as i64),
         ("burst", p.burst as i64),
         ("poverty", p.poverty as i64),

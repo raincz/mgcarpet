@@ -11,7 +11,22 @@
 #     l0   → 3d99885 (dbb3f9b^, before "Sprint to mc1l0 full fidelity")
 #     l1   → dbb3f9b (39e6646^, before "mc1l1 sprint")
 #     l2   → 39e6646 (ba15c26^, before "mc1l2 parity")
-#     prev → 91cd596 (6c32ce2^, before the segmented-replay fix round)
+#     prev → d2be213 (the 2026-08-25c mc2l0-certification grind AS
+#            COMMITTED — mc2l0 END, mc2l3 7885, galore 6523 — i.e.
+#            the state the NEXT session starts from, so it can ask
+#            "did THIS session move it?".
+#            ⚠ The player AMENDS one accumulating conformance commit
+#            onto f5d3137, so each such hash is ORPHANED as soon as the
+#            next amend lands — the worktree checkout is what keeps it
+#            alive. Re-point and rebuild at the end of every session.
+#            ⚠ 26c0924 was once a MID-session hash and could not
+#            attribute a session's own laws; if a rig cannot see a law
+#            you just landed, check it is pointed at the true pre-fix
+#            HEAD before doubting the law.
+#            ⚠⚠ `cd`s into its own worktree, so recording/manifest
+#            paths must be ABSOLUTE — a relative one silently reports
+#            "No such file or directory" and an empty measurement reads
+#            like "no divergence".)
 #
 # `prev` is the general-purpose one: "did THIS session move that
 # number?" is a question the reversion probe answers for free, and it

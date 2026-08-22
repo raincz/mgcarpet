@@ -308,9 +308,15 @@ impl Gen {
         self.link(head, x, y, z);
         self.refill_life(head);
         self.mc2_set_sprite(head, 88);
-        // Head segment metrics from the particle table (EF:33869-71).
-        let p88 = &SPRITE_PARAMS[88];
-        let shift = (60 * p88.speed_6 / 100, 60 * p88.rot_speed_8 / 100);
+        // Head segment metrics from the particle table (EF:33869-71) —
+        // the SAME `particlesParameters_D951C` rows the child loop
+        // reads two lines above, so the DERIVED pair, not the shipped
+        // static row. The static `speed_6` column is zero almost
+        // everywhere (it is filled at load from the sprite bitmap's
+        // aspect), and reading it here collapsed the head's pitch/roll
+        // box to 0.
+        let (ps6, pr8) = self.mc2_params_ext(88);
+        let shift = (60 * ps6 / 100, 60 * pr8 / 100);
         self.mc2_shift_rot(head, shift.0, shift.1);
         Some(head)
     }

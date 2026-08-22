@@ -2635,7 +2635,9 @@ impl Gen {
     /// sub_1E920/sub_35EA0 (:24802/:36260): 4-corner max−min height
     /// of the prospective footprint (spans in tiles), with the parity
     /// nudge on the start corner.
-    fn site_roughness(&self, x: u16, y: u16, w_tiles: u8, h_tiles: u8) -> i32 {
+    /// ⭐ SHARED WITH MC2: `sub_22640` (EF:13906-16) is the same
+    /// routine, called from `sub_22760`'s site test at EF:14036-40.
+    pub(crate) fn site_roughness(&self, x: u16, y: u16, w_tiles: u8, h_tiles: u8) -> i32 {
         let mut v4 = ((x >> 8) as u8).wrapping_sub(w_tiles >> 1);
         let v5 = ((y >> 8) as u8).wrapping_sub(h_tiles >> 1);
         if (v4 as u16 + v5 as u16) % 2 == 1 {

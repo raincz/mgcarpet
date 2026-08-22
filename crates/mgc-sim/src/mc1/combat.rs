@@ -65,6 +65,15 @@ fn no_m8_acquire() -> bool {
 /// same constants the trigger/portal overlap uses).
 pub(crate) const PLAYER_HW: i32 = (SPRITE_STATS[44].width / 2) as i32;
 pub(crate) const PLAYER_HH: i32 = (SPRITE_STATS[44].height / 2) as i32;
+/// The MC2 carpet's half-width. MC2 keeps no world extents in its
+/// sprite table (`mc2::sprite_params` — each ctor sets them through
+/// `SetEntityShiftRot_49EA0`), so this is the boot-derived value the
+/// carpet record actually carries: row 44 authors `speed_6 = 0`, boot
+/// fills it from the TMAPS geometry as `width * rotSpeed_8 / height`
+/// = 242, and `SetEntityIndexAndRot_49CD0` halves it. Measured on the
+/// mc2l0 carpet record (apitch = aroll = 121). The vertical pair is
+/// 100/100 — the same as MC1's, so [`PLAYER_HH`] serves both games.
+pub(crate) const MC2_PLAYER_HW: i32 = 121;
 
 /// Candidate set of the pure crosshair preview — the sub_54520
 /// subtype blocks the player's own spells can reach.
@@ -207,11 +216,43 @@ impl Gen {
     }
 
     /// sub_118C0 against the player carpet.
+    ///
+    /// ⚠ THE CARPET'S HALF-WIDTH IS PER-GAME. `PLAYER_HW` is MC1's
+    /// sprite-44 box (width 0xEE ⇒ 119); MC2's carpet record measures
+    /// **121**, and the port already reads that value at
+    /// `World::mc2_regen_boost` (the dolmen/castle latch) and in the
+    /// switch-volume sum — sprite-params row 44 authors `speed_6 = 0`
+    /// and BOOT derives it from the TMAPS geometry as
+    /// `width * rotSpeed_8 / height` = 121·200/100 = 242, which
+    /// `SetEntityIndexAndRot_49CD0` (:32841) halves into the extent
+    /// quad. This is the third reader of that one lane and the last
+    /// to get the MC2 value.
+    ///
+    /// The VERTICAL terms need no split: MC1's sprite-44 height 0xC8
+    /// halves to 100, and the MC2 carpet's `ayaw` lift and `afov`
+    /// half-extent are both 100 too, so `PLAYER_HH` is already right
+    /// on both columns.
+    ///
+    /// Corpus row mc2l0 t=4104, and it is a ONE-UNIT row: the (9,13)
+    /// archer arrow at slot 149 probes PRE-move (`AddArcherArrow_672E0`
+    /// calls `sub_10780` before any `CopyEntityPosition` — the
+    /// opposite of the fireball, do not unify them) from
+    /// (49664, 52830, 583) against the carpet at (49500, 52705, 482).
+    /// |Δx| = 164 clears the summed half-width 44 + 121 = 165 by one
+    /// unit and fails MC1's 44 + 119 = 163. Retail hit, snapped the
+    /// arrow onto the victim's RAISED position (`sub_65580`: z + f78 =
+    /// 482 + 100 = 582, the recorded landing) and knocked the carpet;
+    /// the port's arrow flew on and the pose forked on y.
     pub(crate) fn player_overlap(&self, i: usize, ctx: &MobCtx) -> bool {
         let e = &self.ent[i];
+        let hw = if matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2) {
+            MC2_PLAYER_HW
+        } else {
+            PLAYER_HW
+        };
         let wd = |p: u16, q: u16| (p.wrapping_sub(q) as i16 as i32).abs();
-        wd(e.x, ctx.px) < e.f80 as i32 + PLAYER_HW
-            && wd(e.y, ctx.py) < e.f82 as i32 + PLAYER_HW
+        wd(e.x, ctx.px) < e.f80 as i32 + hw
+            && wd(e.y, ctx.py) < e.f82 as i32 + hw
             && ((e.z as i32 + e.f78 as i16 as i32) - (ctx.pz as i32 + PLAYER_HH)).abs()
                 < e.f84 as i32 + PLAYER_HH
     }
@@ -305,16 +346,17 @@ impl Gen {
         // the castle list and the tile scan sits a walk of
         // `dword_38527` — the (10,45) BUILDING list (built at
         // EF:40043-52, the `model <= 0x2D` arm) — at EF:4076-4105.
-        // Every building whose 2-D box the writer overlaps gets its
-        // BUILD00 footprint mask sampled at the WRITER's tile, and a
-        // solid cell takes the mail. `CompareAxisWithShift_10750`
-        // (EF:3733) is `ent_overlap` MINUS the z term, so this is
+        // Every building whose 2-D box the writer overlaps samples one
+        // cell of its BUILD00 footprint mask, and a solid cell takes
+        // the mail. `CompareAxisWithShift_10750` (EF:3733) is
+        // `ent_overlap` MINUS the z term, so this is
         // [`Gen::mc2_overlap_xy`], and the pass has **no owner
         // immunity, no damageable flag, no vulnerability mask, no
-        // +66/+67 filter and no z test** — "damage registers anywhere
-        // within the perimeter", literally. `sub_116A0` (the shake
-        // variant) has no such pass, which is why this is gated on
-        // `!shake`; MC1's `sub_120B0` has none either.
+        // +66/+67 filter, no life or collapse-mark test and no z
+        // test** — "damage registers anywhere within the perimeter",
+        // literally. `sub_116A0` (the shake variant) has no such pass,
+        // which is why this is gated on `!shake`; MC1's `sub_120B0`
+        // has none either.
         //
         // Without it a building was reachable only through the tile
         // chain, where it is linked at its ANCHOR alone
@@ -329,61 +371,103 @@ impl Gen {
         // guessed: the raw expression is `**filearray[24] + 6*idx +
         // 4`, a 6-byte TAB record with w at +4 and h at +5, and the
         // building ctor `sub_49A30` (EF:32765) reads the same row
-        // through `filearrayindex_BUILD00DATTAB`. remc2 marks the
-        // block `//fix it` ×3 and transcribes the top-left from the
-        // WRITER, which would pin the index to the mask's centre cell
-        // forever and make the parity bump meaningless; the corner
-        // belongs to the BUILDING, whose ctor computes it with this
-        // exact expression and bump (EF:32780-88). remc2's
-        // resolution halving is part of the same misreading (a
-        // sprite-table adaptation) — and the port's un-halved extents
-        // already reproduce the recorded retail ones.
+        // through `filearrayindex_BUILD00DATTAB`. Its `>> 4` area lift
+        // is the same 4x slip MC1's dwelling cap carries (see
+        // `a_dwelling_carries_the_z_center_marker_sprite_and_area_cap`):
+        // the recording's `min_speed` 6 on a 5x5 row is `(w*h) >> 2`,
+        // which is also what pins the table as un-halved — retail's
+        // `resolution == 1` halving is not in force for these takes.
+        //
+        // ⭐⭐ **AND THE MASK PROBE IS RETAIL'S OWN DEAD COMPUTATION.**
+        // The top-left is taken from the WRITER (`a1x`), not from the
+        // building, and the index then subtracts it from the WRITER
+        // again — so the whole expression cancels to a per-ROW
+        // constant, `(w>>1) - bump + (h>>1)*w`, the mask's own centre
+        // cell. The only writer-dependence left is the parity bump,
+        // which picks the centre or the cell left of it. THE CORPUS
+        // ARBITRATES AND IT IS UNAMBIGUOUS: mc2l0 t=3192→3193, four
+        // ground fires overlap building 196 (row 37, a 5x5 mask at
+        // tile 171,207) at `d = (-1,1)`, `(-1,2)`, `(2,-2)` and
+        // `(2,2)` — three of them OUTSIDE the footprint entirely —
+        // and retail pays all four (1600 = 4x400). Probing the
+        // building's own corner pays exactly the one writer standing
+        // on a solid cell, and that 400-per-fire shortfall was the
+        // whole residue left after the roster law below. Landing this
+        // moves mc2l0's free horizon 3221 → 3240.
+        //
+        // So the pass is, in effect, "every building whose summed AABB
+        // the writer overlaps" — the footprint mask never discriminates
+        // by position. It is a latent retail bug and it is now the
+        // port's law, exactly like the balloon mover's blind absorb
+        // (DEVIATIONS §castle_balloons).
         if fp_pass {
             let (wtx, wty) = ((wx >> 8) as u8, (wy >> 8) as u8);
             let mut hits: Vec<usize> = Vec::new();
-            for j in 1..self.ent.len() {
+            // Retail walks the TICK-TOP roster `dword_38527`
+            // ([`Gen::bldg_chain`]), not the live pool — so a record
+            // that only BECOMES a building mid-tick is unreachable
+            // by ch0 for the rest of that tick, and one killed
+            // mid-tick keeps taking it. The pool walk here delivered
+            // to both: mc2l0's ten village buildings complete at
+            // t=3192 (action 51 → 52) and the port's burning-village
+            // fires started paying them the same tick, so by the
+            // construction window's end at t=3221 every inbox was
+            // 400-multiples high (slot 123: retail 1600, port 2400)
+            // and the drain at 3222 forked ten lives at once — the
+            // take's whole wall. The chain-vs-pool costume, MC2 ch0
+            // face.
+            for c in 0..self.bldg_chain.visible_len() {
+                let j = self.bldg_chain.list[c] as usize;
                 let c = &self.ent[j];
-                if c.class64 != 10 || c.model65 != 45 || c.flags & 0x400 != 0 {
-                    continue;
-                }
                 if !self.mc2_overlap_xy(i, j) {
                     continue;
                 }
                 let Some(def) = self.assets.build_tab.get(c.f71 as usize).copied() else {
                     continue;
                 };
-                if def.w == 0 {
-                    continue;
+                // Retail's own expression, verbatim and with its dead
+                // subtraction intact (EF:4082-88). `v22`/`v20` are
+                // plain ints there, so nothing wraps at a byte.
+                let mut v22 = wtx as i32 - (def.w as i32 >> 1);
+                let v20 = wty as i32 - (def.h as i32 >> 1);
+                if (v20 + v22) & 1 != 0 {
+                    v22 += 1;
                 }
-                // The building's own top-left, its ctor's expression
-                // verbatim. Idempotent here: the ctor already shifted
-                // the building one tile +x to make the sum even, so
-                // recomputing from the stored position re-derives the
-                // bumped corner and the bump is a no-op — which is
-                // the corroboration that this corner is the
-                // building's and not the writer's.
-                let mut tlx = ((c.x >> 8) as u8).wrapping_sub(def.w / 2);
-                let tly = ((c.y >> 8) as u8).wrapping_sub(def.h / 2);
-                if tlx.wrapping_add(tly) & 1 != 0 {
-                    tlx = tlx.wrapping_add(1);
-                }
-                // Cell offsets stay SIGNED (retail's are plain ints):
-                // a writer left of or above the corner indexes
-                // backwards out of the row, and a writer past the
-                // right edge spills into the next one. Both are
-                // retail reads into the neighbouring BUILD00 bytes,
-                // reproduced as far as the blob reaches — off the
-                // blob we decline rather than invent a byte.
-                let dx = wtx.wrapping_sub(tlx) as i8 as i32;
-                let dy = wty.wrapping_sub(tly) as i8 as i32;
-                let off = def.offset as i64 + 2 * (dx + dy * def.w as i32) as i64;
+                let off = def.offset as i64
+                    + 2 * ((wtx as i32 - v22) + (wty as i32 - v20) * def.w as i32) as i64;
                 if off < 0 {
                     continue;
                 }
-                if let Some(&cell) = self.assets.build_dat.get(off as usize) {
-                    if cell != 0xFF {
-                        hits.push(j);
-                    }
+                // ⭐⭐ A ZERO-SIZE TEMPLATE IS NOT A SKIP — IT IS A
+                // PARITY TEST, and the port's `def.w == 0 { continue }`
+                // was a defensive guard with no line behind it.
+                // EF:4082-88 has no size test at all. Put w = h = 0
+                // through the expression and the row/column terms both
+                // vanish: `v22 = wtx`, `v20 = wty`, so the index is
+                // 0 when `wtx + wty` is EVEN and −2 when it is ODD.
+                // A 0x0 building therefore takes ch0 from writers on
+                // even-parity tiles and not from odd ones.
+                //
+                // It is reachable because BUILD.TAB has a 77th entry —
+                // row 76, `offset 80064 / 0x0`, where 80064 is exactly
+                // BUILD.DAT's length — and the villager lottery can
+                // raise it (see `Assets::with_bldgprm` for the other
+                // half of that phantom template). So its `data`
+                // pointer sits one past the blob, and the two indices
+                // are: −2 → BUILD.DAT's last byte, 0xFF, a MISS; and
+                // 0 → the byte AFTER the buffer, which is the one
+                // thing here we cannot read off disk.
+                //
+                // ⚠ THE CORPUS DECIDES IT, AND IT IS A HIT. mc2l3
+                // t=15419: the (10,45) built at 14611 stands at
+                // (46080, 17920) = tile (180, 70), sum 250, EVEN; the
+                // (10,0) burst on top of it broadcasts 160 and
+                // retail's building takes it (`life` 170000 → 169840,
+                // `word_0x26_38` → the human). So an index past the
+                // blob reads non-0xFF and delivers.
+                let cell = self.assets.build_dat.get(off as usize).copied();
+                if cell != Some(0xFF) {
+                    hits.push(j);
                 }
             }
             for j in hits {
@@ -1278,28 +1362,40 @@ impl Gen {
             (e.x, e.y, e.id24, e.f66, e.f67)
         };
         let r = (self.ent[i].f80 as i32 + 255) >> 8;
-        let cells = self.probe_window(wx, wy, r);
+        let cells = self.probe_window(wx, wy, r, ctx.strict);
         for &t in &cells {
             let mut j = self.map_entity[t] as usize;
             while j != 0 {
                 let c = &self.ent[j];
                 // Class-14 map objects (MC2 XP scrolls, mouth/
-                // checkpoint markers) are OBSERVABLE pass-through:
-                // retail's probe admits them mechanically (the
-                // (14,5) ctor keeps byte[0]&8, EF:37315/37365,
-                // and a player bolt's xtype is the −1 wildcard)
-                // but its ≈0-box, own-cell, endpoint-only probe
-                // never reaches the scroll's 768/1280 PICKUP box
-                // in practice (EF:63127-28 + Events.cpp:132 ring
-                // 0). Our anti-tunneling ring + chord-march
-                // (below/mc2 proj) WOULD reach it — the player's
-                // "fireballs detonate on scrolls / scrolls steal
-                // autoaim" report — so the guard restores the
+                // checkpoint markers) are OBSERVABLE pass-through
+                // in NATIVE play: retail's probe admits them
+                // mechanically (the (14,5) ctor keeps byte[0]&8,
+                // EF:37315/37365, and a player bolt's xtype is the
+                // −1 wildcard) but its ≈0-box, own-cell,
+                // endpoint-only probe rarely reaches the scroll's
+                // 768/1280 PICKUP box (EF:63127-28 +
+                // Events.cpp:132 ring 0). Our anti-tunneling ring +
+                // chord-march (below/mc2 proj) WOULD reach it — the
+                // player's "fireballs detonate on scrolls / scrolls
+                // steal autoaim" report — so the guard restores the
                 // retail observable (2026-07-16 scroll trace;
                 // MC1 has no class-14, goldens untouched).
+                //
+                // ⚠ STRICT-RETAIL REPLAY IS EXEMPT — the SAME
+                // treatment DEVIATIONS §262 gave the march and the
+                // square, and for the same reason: this guard exists
+                // only to compensate for THEM, and under `strict`
+                // neither is live, so gating here would be gating
+                // against retail's own geometry. "Rarely reaches"
+                // is not "never": mc2l0 t=9216 detonates FIVE (9,0)
+                // fireballs at once on the (14,5) cluster minted the
+                // tick before (slots 58/59/60 at 768/768/1280,
+                // ground z 0), each landing at victim z + its ayaw
+                // 37 — the port flew all five straight through.
                 if c.id24 != id
                     && c.flags & 8 != 0
-                    && c.class64 != 14
+                    && (ctx.strict || c.class64 != 14)
                     && Self::filter_admits(f66, f67, c.class64, c.model65)
                     && self.ent_overlap(i, j)
                 {
@@ -1333,13 +1429,15 @@ impl Gen {
         // teleported onto the carpet and spawned its (10,25) flash a
         // tick early.
         //
-        // MC2 keeps the pure AABB probe, in step with `area_write`:
-        // its window is the inflated square with the `.max(1)` floor
-        // (see [`Self::probe_window`]), one half of a compensating
-        // pair with the chord march, so gating it there would be
-        // gating a window that is not retail's.
+        // MC2 NATIVE PLAY keeps the pure AABB probe, in step with
+        // `area_write`: its window is the inflated square with the
+        // `.max(1)` floor (see [`Self::probe_window`]), one half of a
+        // compensating pair with the chord march, so gating it there
+        // would be gating a window that is not retail's. Under
+        // `strict` that square IS the ring, so the cell gate is
+        // retail's again and MC2 rejoins the shared arm.
         let player_in_window = no_probe_window_player()
-            || matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2)
+            || (!ctx.strict && matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2))
             || cells.contains(&tile((ctx.px >> 8) as u8, (ctx.py >> 8) as u8));
         if id != PLAYER_TARGET
             && player_in_window
@@ -1467,9 +1565,9 @@ impl Gen {
     ///   at the end of the move — which the port's MC1 movers also
     ///   do (endpoint-only `victim_scan_at`).
     ///
-    /// - **MC2: the port's inflated square window stays.** The MC2
-    ///   mover ray-marches the chord in ≤128-unit sub-steps (the
-    ///   documented anti-tunnel deviation for zero-width sprite
+    /// - **MC2 NATIVE PLAY: the port's inflated square window stays.**
+    ///   The MC2 mover ray-marches the chord in ≤128-unit sub-steps
+    ///   (the documented anti-tunnel deviation for zero-width sprite
     ///   boxes), and that march and the truncated-centre square with
     ///   its `.max(1)` floor are ONE compensating family — measured
     ///   2026-08-12: giving MC2 the retail ring cost five pinned
@@ -1477,8 +1575,22 @@ impl Gen {
     ///   collateral, two muzzle-admission guards) and mc2l4 t=621.
     ///   They come out together or not at all (the +1/+2 mc2l4/
     ///   mc2l30 ring pairs are forfeited with it, documented there).
-    fn probe_window(&self, wx: u16, wy: u16, r: i32) -> Vec<usize> {
-        if matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2) {
+    ///
+    /// - **MC2 UNDER `strict` (conformance replay): retail's geometry,
+    ///   like every other game.** The compensating pair comes out
+    ///   TOGETHER exactly as the deviation requires — the march
+    ///   collapses to retail's single endpoint probe in
+    ///   `mc2_proj_flight`, and the window becomes the ring — so the
+    ///   strict lane carries neither half and the native lane carries
+    ///   both. Measured mc2l0 t=3992: the (9,0) fireball's chord from
+    ///   (50460, 53582) to (50708, 53901) passes the (5,4) archer at
+    ///   slot 142 without either endpoint overlapping it (post-move
+    ///   |Δx| = 195 and pre-move |Δy| = 313, both against half-sums of
+    ///   176), but sub-step 2 of 4 sits at (50584, 53741) — inside on
+    ///   all three axes. The port burst and minted a (10,0) into slot
+    ///   48; retail flew past and terrain-contacted a tick later.
+    fn probe_window(&self, wx: u16, wy: u16, r: i32, strict: bool) -> Vec<usize> {
+        if !strict && matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2) {
             let r = r.max(1);
             let mut out = Vec::with_capacity(((2 * r + 1) * (2 * r + 1)) as usize);
             for dy in -r..=r {
@@ -2601,15 +2713,45 @@ impl Gen {
             cx = cx.wrapping_add(1); // parity snap (:44246-52)
         }
         let (px, py) = ((cx as u16) << 8, (cy as u16) << 8);
-        // The build datum: MC1 = the ground AT THE RAW LANDING POINT
-        // (sub_37920 runs sub_11F50 on the caller's axis BEFORE the
-        // snap — mc1l0 t=562: site (114,96) carries z 797, the
-        // mid-tile ground, not the corner's 736); MC2's ctor
-        // (sub_4AA40 EF:33390-99) = 32 x the perimeter-MIN over the
+        // ⭐⭐ TWO Z DATA, NOT ONE — AND ONLY MC2 SPLITS THEM.
+        //
+        // Both ctors open identically: take the RAW caller axis, read
+        // the ground under it, parity-snap x/y to the tile corner,
+        // link. MC1 (`sub_37920_37CE0` remc1:44229) keeps ONE number
+        // for both jobs, and does so BY STACK ACCIDENT: `v4 =
+        // sub_11F50(&raw)` (:44250) is the ground at the raw point, it
+        // is written to +154 (:44256), and the link
+        // `sub_41CF0_42030(v2, (axis_3d*)&v3)` (:44257) reads an
+        // axis_3d at `&v3` whose z WORD IS `v4` — v3 sits at
+        // [ebp-14h], v4 at [ebp-10h] (:44233-34), and `axis_3d`'s z is
+        // at byte offset 4 (remc1 Basic.h:41-45). Same value, both
+        // lanes (mc1l0 t=562: site (114,96) carries z 797, the
+        // mid-tile ground, not the corner's 736).
+        //
+        // MC2 (`sub_4AA40` EF:33362) uses a REAL `axis_3d` local, and
+        // that is the whole difference:
+        //     v6ar.z = getTerrainAlt_10C40(&predictedAxis_EB398ar); // :33385
+        //     v2x->axis_0x9A_154x = v6ar;                           // :33390
+        //     v2x->axis_0x9A_154x.z = 32 * sub_48E60(..);           // :33399
+        //     AddEventToMap_57D70(v2x, &v6ar);                      // :33400
+        // The perimeter-min overwrite lands on the ENTITY's +0x9E and
+        // never touches `v6ar`, so the record is LINKED at the ground
+        // under the RAW landing point while its painter/leveler datum
+        // keeps the perimeter minimum. Retail carries BOTH at once.
+        //
+        // Measured at the two birth ticks where the data DIFFER:
+        //   mc2l0  t=7224 slot 4   retail z 864 / dest_z 0
+        //   mc2l30 t=234  slot 126 retail z 256 / dest_z 0
+        // and at three where they COINCIDE on sea-level ground, which
+        // is why one number passed for so long: spells-galore t=1029
+        // slot 266, mc2l3 t=244 slot 127, mc2l1 t=2069 slot 146.
+        let link_z = self.ground_z(x, y) as i16;
+        // The build datum (+154 / site_z): MC1 = that same ground;
+        // MC2's ctor (EF:33399) = 32 x the perimeter-MIN over the
         // BUILD00 row-1 footprint at the snapped site.
         let z = match self.verbs.movement {
             crate::verbs::MovementVerb::Mc2 => self.mc2_castle_site_z(cx, cy),
-            _ => self.ground_z(x, y) as i16,
+            _ => link_z,
         };
         let s = self.new_event()?;
         {
@@ -2631,9 +2773,53 @@ impl Gen {
             // Channel mask (+28 = 33, ch0+ch5 — sub_37920 :44247).
             e.f28 = 33;
         }
-        self.link(s, px, py, z);
+        // ⚠ `link_z`, NOT `z`. MC2's `AddEventToMap_57D70(v2x, &v6ar)`
+        // (EF:33400) links with the ctor LOCAL, whose z is still the
+        // raw-point ground — the perimeter-min write one line earlier
+        // hit the entity field only. On MC1 the two are one number.
+        self.link(s, px, py, link_z);
         self.refill_life(s);
-        self.set_sprite(s, 177);
+        // ⭐ THE SPRITE/EXTENT STAMP IS PER-GAME, AND IT IS THE ONLY
+        // LINE OF THIS CTOR THAT IS. MC1's `sub_37920_37CE0` ends in
+        // `sub_36FA0_37360(event, 177)` (remc1 sub_main.cpp:44259) —
+        // the SPRITE_STATS row, 369 x 400, quad {200, 184, 184, 200}.
+        // MC2's `sub_4AA40` ends in `SetEntityIndexAndRot_49CD0(v2x,
+        // 177)` (EF:33402) — the `particlesParameters_D951C` row,
+        // whose (speed_6, rotSpeed_8) pair is DERIVED AT BOOT from the
+        // DAY bank's sprite 96 (38 x 39 → 38*400/39 = 389), quad
+        // {200, 194, 194, 200}. Same literal 177, two different tables.
+        // ⚠ The two tables COLLIDE at 184 for this row, because MC2's
+        // night/cave banks ship sprite 96 at 36 wide (36*400/39 = 369)
+        // — exactly what MC1's table carries. That is why this read as
+        // the already-closed dwelling day-source family (ledger
+        // 2026-08-01 ①) rather than as a wrong-table bug.
+        // Measured at the castle's BIRTH tick, three takes, zero
+        // counterexamples: spells-galore t=1029 slot 266, mc2l1 t=2069
+        // slot 146, mc2l30 t=234 slot 126 — retail apitch/aroll 194,
+        // port 184, every other lane equal. Live for one tick only
+        // (`mc2_castle_extents_ent` overwrites the quad on the
+        // castle's first dispatch), but the birth tick is the boundary
+        // the free run dies on.
+        match self.verbs.movement {
+            crate::verbs::MovementVerb::Mc2 => {
+                self.mc2_set_sprite(s, 177);
+                // `SetEntityIndex_49C90`'s third line (EF:32834):
+                // `byte_0x5D_93 = x_BYTE_D8A2E[params[177].byte_12]`.
+                // `x_BYTE_D8A2E` (EF:2297) is byte-identical to MC1's
+                // FRAME_COUNTS and row 177's draw type is 0, so this is
+                // retail's own 1 (dump-state t=1029 slot 266: b5d = 1).
+                // `mc2_set_sprite` does not carry the lane yet — retail
+                // REWRITES every row's `byte_12` at boot from the
+                // decompressed tmap header (EF:44906), like
+                // speed_6/rotSpeed_8, so the static column is not
+                // trustworthy table-wide and the general stamp is a
+                // separate law. Kept local so the swap does not drop
+                // this record from retail's 1 to the default zero.
+                self.ent[s].frames89 = crate::mc1::mobs::FRAME_COUNTS
+                    [crate::mc2::sprite_params::SPRITE_PARAMS[177].byte_12 as usize];
+            }
+            _ => self.set_sprite(s, 177),
+        }
         Some(s)
     }
 
@@ -4549,6 +4735,19 @@ impl Gen {
             e.f28 = 3;
             e.f58 = 0x80;
         }
+        // ⚠⚠ THE MASK HAS TWO HOMES AND MC2's WAS EMPTY. Both ctors
+        // stamp the mail-channel admit mask 3 (`(1 << ch) & mask`),
+        // but MC1 keeps it at +28 and MC2 at **@0x38** — retail's
+        // `CreateManaSphere_500C0` writes `byte_0x38_56 = 3`
+        // (EF:36617), which the importer homes in `f56` for class
+        // 2/10 and the roster publishes as the graded `b38` lane. The
+        // shared ctor set only MC1's `f28`, so every free-run MC2
+        // sphere carried mask 0 where retail carries 3. Corpus: mc2l3
+        // t=9816 borns eleven spheres in one tick and `explain` shows
+        // ALL ELEVEN taking `b38 0 -> 3`.
+        if matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2) {
+            self.ent[b].f56 = 3;
+        }
         self.link(b, x, y, z);
         self.refill_life(b);
         self.ball_resize(b);
@@ -5586,21 +5785,32 @@ impl Gen {
     /// clamp), merge on overlap (sub_277D0 :29700).
     fn ball_tick(&mut self, i: usize, ctx: &MobCtx) -> bool {
         let mc2 = matches!(self.verbs.movement, crate::verbs::MovementVerb::Mc2);
-        // MC2 ONLY: a disabled sphere never runs again (retail's
-        // UpdateEntities gate — the disable unlinks at once; the
-        // strict-mode main walk also skips it, native MC2 needs the
-        // guard here). MC1's walk gates on CLASS alone (:52351) and
-        // sub_27030 has no disable check: a ball soft-disabled
-        // EARLIER THIS TICK still runs its full dispatch — mc1l0
-        // t=1234, castle 663's absorb (:56032, slot 663) banks ball
-        // 754 and the flagged ball still slides/decays at its own
-        // slot before the next tick-top reap frees it. (The old
-        // whole-tick early-out was a fossil of the soft-kill merge
-        // era; the merge hard-frees now, see the sub_277D0 note
-        // below, so mutual merges cannot happen.)
-        if mc2 && self.ent[i].flags & 0x400 != 0 {
-            return false;
-        }
+        // ⭐⭐ NO DISABLE TEST AT THE SPHERE'S OWN HEAD EITHER, ON
+        // EITHER GAME. MC1's walk gates on CLASS alone (:52351) and
+        // `sub_27030` has no disable check — mc1l0 t=1234, castle 663
+        // banks ball 754 (:56032) and the flagged ball still
+        // slides/decays at its own slot before the next tick-top reap
+        // frees it. MC2's `TransformArcherToMana_35940` (EF:26015) is
+        // the same shape: EF:26062-65 tests `byte[1] & 8` — the STALL
+        // bit, handled immediately below — and NOTHING else.
+        //
+        // The MC2-only early-out that used to sit here claimed to
+        // mirror "retail's UpdateEntities gate", but that loop
+        // (EF:40116-80) has no disable test at all; the only one is
+        // the tick-top reaper (EF:39948-56). The certified MC1 twin
+        // omitting the check was the tell — a certified twin omitting
+        // a call is the proof. mc2l3 t=438/543/564/684/780/963/1175/
+        // 1228: a sphere swallowed by a balloon at a LOWER pool slot
+        // still runs its collector-tether arm that same tick, z += 32
+        // straight into the balloon that just ate it, and only the
+        // next tick's top-of-frame reaper frees the slot.
+        //
+        // ⚠ This guard is scoped by MovementVerb::Mc2, not GameId —
+        // "anything running the MC2 mover". Native MC2 relies on it
+        // being gone: world.rs' end-of-iteration `free_slot` already
+        // implements run-then-free (DEVIATIONS.md), and spheres were
+        // the one class exempted from native MC2's own documented
+        // rule.
         // MC2 stall skip (retail byte[1] & 8 → import bit 26,
         // EF:26062-65): a one-shot whole-tick skip — intakes, modes
         // and the decay tail included. Native MC2 never arms it on
@@ -5759,8 +5969,26 @@ impl Gen {
         // stopped dead short of the eye, twitching back to life only
         // when the player wandered close enough for the awake pass to
         // re-arm +58. That is precisely the reported regression.
-        if mc2 && self.mc2_aura_claim.0.remove(&(i as u16)).is_some() {
+        if mc2 && let Some(aura) = self.mc2_aura_claim.0.remove(&(i as u16)) {
             kicked = true;
+            // ⭐ AND THE SPHERE WRITES ITS OWN HEADING BEFORE IT FLIES
+            // — `yaw_0x1C_28 = sub_581E0_maybe_tan2(&a1x->position,
+            // &Entities[w7A]->position)` (EF:26101), and only THEN
+            // does it set its dest from that bearing. Exactly the MC1
+            // ch4 twin twenty lines above, which has had this write
+            // since the mc1l0 (10,39) heading family was closed; the
+            // MC2 half collapsed the claim into the dest velocity and
+            // threw the aura slot away with `.is_some()`, so every
+            // dragged sphere kept heading 0 (mc2l3 t=9816 slot 168:
+            // retail 960, port 0 — the (10,39) `heading` family).
+            // Stored RAW like the MC1 arm: retail's atan2 returns
+            // 0..2048 inclusive and every consumer masks on read.
+            let aura = aura as usize;
+            if aura < self.ent.len() {
+                let (ax, ay) = (self.ent[aura].x, self.ent[aura].y);
+                let (bx, by) = (self.ent[i].x, self.ent[i].y);
+                self.ent[i].f30 = Self::angle_between(bx, by, ax, ay);
+            }
         }
         // Collector tether (flag 0x40): the ball FLIES to its
         // collector (+146) instead of running ground physics
@@ -5931,9 +6159,8 @@ impl Gen {
             let e = &self.ent[i];
             (e.x, e.y, e.z)
         };
-        let x = x0.wrapping_add(vx as u16);
-        let y = y0.wrapping_add(vy as u16);
-        let ground = self.ground_z(x, y) as i16;
+        let mut x = x0.wrapping_add(vx as u16);
+        let mut y = y0.wrapping_add(vy as u16);
         // Vertical (:29532-37 / EF:26188-91 — the twins are verbatim):
         // z steps by the +46 lift and gravity integrates EVERY moving
         // tick; there is no at-rest gate. The strict below-ground
@@ -5941,6 +6168,71 @@ impl Gen {
         // while its lift cycles 0 → −16 → 0 underneath.
         let mut z = z0.wrapping_add(self.ent[i].f46);
         self.ent[i].f46 = (self.ent[i].f46 - 16).max(-128);
+        // ⭐ THE MC2 CAVE-WALL ESCAPE (EF:26192-26239), MC2-only — a
+        // sphere whose stepped position pokes the rock (`sub_11E70`,
+        // Terrain.cpp:2152 = [`Gen::cave_poke`]) does NOT stop: it
+        // takes actSpeed 256 and FANS for an opening, ±170 at a time
+        // out to ±1020 (`v30` alternating sign, `v32` advancing only
+        // on the way back to +1), each candidate probed from the
+        // CURRENT position — not the stepped one — and dropped onto
+        // the terrain. The first opening becomes both the yaw and the
+        // roll and the sphere lands there; if all twelve poke, retail
+        // falls back to a flat +64/+64 nudge and — its own quirk —
+        // leaves z at the LAST probe's terrain altitude, sampled at an
+        // x/y it then discards. Either way the lift is slammed to
+        // −128. mc2l3 t=5426: sphere 234 wedges under the rock and
+        // retail relaunches it at speed 256 on a fanned heading.
+        //
+        // ⚠ Retail's `v35` arm (skip the fan, keep the position) is
+        // the COLLECTOR TETHER, which this port returns out of well
+        // above — the ballistic path is only ever reached with v35 = 0.
+        if mc2 && self.is_cave() {
+            let (fov, hover) = {
+                let e = &self.ent[i];
+                (
+                    e.f84 as i32,
+                    crate::mc2::behavior::BEHAVIOR
+                        [crate::mc2::behavior::ROW_BASE + e.row156 as usize]
+                        .v_12 as i32,
+                )
+            };
+            if self.cave_poke(fov, hover, x, y) {
+                self.ent[i].f126 = 256;
+                let yaw0 = self.ent[i].f30 as i32;
+                let (mut v32, mut v30) = (170i32, 1i32);
+                let mut found = None;
+                let mut last_z = z;
+                while v32 <= 1024 {
+                    let a = ((v30 * v32 + yaw0 + 512) as u16) & 0x7FF;
+                    let mut p = (x0, y0, z0);
+                    Self::polar_step(&mut p, a, 0, 256);
+                    p.2 = self.ground_z(p.0, p.1) as i16;
+                    last_z = p.2;
+                    if !self.cave_poke(fov, hover, p.0, p.1) {
+                        found = Some((a, p));
+                        break;
+                    }
+                    v30 = -v30;
+                    v32 += if v30 == 1 { 170 } else { 0 };
+                }
+                match found {
+                    Some((a, p)) => {
+                        self.ent[i].f30 = a;
+                        self.ent[i].f34 = a;
+                        (x, y, z) = p;
+                    }
+                    None => {
+                        vx = 64;
+                        vy = 64;
+                        x = x0.wrapping_add(64);
+                        y = y0.wrapping_add(64);
+                        z = last_z;
+                    }
+                }
+                self.ent[i].f46 = -128;
+            }
+        }
+        let ground = self.ground_z(x, y) as i16;
         // Clamp + rebound ONLY when the step went STRICTLY below the
         // ground (`tempV13 > z` :29538 / `v22 > z` EF:26244): a ball
         // landing EXACTLY on it keeps its falling lift one more tick
@@ -5958,6 +6250,28 @@ impl Gen {
             let v = self.ent[i].f46;
             let nb = -(v / 4);
             self.ent[i].f46 = if nb <= 16 { 0 } else { nb };
+        }
+        // ⭐ THE MC2 CAVE-CEILING CLAMP (EF:26256-63) — MC2-ONLY, and
+        // it has no MC1 counterpart because MC1 has no ceiling plane:
+        //
+        //     if (isCaveLevel) {
+        //         v24 = sub_10C60(&pred) - a1x->array_0x52_82.fov;
+        //         if (v24 < (int16_t)pred.z) { w2C = -abs(w2C); pred.z = v24; }
+        //     }
+        //
+        // A sphere thrown up inside a cave stops at the ROCK, its lift
+        // forced downward — the ceiling twin of the ground rebound
+        // above, and it must land BEFORE the `grounded` test, whose
+        // retail form (`v22 == pred.z`, EF:26265) compares the terrain
+        // altitude against the FULLY clamped z. mc2l3 t=5424: sphere
+        // 234 arcs from 2937 at lift −5 and retail parks it on 2913,
+        // the ceiling less its own fov, where the port flew on to 2932.
+        if mc2 && self.is_cave() {
+            let cap = (self.ceiling_z(x, y) as i16).wrapping_sub(self.ent[i].f84 as i16);
+            if cap < z {
+                self.ent[i].f46 = -self.ent[i].f46.abs();
+                z = cap;
+            }
         }
         // Grounded contact = post-clamp z ON the ground (`tempV13 ==
         // z` :29552 / `v22 == predicted.z` EF:26265) — true on an

@@ -485,6 +485,21 @@ pub struct Mc2Moved {
     /// `SpellEnabled[3]` manifestation's `word_0x2E_46`, EF:59603 —
     /// MC2 spell 3 = the accelerate channel).
     pub accel_cancel: bool,
+    /// `word_0xe_14` — retail's "a speed KEY stepped the command this
+    /// frame" flag, set by `sub_5F380` (EF:60790) whenever the guarded
+    /// ±16 integration actually moved the target. MC1 has published it
+    /// as `Mc1Moved::speed_touched` all along; MC2 computed `dir` and
+    /// threw it away.
+    ///
+    /// ⭐⭐ IT IS THE SPEED SPELL'S BRAKE-CANCEL, AND THE GUARD IS WHAT
+    /// MAKES IT DIRECTIONAL. `GetScroll_69DB0` collapses its window to
+    /// one tick when this is set, and the integration only steps while
+    /// the target is inside ±80 — so against a FORWARD boost (target
+    /// +160/+240/+320) the up key cannot step and only the down key
+    /// arms it, and against a BACKWARD boost only the up key does.
+    /// That is the manual's "press the down cursor to cancel", falling
+    /// out of the bounds test rather than a separate rule.
+    pub speed_touched: bool,
 }
 
 /// The faithful MC2 human move — `sub_5F380`'s command integration
@@ -525,32 +540,44 @@ pub fn mc2_move(
     // ---- sub_5F380 (EF:60748): command integration, pre-move ----
     // Identical numbers to MC1's sub_46840 (trace §4c: the D4B8x
     // constants match 16/±80/−4 exactly).
-    let mut dir: i16 = 0;
-    if inp.speed_up && st.tgt_speed < 80 {
-        dir = 1;
-    }
-    if inp.speed_down && st.tgt_speed > -80 {
-        dir = -1;
-    }
-    if dir != 0 {
-        st.tgt_speed = (st.tgt_speed + 16 * dir).clamp(-80, 80);
-    }
-    // Sequential bit tests like MC1's (EF:60793-96) — both strafes
-    // held resolves to RIGHT, never to release.
-    let mut sdir: i16 = 0;
-    if inp.strafe_left {
-        sdir = -1;
-    }
-    if inp.strafe_right {
-        sdir = 1;
-    }
-    if sdir != 0 {
-        st.strafe = (st.strafe + 16 * sdir).clamp(-80, 80);
-    } else if st.strafe != 0 {
-        let s = st.strafe.signum();
-        st.strafe -= 4 * s;
-        if st.strafe.signum() != s {
-            st.strafe = 0;
+    //
+    // ⚠ THE WHOLE BLOCK IS SKIPPED ON THE DEATH FALL (`no_command`),
+    // the exact MC1 law one column over. Retail dispatches class 3 by
+    // `actionIndex`, and state 2 goes to `sub_5E310` (EF:60045) whose
+    // FIRST statement is `sub_5D530` — the command handler is never
+    // reached, so thrust, strafe and strafe's own 4/tick release decay
+    // all freeze while the mover keeps running. Only `AddPlayer03_00`
+    // (state 0) calls `sub_5F380`, at EF:59967, and the `life < 0`
+    // flip to state 2 is that function's TAIL.
+    if !inp.no_command {
+        let mut dir: i16 = 0;
+        if inp.speed_up && st.tgt_speed < 80 {
+            dir = 1;
+        }
+        if inp.speed_down && st.tgt_speed > -80 {
+            dir = -1;
+        }
+        if dir != 0 {
+            st.tgt_speed = (st.tgt_speed + 16 * dir).clamp(-80, 80);
+            moved.speed_touched = true; // word_0xe_14 = 1 (EF:60790)
+        }
+        // Sequential bit tests like MC1's (EF:60793-96) — both strafes
+        // held resolves to RIGHT, never to release.
+        let mut sdir: i16 = 0;
+        if inp.strafe_left {
+            sdir = -1;
+        }
+        if inp.strafe_right {
+            sdir = 1;
+        }
+        if sdir != 0 {
+            st.strafe = (st.strafe + 16 * sdir).clamp(-80, 80);
+        } else if st.strafe != 0 {
+            let s = st.strafe.signum();
+            st.strafe -= 4 * s;
+            if st.strafe.signum() != s {
+                st.strafe = 0;
+            }
         }
     }
 
@@ -1574,6 +1601,57 @@ mod tests {
         // actSpeed still slews down over the following ticks (the
         // carpet decelerates, it doesn't freeze).
         assert_eq!(st.act_speed, 80);
+    }
+
+    /// ⭐⭐ THE SPEED SPELL'S BRAKE-CANCEL IS `sub_5F380`'s BOUNDS TEST.
+    /// `word_0xe_14` (`Mc2Moved::speed_touched`) rises only when the
+    /// guarded ±16 step actually MOVED the target, and a boosted target
+    /// sits outside ±80 — so exactly one key can move it, and it is the
+    /// resisting one. That is the manual's "press the down cursor to
+    /// cancel" falling out of arithmetic rather than a separate rule,
+    /// and it is why the registered `thrust_cancel` deviation (which
+    /// asserted the decompile "hard-overrides speed every tick with no
+    /// brake input") was retired.
+    #[test]
+    fn the_mc2_speed_brake_is_the_resisting_key_only() {
+        let step = |tgt: i16, up: bool, down: bool| {
+            let mut st = Mc1State {
+                z: 256,
+                act_speed: tgt,
+                tgt_speed: tgt,
+                ..Default::default()
+            };
+            let mut ext = Mc2Ext::default();
+            let inp = Mc1Input {
+                speed_up: up,
+                speed_down: down,
+                ..Default::default()
+            };
+            let moved = mc2_move(
+                &mut st,
+                &mut ext,
+                &inp,
+                None,
+                None,
+                &flat_ground,
+                &no_ceiling,
+                &open_gate2,
+                &never_stuck,
+            );
+            (moved.speed_touched, st.tgt_speed)
+        };
+        // FORWARD boost (tier 0 sustained): up is inert, down clamps
+        // 160 → 80 and arms the flag — galore t=6278 exactly.
+        assert_eq!(step(160, true, false), (false, 160), "up cannot brake");
+        assert_eq!(step(160, false, true), (true, 80), "down brakes");
+        // BACKWARD boost: mirrored, and the manual's "down" is now the
+        // one that rides along.
+        assert_eq!(step(-160, false, true), (false, -160), "down cannot brake");
+        assert_eq!(step(-160, true, false), (true, -80), "up brakes");
+        // Unboosted flight arms the flag on EITHER key — the window is
+        // what makes it directional, not the flag.
+        assert_eq!(step(16, true, false), (true, 32));
+        assert_eq!(step(16, false, true), (true, 0));
     }
 
     #[test]

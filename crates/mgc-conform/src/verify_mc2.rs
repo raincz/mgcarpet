@@ -33,6 +33,10 @@
 
 use crate::Args;
 use crate::verify::{FieldDiff, PairDiff, Stats};
+/// The campaign REPLAY gate's capture witness — shared with the app's
+/// own retail driver, which needs the identical derivation
+/// ([`mgc_formats::mgcr::mc2_take_replayed`]).
+pub(crate) use mgc_formats::mgcr::mc2_take_replayed;
 use mgc_formats::mgcr::{EntObsMc2, ObsMc2, Recording, RetailEntMc2, RetailMc2, decode_retail_mc2};
 use mgc_sim::engine::features::{FeatureAssets, Planes};
 use mgc_sim::engine::world::conformance::{PinnedMc2, ThingTable};
@@ -52,7 +56,8 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
         path.display(),
         args.pin_pose
     );
-    let (mut world, pristine, things) = build_world_mc2(&args.baked, level)?;
+    let replayed = mc2_take_replayed(path)?;
+    let (mut world, pristine, things) = build_world_mc2(&args.baked, level, replayed)?;
 
     let mut csv: Option<std::io::BufWriter<std::fs::File>> = match &args.csv {
         Some(p) => {
@@ -107,6 +112,22 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     let mut ring_casts = 0u64;
     let mut stats = Stats::default();
     let mut pose_chan = crate::pose_lane::PoseLane::default();
+    // THE RAW SHADOW (`MGC_RAW_SHADOW=1`) — the MC2 arm. `EntObsMc2`
+    // carries 20 of the record's 91 raw lanes, so a handler that reads
+    // one of the other 71 correctly and WRITES it wrong reports CLEAN
+    // in pair mode forever. That is not hypothetical on this game: the
+    // mc2l0 horizon head was a `phase3e` reading 1 against retail's
+    // 149 — invisible to the graded diff, and the actual cause of the
+    // two graded rows it did show. Off by default; it grades nothing,
+    // it only reports, and it must not move the UNEXPLAINED headline.
+    let mut shadow = crate::shadow::Shadow::from_env()?;
+    // The PER-ENTITY tear census (see the loop body): pairs touched,
+    // total slot-exclusions, distinct slots, and the (class, model)
+    // breakdown — a family concentration is the tell that an
+    // exclusion is hiding a law rather than a capture artifact.
+    let (mut torn_pairs, mut torn_rows) = (0u64, 0u64);
+    let mut torn_distinct: std::collections::BTreeSet<u16> = Default::default();
+    let mut torn_fam: std::collections::BTreeMap<(u8, u8), u64> = Default::default();
     let mut printed_import = false;
     let mut boundary_seeded = false;
     // Measured-terrain accumulator — the MC1 twin's pending-block
@@ -121,6 +142,10 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
         })
         .flatten();
     let mut pending_terrain: Option<mgc_formats::mgcr::TerrainBlock> = None;
+    // Terrain@N held across the pose lane's in-place advance to N+1 —
+    // see [`crate::verify::PlanesAtN`]. Both re-execs below (pose-alt,
+    // `--dump`) are still executing the PAIR and must see terrain@N.
+    let mut planes_n = crate::verify::PlanesAtN::default();
     while let Some(r) = rec.next_tick() {
         let tick = r?;
         if let Some(img) = timg.as_mut() {
@@ -238,6 +263,14 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 // pair it fires on cannot conform without it
                 // (`engine::world::cheats`).
                 c.cheat = rec.cheat;
+                // …and so does a demolish. MC2 has no move-byte trace
+                // for it (`PlayerAction` 0x2A), so `recover_pair_mc2`
+                // reads the own castle at the END record with
+                // `life == -1` in the destroy intake; MC1's verify arm
+                // has always forwarded its own witness (verify.rs) and
+                // this one silently did not, leaving MC2 pair mode
+                // structurally unable to demolish.
+                c.demolish = rec.demolish;
                 c
             };
             if args.start.is_some_and(|s| pt < s) {
@@ -276,6 +309,51 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     )
                     .map_err(|e| format!("t={pt}: {e}"))?;
                     let human_slot = report.human_slot;
+                    // ⚠ THE PER-ENTITY TEAR IS AN EXCLUSION, AND AN
+                    // UNREPORTED EXCLUSION IS A BLIND SPOT. Every slot
+                    // in here had ALL its fields dropped from the
+                    // graded diff — so a lane can be wrong on a torn
+                    // slot forever and the report will never say so.
+                    // The whole-pair `0 TORN` headline is a DIFFERENT
+                    // number (`capture_clean_mc2`); this one is
+                    // per-entity and used to be invisible. (mc2l0
+                    // t=1055: retail recycles a castle piece, its
+                    // phase byte goes 255 → 230, and the slot's real
+                    // x/y divergence was silently skipped — that
+                    // absence read as evidence of correctness.)
+                    let torn = torn_slots(&pst, &st);
+                    if !torn.is_empty() {
+                        torn_pairs += 1;
+                        torn_rows += torn.len() as u64;
+                        for s in &torn {
+                            torn_distinct.insert(*s);
+                            let e = &st.ents[*s as usize];
+                            *torn_fam.entry((e.class3f, e.model40)).or_insert(0u64) += 1;
+                        }
+                    }
+                    // Feed the raw shadow HERE — the world is exactly
+                    // the post-tick state the graded diff just judged,
+                    // and the pose lane below re-installs terrain.
+                    if let Some(sh) = shadow.as_mut() {
+                        sh.compare_ents_mc2(&world, &st, human_slot, &torn, pt);
+                        // A fallback pair started from a SCANNED free
+                        // list, not retail's, so it has nothing to say
+                        // about the allocator.
+                        if report.stack_fallback.is_none() {
+                            sh.compare_free_mc2(&world, &st, human_slot, pt);
+                        }
+                    }
+                    // ARM terrain@N before the pose lane advances the
+                    // shared image: a re-exec runs below iff the pair
+                    // is dirty (pose-alt, and `--dump-first`) or this
+                    // tick was named by `--dump`, and it only needs
+                    // the snapshot when the tick actually carries a
+                    // terraform block.
+                    if pending_terrain.is_some() && (!pd.clean() || args.dump == Some(pt)) {
+                        planes_n.arm(&timg);
+                    } else {
+                        planes_n.disarm();
+                    }
                     // The POSE CHANNEL (crate::pose_lane): shadow-step
                     // the faithful mover over the human's own motion
                     // column. Terrain probes run on the MEASURED
@@ -361,7 +439,7 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         let (alt, _, _) = exec_pair_mc2(
                             &mut world,
                             &pristine,
-                            crate::verify::measured_planes(&timg),
+                            planes_n.get(&timg),
                             &things,
                             &pst,
                             &st,
@@ -385,7 +463,7 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                         let (pd, port, _) = exec_pair_mc2(
                             &mut world,
                             &pristine,
-                            crate::verify::measured_planes(&timg),
+                            planes_n.get(&timg),
                             &things,
                             &pst,
                             &st,
@@ -443,6 +521,28 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     }
     print!("{}", stats.render(args, roster.as_ref()));
     print!("{}", pose_chan.render());
+    if torn_rows > 0 {
+        // Ordered by weight: the heaviest family is the one most
+        // likely to be hiding something.
+        let mut fam: Vec<_> = torn_fam.iter().collect();
+        fam.sort_by_key(|(k, v)| (std::cmp::Reverse(**v), **k));
+        println!(
+            "   per-entity TEAR (fields excluded from grading, presence still compared): \
+             {torn_rows} slot-exclusions across {torn_pairs} pairs, {} distinct slot(s)",
+            torn_distinct.len()
+        );
+        for ((c, m), n) in fam.iter().take(8) {
+            println!("     ({c:>3},{m:>3}): {n}");
+        }
+        if fam.len() > 8 {
+            println!("     … and {} more (class, model)", fam.len() - 8);
+        }
+    }
+    if let Some(sh) = shadow.as_ref() {
+        // Pair mode's question is "which family is worst", so the
+        // report keeps the map's own (class, model, lane) order.
+        print!("{}", sh.render(false));
+    }
     // Both counters cover the whole STREAM, not just `--start`'s
     // window: the input chain is fed from t=0 regardless, and the ring
     // lane is a "did this take ever trip it" question.
@@ -739,6 +839,7 @@ pub(crate) fn carpet_pose_mc2(e: &RetailEntMc2) -> PlayerPose {
 pub(crate) fn build_world_mc2(
     baked: &std::path::Path,
     level: u32,
+    replayed: bool,
 ) -> Result<(World, Planes, ThingTable), String> {
     let lp = baked.join("mc2").join(format!("level-{level:03}.mgcl"));
     let file = std::fs::File::open(&lp).map_err(|e| format!("{}: {e}", lp.display()))?;
@@ -798,6 +899,7 @@ pub(crate) fn build_world_mc2(
         Some(mgc_formats::MapType::Night) | Some(mgc_formats::MapType::Cave)
     ));
     w.set_mc2_doom_level(header.is_some_and(|h| h.gfx_type & 2 != 0));
+    w.set_mc2_level_replayed(replayed);
     if let Some(stages) = pkg.stages.as_ref() {
         let rows: Vec<(i8, i16, i16, i16)> = stages
             .checkpoints

@@ -326,22 +326,32 @@ impl World {
             let e = &mut self.g.ent[ent];
             e.site_z = 0;
             e.tick70 = model.wrapping_mul(8).wrapping_add(1); // 8*model+1 = active
-            // IMMEDIATE RESCAN ON GATE RELEASE (port nudge, retail-
-            // observed): retail's mc2:04 archers attack the worms the
-            // INSTANT the skeletons are extinct; on the port's idle
-            // cadence a released creature waited up to 4*v_26 ticks
-            // (~5 s) for its next acquire scan. Zeroing the phase
-            // counter makes the same tick's brain run hit every
-            // `f63 % n == 0` gate (the stagevar pre-pass runs before
-            // the entity loop; the loop increments f63 AFTER the
-            // handler). Reaction-path releases only — the spawn-time
-            // cadence-skip (`direct`) keeps its fresh ordinal so
-            // same-spawn flocks stay de-synced. Mechanism
-            // unrecovered in remc2 — re-check against the true
-            // NETHERW.EXE decompile someday (DEVIATIONS entry).
-            if !direct {
-                e.f63 = 0;
-            }
+            // ⭐⭐ A GATE RELEASE DOES NOT TOUCH THE PHASE COUNTER.
+            // `sub_12470` (EF:5035-42) is a FOUR-write leaf —
+            // `StageVar2 = 0; StageVar1 = 0; word_0x4A_74 = 0;
+            // actionIndex = a2` — and `sub_12410` (EF:5023-33) only
+            // chains into it, so `byte_0x3E_62` survives the release
+            // untouched and the freed creature's brain runs the
+            // release tick on its OWN standing ordinal, cadence gates
+            // wherever that ordinal leaves them.
+            //
+            // The port used to zero `f63` here (the "immediate rescan
+            // on gate release" nudge, registered in DEVIATIONS.md as
+            // an invention awaiting exactly this re-check), which
+            // forced EVERY `f63 % v_26 == 0` gate open on the release
+            // tick. mc2l0 t=7292 slot 68 REFUTES it: a kind-6 timer
+            // hold expires on a (5,13) townie (sv_timer 1->0, sv1/sv2
+            // 6->0, action45 111->105) and retail's own changelog
+            // reads `phase3e 148 -> 149` — the plain post-handler loop
+            // increment, no reset — so `148 % v_26(40) = 28` keeps
+            // `sub_23340`'s gate SHUT (EF:14576) and retail falls
+            // straight to LABEL_43. The port's zero opened it and paid
+            // four raw lanes plus the graded `speed` row in one tick:
+            // `mc2_wander_turn`'s two entity draws (rand 9370 -> 3640,
+            // roll 1053 -> 1194), the dwelling scan's `f146 = 15`, and
+            // `f126 = maxSpeed + 12 = 30` (EF:14637) where retail held
+            // 18. ⚠ `direct` still gates the CHAIN hop above — only
+            // the phase write was the invention.
         }
         self.mc2_sv_held.retain(|h| h.ent as usize != ent);
     }
@@ -692,6 +702,58 @@ impl World {
                 _ => {}
             }
         }
+        // ⭐⭐ **AND m4's TAIL IS AN AIM RE-TEST, NOT AMBIENT
+        // PHYSICS.** `AddScroll05_04_20140` (EF:11960-66) is the
+        // archer's phase-7 wrapper and its whole body is
+        // `dword_0x10_16 = 0; sub_1D5D0(entity, 32); if (actionIndex
+        // == 34) sub_20060(entity);` — the aim test reads the action
+        // the 1D5D0 legs JUST WROTE, so the tick a held archer's
+        // wizard-watch promotes it to its attack state is the tick it
+        // takes its aim: the sprite roll (a per-entity draw), sprite
+        // 206, the shift-rot, `f126 = 0` (speed to a standstill) and
+        // the victim's class/model into +66/+67. The port's held seam
+        // pre-empts the normal dispatch, so `archer_tick`'s own copy
+        // of that test never ran and a promoted archer kept walking
+        // at patrol speed with the patrol sprite. mc2l0 t=3946, slot
+        // 142: retail `f5a 0 -> 206`, `speed 30 -> 0`, `+66/+67 ->
+        // 3/0` and one entity-rand step; the port wrote none of it.
+        // ⚠ the test is NOT under the `tick70 & 7 == 7` gate above —
+        // by this point the action is `base + 2`, not phase 7.
+        if self.g.ent[i].model65 == 4 && self.g.ent[i].tick70 == base.wrapping_add(2) {
+            self.g.archer_aim(i);
+        }
+        // ⭐⭐ **AND FOUR MORE WRAPPERS END IN A SUB-STATE RESET.**
+        // `sub_24DF0` (m17, EF:15833-37), `AddFirebug05_13_25D50`
+        // (m19, EF:16605-09), `sub_26020` (m20, EF:16746-50) and
+        // `sub_2B7B0` (m28, EF:21266-70) are each exactly
+        // `sub_1D5D0(a1x, 8m); if (actionIndex_0x45_69 == 8m+2)
+        // byte_0x46_70 = 0;` — the test reads the action the held legs
+        // JUST WROTE, so a creature the wizard-watch, the kind-3
+        // ambush, the kind-10 re-raise or a foreign-class hit promotes
+        // out of the hold ENTERS its attack machine at sub-state 0,
+        // whatever sub-state its previous release ended in. m28 reaches
+        // it one call-hop away — `sub_2B840` (EF:21298-306) is
+        // `actionIndex = 226; byte_0x46_70 = 0;`, and the 226 write is
+        // a no-op because the caller's guard already proved it.
+        // ⚠ only the PHASE-7 wrappers are this bare: the ordinary
+        // m17/m20 wrappers (`sub_25D80` :16613) also null a non-wizard
+        // target, so `m17_validate`/`m20_validate` must NOT be reused
+        // here. The port already owns the m19 and m28 halves
+        // (`Gen::m19_reset` roster.rs:2039, `m28_tick` roster.rs:3837)
+        // but hangs them off the per-model tick, which this seam
+        // pre-empts (world.rs:5037) — so a re-held creature kept a
+        // stale sub-state. mc2l3 slot 146: knocked into the dive latch
+        // `f71 = 7` at t=275, re-held at t=277, re-promoted at t=340 —
+        // retail zeroes it and re-enters case 0 (`f126 = f128` = 76, no
+        // z write); the port kept 7 and took the dive-launch arm
+        // (`f126 = 3*f128` = 228, `z += 64` = 115).
+        // ⚠ like the m4 test above, this is NOT under the `tick70 & 7
+        // == 7` gate — by this point the action is `base + 2`.
+        if matches!(self.g.ent[i].model65, 17 | 19 | 20 | 28)
+            && self.g.ent[i].tick70 == base.wrapping_add(2)
+        {
+            self.g.ent[i].f71 = 0;
+        }
         // The per-model wrapper's SPEED TAIL (the goat's
         // `AddGoat05_01_1F5B0` :11452 shape, shared by the townie
         // wrapper): the flee state runs at minSpeed — applied the
@@ -843,9 +905,45 @@ impl World {
 
     /// The non-lethal-hit arm shared by every kind handler
     /// (EF:10227-39): an attacker of a foreign class or model breaks
-    /// the hold — target it, mark `StageVar2 = 10`, raise to aggro.
-    /// (Retail follows with the `sub_1EEE0` ground settle — APPROX
-    /// skipped, module doc.)
+    /// the hold — target it, mark `StageVar2 = 10`, raise to aggro —
+    /// and then the GROUND SETTLE runs UNCONDITIONALLY, OUTSIDE the
+    /// foreign-attacker test. All three kind handlers end their
+    /// `case 1` with a bare `sub_1EEE0(a1x)` (`sub_1D8C0` EF:10240,
+    /// `sub_1DDA0` EF:10434, `sub_1E1C0` EF:10554), and `sub_29930`'s
+    /// m27 head reaches the same arm through `sub_1D5D0(a1x, 216)`
+    /// (EF:19702). The enclosing arm is `else if (v2 <= 1)` after
+    /// `if (v2 < 1)`, so it is the v2 == 1 case alone — quiet ticks
+    /// never reach it, and the port's `match` is faithful.
+    ///
+    /// `sub_1EEE0` (EF:11172) is `sub_580E0(&pos, getTerrainAlt(pos),
+    /// v_12, v_10, v_14)`, and `sub_580E0` (EF:40372) is the 2-branch
+    /// servo [`Gen::mc2_alt_core`] already implements: `if (z > G) z
+    /// += step; if ((i16)z <= G + hover) z = G + hover` (its `a4` =
+    /// `v_10` is dead, commented out in the decompile itself).
+    ///
+    /// ⭐⭐ **THE HELD WALK ONLY EVER LIFTS.** The move core
+    /// `sub_1B8C0` runs its own `sub_580E0` on the PREDICTED axis at
+    /// the PRE-move position (EF:8798-8805) and only then steps x/y,
+    /// so a walking creature's `z` is the ground of the tile it LEFT
+    /// and a DESCENT leaves it hanging at the last high ground.
+    /// `sub_1EEE0` is retail's only settle at the CURRENT position,
+    /// and on a stage-held creature this hit arm is its only caller —
+    /// skip it and the creature keeps a stale altitude indefinitely.
+    ///
+    /// mc2l0 t=7744 slot 89, a stage-held goat (row 98: hover
+    /// `v_12` = 0, step `v_14` = −256; `StageVar2` 2 → 10, action
+    /// 15 → 14): retail `z 1695 → 1585`, the port carried 1695. The
+    /// −110 is the CLAMP branch, not the step — 1695 − 256 = 1439,
+    /// then clamped UP to ground 1585 — and two ticks later the same
+    /// servo LIFTS 1585 → 1612, which a −256 step alone can never do.
+    /// ⚠ The head arithmetic pins `hover = 0` but does NOT
+    /// discriminate the step: any step ≤ −110 clamps to the same
+    /// 1585. The step comes from the row table, not from this fit.
+    ///
+    /// ⭐ TRAP #3 (grep the LANE) CLEARED: retail has 14 `sub_1EEE0`
+    /// call sites; the 11 free-creature ones are already ported
+    /// (mobs.rs ×8, roster.rs ×3) and the remaining three all funnel
+    /// through here, so one call closes the family.
     fn mc2_held_hit(&mut self, i: usize, base: u8) {
         let src = self.g.ent[i].f40 as usize;
         let differs = src == 0
@@ -857,6 +955,7 @@ impl World {
             self.g.ent[i].site_z = 10;
             self.mc2_aggro_raise(i, base);
         }
+        self.g.mc2_alt_commit(i);
     }
 
     /// The kind-3 GUARDIAN arm, every 8th tick of the STATIC f63
