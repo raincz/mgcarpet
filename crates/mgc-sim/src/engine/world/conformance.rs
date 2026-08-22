@@ -229,6 +229,7 @@ impl World {
     /// are not part of the master-struct closure; craters and retile
     /// do not survive a retail import).
     pub fn restore_planes(&mut self, planes: &Planes) {
+        self.measured_terrain = false;
         self.g.t = Planes {
             height: planes.height.clone(),
             tile_type: planes.tile_type.clone(),
@@ -293,6 +294,7 @@ impl World {
         if let Some(a) = angle {
             self.g.t.angle.copy_from_slice(a);
         }
+        self.measured_terrain = true;
         self.terrain_dirty = true;
         Ok(())
     }
@@ -1501,6 +1503,8 @@ impl World {
         // the RECORDED carpet, not a stale pose.
         self.human_pose = (carpet.x, carpet.y, carpet.z);
         self.human_pose_prev = self.human_pose;
+        self.human_yaw = carpet.yaw as u16;
+        self.human_yaw_prev = self.human_yaw;
         let tr = |v: u16| if v == human_slot { PLAYER_TARGET } else { v };
 
         // Anchor the per-tick counter to the recording: it feeds the
@@ -1920,8 +1924,20 @@ impl World {
         // `MGC_NO_PAD_REPLAY` is the terrain-replay A/B toggle:
         // `1`/`all` disables both arms, `castle`/`building` one of
         // them. The runner's own measurements are taken with it unset.
+        //
+        // A MEASURED terrain channel (format-2) disables ALL of the
+        // reconstruction heuristics outright: the planes are ground
+        // truth, and a reconstruct that "solves to a no-op" on a
+        // finished map does NOT no-op on a mid-rise one — the castle
+        // pad stamper wrote the full 48-byte pad over the measured
+        // partial rise, so every pair inside a build window read
+        // finished ground (mc2l3 t=244: castle z 1536 vs retail 64,
+        // and the painter's own delta solved to 0 — no crush sweep,
+        // no rise).
         let off = std::env::var("MGC_NO_PAD_REPLAY").unwrap_or_default();
-        let off = |arm: &str| off == "1" || off == "all" || off == arm;
+        let off = |arm: &str| {
+            self.measured_terrain || off == "1" || off == "all" || off == arm
+        };
         if !off("castle") {
             for i in 0..self.g.ent.len() {
                 if self.g.ent[i].class64 == 3 && self.g.ent[i].model65 == 2 {
@@ -1936,9 +1952,11 @@ impl World {
                 }
             }
         }
-        for i in 0..self.g.ent.len() {
-            if self.g.ent[i].class64 == 14 && self.g.ent[i].model65 == 1 {
-                self.g.mc2_riser_reconstruct(i);
+        if !self.measured_terrain {
+            for i in 0..self.g.ent.len() {
+                if self.g.ent[i].class64 == 14 && self.g.ent[i].model65 == 1 {
+                    self.g.mc2_riser_reconstruct(i);
+                }
             }
         }
         // The STATIC GROUND PROBES run LAST (mc2::probes): the three
@@ -1951,7 +1969,9 @@ impl World {
         // reads is the last pass, so a prop standing on a replayed
         // pad/riser sees the finished map and solves to a no-op.
         // `MGC_NO_STATIC_TERRAIN_REPLAY=1` is its A/B toggle.
-        if std::env::var("MGC_NO_STATIC_TERRAIN_REPLAY").unwrap_or_default() != "1" {
+        if !self.measured_terrain
+            && std::env::var("MGC_NO_STATIC_TERRAIN_REPLAY").unwrap_or_default() != "1"
+        {
             let cost = self.g.mc2_ground_reader_cost();
             let mut claimed = std::collections::BTreeSet::new();
             for i in 0..self.g.ent.len() {
@@ -2422,6 +2442,16 @@ fn import_ent_mc2(r: &RetailEntMc2, slot: u16, row156: u8, tr: &dyn Fn(u16) -> u
         // at their anchor; the footprint pass surfaced it as 41 fires
         // × 400 landing on one mc2l24 village house in a single tick.
         flags |= 0x1_0000;
+        // The SAME retail bit is the (10,42) castle painter's KILL
+        // ARM (`byte[2] |= 1`, sub_60480 EF:61602 — see
+        // [`crate::mc2::castle::F_BUILD_KILL`]), which the port homes
+        // at bit 21. Without the translation an imported mid-rise
+        // painter never runs its footprint purge, so every pair
+        // inside a build window kept alive what retail crushed
+        // (mc2l3 t=245: firebug 147, life -1 vs 600).
+        if r.class3f == 10 && r.model40 == 42 {
+            flags |= crate::mc2::castle::F_BUILD_KILL;
+        }
     }
     if b2 & 4 != 0 {
         flags |= 1 << 27;
@@ -2462,7 +2492,16 @@ fn import_ent_mc2(r: &RetailEntMc2, slot: u16, row156: u8, tr: &dyn Fn(u16) -> u
     // `mc2_atk_heavy9`). Importing the uniform @0x2A home made every
     // imported dweller lift its sphere by a flat 500/tick instead of
     // the ramp (mc2l24 t=14519-14523: retail +98/+108/+118/+128).
-    let ramp2c = m27 || (r.class3f == 5 && r.model40 == 23);
+    // The (14,2) CAVE PILLAR is the third `word_0x2C_44` tenant: its
+    // long-axis ORIENT lives there (THING wiring EF:33236-41,
+    // sub_5B100's koefX/koefY split) and @0x2A is dead. The uniform
+    // @0x2A home re-seeded orient 0 every pair, so an X-run pillar
+    // grew a TRANSPOSED 2×8 footprint and its GROW arm missed
+    // retail's convergence tick (mc2l3 t=15/16/18: slots 195/196/203
+    // life retail 3 port 1 — the built-seal transition).
+    let ramp2c = m27
+        || (r.class3f == 5 && r.model40 == 23)
+        || (r.class3f == 14 && r.model40 == 2);
     let mut e = Ent {
         rand: r.rand as u32,
         max_life: r.max_life.max(0) as u32,
@@ -2519,7 +2558,15 @@ fn import_ent_mc2(r: &RetailEntMc2, slot: u16, row156: u8, tr: &dyn Fn(u16) -> u
             // moment it reads <= 0 — an m0 worm summon imported with the
             // bob velocity there puffs itself on the first replayed
             // tick. The latch wins for exactly those two slots.
-            (5, 0 | 27) if !matches!(r.sv2, 16 | 17) => r.scratch10 as i16,
+            // The m19 firebug shares the @0x10 home too: the attack
+            // machine's HOVER ALTITUDE (case-2 `dword_0x10_16 =
+            // rand&0x3FF + target z`, EF:16410-16; the case-3 bob
+            // compares z against it, :16455-61) and the ctor's i%100
+            // seed (:34290). Importing the dead @0x2E charm lane (0)
+            // flipped every imported bob DOWN (z<=0 never holds) —
+            // mc2l3 t=206 slot 151: retail 51→115 (hover 62), port
+            // 51→-13, the 395-row (5,19) z family's head.
+            (5, 0 | 19 | 27) if !matches!(r.sv2, 16 | 17) => r.scratch10 as i16,
             // The (5,10) DOOMSDAY PYRAMID drives its whole 16-state
             // machine off `dword_0x10_16` (@0x10 = scratch10): the
             // per-state countdown AND the 0..1200 doom-meter ramp
@@ -2533,6 +2580,16 @@ fn import_ent_mc2(r: &RetailEntMc2, slot: u16, row156: u8, tr: &dyn Fn(u16) -> u
             // suppression tell) plus the epoch's isolated (1,5) pairs.
             (5, 10) => r.scratch10 as i16,
             (5, _) => r.f2e,
+            // Class-15 manifestations: the port's f26 is the ACTIVE-
+            // CAST countdown, retail's `word_0x2E_46` (the cast
+            // machine arms f26 = f28 and counts down — cast.rs; the
+            // SetSpell short-arm gate reads the same word, L:1511).
+            // Importing @0x10 (0) parked every mid-cast token INERT:
+            // no effect tick, no charge, no cost refresh (mc2l3
+            // t=243: the castle token froze at 1000/9 while retail's
+            // active cast re-derived 10000/99 the tick the castle
+            // stood).
+            (15, _) => r.f2e,
             _ => r.scratch10 as i16,
         },
         f28: r.b38 as u8 as u16,

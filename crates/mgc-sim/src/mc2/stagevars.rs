@@ -476,11 +476,17 @@ impl World {
         for h in held {
             let ent = h.ent as usize;
             // Prune bindings whose entity is gone or no longer held.
+            // NOT on a negative life: retail's record keeps its
+            // StageVar1 byte through the whole prekill/kill arc (the
+            // reaction gate skips phases 4/5, EF:5050, and the byte
+            // only clears when the record frees) — the obs sv1 lane
+            // reads it there (mc2l3 t=244: the castle crush sends
+            // twelve bound firebugs into prekill; retail sv1 holds 1
+            // until the reap ~250, the port's early prune read 0).
             if ent >= self.g.ent.len()
                 || self.g.ent[ent].class64 != 5
                 || self.g.ent[ent].site_z == 0
                 || self.g.ent[ent].flags & 0x400 != 0
-                || self.g.ent[ent].act_life < 0
             {
                 self.mc2_sv_held.retain(|x| x.ent != h.ent);
                 continue;

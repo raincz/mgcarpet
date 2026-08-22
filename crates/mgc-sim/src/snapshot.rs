@@ -74,7 +74,7 @@ const MAGIC: u32 = 0x5343_474D;
 ///    knockback impulse (retail Type_160 v_24/v_22) joined the rival
 ///    record after `jink`. A live rival never spends it; its death
 ///    fall does.
-pub const SNAPSHOT_VERSION: u32 = 13;
+pub const SNAPSHOT_VERSION: u32 = 14;
 
 /// Why a snapshot could not be read.
 #[derive(Debug, Clone, PartialEq, Eq)]

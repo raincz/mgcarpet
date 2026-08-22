@@ -535,11 +535,16 @@ fn mc2_castle_cost_refreshes_on_downgrade() {
 }
 
 /// The MC2 face of the `castle_recast_cost` patch (DEVIATIONS.md
-/// first-castle lockout): retail's `sub_60780` cost re-sync rides the
-/// castle's OWN stat stamps, so total castle DEATH never re-stamps —
-/// the homeless recast keeps the last rung cached. Retail arm keeps
-/// that; the patched arm re-syncs the castle-less release to the base
-/// cost. One world per arm (the release edge fires once per death).
+/// first-castle lockout). CORRECTED 2026-08-22 by the mc2l3 corpus
+/// (t=265): total castle DEATH walks the destroy's DOWNGRADE, and
+/// `sub_605E0` → `sub_60810` runs the level-0 ladder rung THROUGH
+/// `sub_60780` — the gate-suppressed SetSpell re-prices the token at
+/// the level-0 rung (base 1000) BEFORE the record frees. "Death never
+/// re-stamps" was the same mis-reading the MC1 half of the entry shed
+/// on 2026-08-10 (its teardown stamps CAP[0]). Both arms therefore
+/// converge on a ladder-stamped death; the patch's remaining scope is
+/// the castle-less RELEASE re-sync (a release edge with no castle and
+/// no ladder stamp in between). One world per arm.
 fn mc2_castle_death_cost_arm(patched: bool) {
     let Some(root) = baked_root() else {
         eprintln!("skipping: no baked data");
@@ -602,28 +607,23 @@ fn mc2_castle_death_cost_arm(patched: bool) {
         1_000,
         "the live law prices the castle-less rebuild at base"
     );
-    if patched {
-        assert_eq!(
-            w.debug_spell_gate_cost(2),
-            Some(1_000),
-            "patched arm: the castle-less release re-synced to base cost"
-        );
-    } else {
-        assert_eq!(
-            w.debug_spell_gate_cost(2),
-            Some(10_000),
-            "retail arm: death never re-stamps - the stale rung is the lockout"
-        );
-    }
+    // Both arms: the death's own downgrade ladder stamped the level-0
+    // rung through the suppressed re-sync (mc2l3 t=265: retail token
+    // 10000/99 -> 1000/9 the tick the castle fell).
+    assert_eq!(
+        w.debug_spell_gate_cost(2),
+        Some(1_000),
+        "the death's downgrade ladder re-priced the token at the level-0 rung"
+    );
 }
 
 #[test]
-fn mc2_castle_death_keeps_the_stale_cost_on_the_retail_arm() {
+fn mc2_castle_death_reprices_at_the_level0_rung_on_the_retail_arm() {
     mc2_castle_death_cost_arm(false);
 }
 
 #[test]
-fn mc2_castle_death_resyncs_to_base_cost_on_the_patched_arm() {
+fn mc2_castle_death_reprices_at_the_level0_rung_on_the_patched_arm() {
     mc2_castle_death_cost_arm(true);
 }
 

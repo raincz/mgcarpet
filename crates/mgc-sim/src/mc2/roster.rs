@@ -2088,8 +2088,16 @@ impl Gen {
     fn m19_attack(&mut self, i: usize, ctx: &MobCtx) {
         match self.mc2_state_head(i) {
             1 => {
+                // The hit arm is a TAIL arm (`else if (v1 <= 1)`,
+                // EF:16565-69): latch the dive + retarget the
+                // attacker and END the dispatch — no move core, no
+                // rand, no dive step until next tick (mc2l3 t=252:
+                // the ground-fire hit tick, retail's record freezes
+                // everything but life/f71 while the fallen-through
+                // port dove same-tick).
                 self.ent[i].f71 = 7; // damage → straight into a dive
                 self.ent[i].f146 = self.ent[i].f40;
+                return;
             }
             2 => {
                 self.ent[i].tick70 = M19_BASE + 4;

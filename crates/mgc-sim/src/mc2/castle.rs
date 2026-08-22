@@ -129,6 +129,11 @@ impl Gen {
             self.mc2_castle_eject(i);
             let lvl = self.ent[i].f26;
             self.mc2_castle_extents(i, lvl.clamp(0, 7) as u8);
+            // EF:61098-99: the AIM LIFT + fov re-assert right after
+            // the extents refresh (the yaw seat carries -8192 on a
+            // standing castle every even tick).
+            self.ent[i].f78 = 0xE000;
+            self.ent[i].f84 = 0x4000;
             self.mc2_castle_roster(i);
             self.mc2_castle_absorb(i);
         }
@@ -282,6 +287,13 @@ impl Gen {
         self.ent[i].tick70 = 5;
         self.ent[i].f59 = 4; // wait-for-painter
         self.mc2_castle_extents(i, lvl as u8);
+        // sub_60480's own follow-up (EF:61590-91): the AIM LIFT into
+        // the yaw seat of the extents block + the fov re-assert —
+        // the writes the extents helper's ⛔ note defers to (mc2l3
+        // t=244: applied_yaw -8192 from the birth's same-frame
+        // upgrade).
+        self.ent[i].f78 = 0xE000;
+        self.ent[i].f84 = 0x4000;
         self.mc2_castle_extents_ent(p, lvl as u8);
         self.mc2_castle_ladder(i);
         self.mc2_castle_stages(i);
@@ -378,6 +390,10 @@ impl Gen {
             self.ent[i].act_life = hp as i32 - debt;
         }
         self.ent[i].f136 = MC2_CASTLE_CAP[lvl];
+        // `sub_60780`'s second half: every HP/CAP stamp re-syncs the
+        // owner's book token, gate-suppressed (see [`Mc2LadderMail`])
+        // — the book is World-side, drained same tick.
+        self.mc2_ladder_sync.0.push(i as u16);
     }
 
     /// The MC2 castle build datum (ctor `sub_4AA40` EF:33399):
@@ -403,6 +419,45 @@ impl Gen {
         let tlx = cx.wrapping_sub(def.w / 2);
         let tly = cy.wrapping_sub(def.h / 2);
         (32 * self.mc2_perimeter_min(tlx, tly, def.w as u16, def.h as u16)) as i16
+    }
+
+    /// `sub_11CB0` (EF:4557) — the castle-CAST site test the (9,10)
+    /// ball runs at launch and as its per-tick tripwire: REFUSED when
+    /// (a) any castle (class-3 model-2) sits within its x/y extents
+    /// + 2560 of the point, (b) any building (the dword_38527 chain =
+    /// the live (10,45) roster) within the same margin, or (c) any
+    /// cell of retail's 8×8 window anchored at (tile − 8, tile − 8)
+    /// (the left/up-biased quirk, kept verbatim) is built (angle bit7)
+    /// or, on caves, sealed (bit3 — `sub_11C80`).
+    pub(crate) fn mc2_castle_cast_site_ok(&self, x: u16, y: u16) -> bool {
+        let wd = |p: u16, q: u16| (p.wrapping_sub(q) as i16 as i32).abs();
+        for j in 1..self.ent.len() {
+            let e = &self.ent[j];
+            if e.flags & 0x400 != 0 || e.act_life < 0 {
+                continue;
+            }
+            let castle = e.class64 == 3 && e.model65 == 2;
+            let building = e.class64 == 10 && e.model65 == 45;
+            if (castle || building)
+                && wd(e.x, x) <= e.f80 as i32 + 2560
+                && wd(e.y, y) <= e.f82 as i32 + 2560
+            {
+                return false;
+            }
+        }
+        let tx = (x >> 8) as u8;
+        let ty = (y >> 8) as u8;
+        for ry in 0..8u8 {
+            for rx in 0..8u8 {
+                let gx = tx.wrapping_sub(8).wrapping_add(rx);
+                let gy = ty.wrapping_sub(8).wrapping_add(ry);
+                let a = self.t.angle[tile(gx, gy)];
+                if a & 0x80 != 0 || (self.is_cave() && a & 8 != 0) {
+                    return false;
+                }
+            }
+        }
+        true
     }
 
     /// `SetShiftByCastle_49EC0` (EF:32882): AABB half-extents from
@@ -704,7 +759,14 @@ impl Gen {
             let e = &self.ent[i];
             (e.x, e.y, e.z)
         };
-        // Shortfall spawn (EF:61382-90): one per empty slot.
+        // Shortfall spawn (EF:61382-90): one per empty slot. The
+        // spawn arm jumps PAST the retarget (`goto LABEL_17`) — a
+        // newborn keeps target 0 until the NEXT roster pass, so its
+        // first frames run no flight body at all (mc2l3 t=264: the
+        // port's same-pass retarget sent the fresh balloon through
+        // its servo to ground+512 while retail's sat at the castle
+        // z; the castle died before another pass ever targeted it).
+        let firstborn = alive.len();
         while alive.len() < bq {
             let Some(b) = self.mc2_spawn_balloon(cx, cy, cz, own) else {
                 break;
@@ -720,7 +782,7 @@ impl Gen {
         // EF:61405), not the live-fleet size — they differ only on
         // a pool-starved shortfall.
         let stagger = bq != 0 && self.ent[i].f63 as usize % bq == 0;
-        for k in 0..alive.len() {
+        for k in 0..firstborn {
             let b = alive[k];
             if full {
                 self.ent[b].f146 = i as u16;
@@ -1055,7 +1117,7 @@ impl Gen {
         &mut self,
         pos: (u16, u16, i16),
         row: u8,
-        own: u16,
+        _own: u16,
         parent: u16,
     ) -> Option<usize> {
         let i = self.new_event()?;
@@ -1067,7 +1129,9 @@ impl Gen {
             e.max_life = 0;
             e.f59 = 0;
             e.f71 = row;
-            e.id24 = own;
+            // Same fused-parent id24 convention as the castle
+            // painter (retail @0x28 = the wizard's own slot here).
+            e.id24 = parent;
             e.f40 = parent;
         }
         self.link(i, pos.0, pos.1, pos.2);
@@ -1081,9 +1145,9 @@ impl Gen {
         row: u8,
         repaint: bool,
     ) -> Option<usize> {
-        let (x, y, site_z, own) = {
+        let (x, y, site_z) = {
             let e = &self.ent[castle];
-            (e.x, e.y, e.site_z, e.id24)
+            (e.x, e.y, e.site_z)
         };
         let i = self.new_event()?;
         {
@@ -1094,7 +1158,13 @@ impl Gen {
             e.max_life = 0;
             e.f59 = u8::from(repaint); // byte_0x3B_59: settle window
             e.f71 = row;
-            e.id24 = own;
+            // The port's id24 convention for painters is the FUSED
+            // parentId @0x28 (the import's `id24 = tr(@0x28)`, and
+            // `obs_project_mc2` recovers the recorded `owner` lane
+            // from it) — the parent CASTLE slot, not the owning
+            // wizard (mc2l3 t=243 slot 131: retail owner obs 127 =
+            // the castle). The wizard identity rides the parent.
+            e.id24 = castle as u16;
             e.f40 = castle as u16; // parentId_0x28_40
         }
         self.link(i, x, y, site_z);
@@ -1184,7 +1254,15 @@ impl Gen {
         let mut paint: Vec<(u8, u8, u8)> = Vec::new();
         let do_paint = countdown % 7 == 0 || countdown == 1;
         let kill = self.ent[i].flags & F_BUILD_KILL != 0;
-        let owner = self.ent[i].id24;
+        // The crush spares the OWNER WIZARD's entities — retail
+        // passes the painter's id26 (the wizard). The port's painter
+        // id24 is the FUSED parent (the castle slot), so the wizard
+        // identity resolves through the parent castle's id24.
+        let owner = if parent != 0 && parent < self.ent.len() {
+            self.ent[parent].id24
+        } else {
+            self.ent[i].id24
+        };
         for r in 1..=row {
             let Some(rd) = self.assets.build_tab.get(r).copied() else {
                 continue;

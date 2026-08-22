@@ -901,6 +901,8 @@ pub(crate) struct Gen {
     /// book the same turn — empty at hash time like a read mailbox
     /// (and hash-transparent when empty).
     pub(crate) mc2_cast_xp: Mc2XpMail,
+    /// See [`Mc2LadderMail`].
+    pub(crate) mc2_ladder_sync: Mc2LadderMail,
     /// m26 spell-steal requests (`sub_28FF0` EF:19348-71 → the
     /// `sub_69300` effect): the wraith's roll lands pool-side but the
     /// human book is world-side — the world tick drains this the
@@ -982,6 +984,27 @@ impl std::hash::Hash for Mc2CastleResearch {
 pub(crate) struct Mc2XpMail(pub Vec<(u16, u16, i32)>);
 
 impl std::hash::Hash for Mc2XpMail {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        if !self.0.is_empty() {
+            self.0.hash(state);
+        }
+    }
+}
+
+/// Castle slots whose HP/CAP ladder just stamped (`sub_60780`) —
+/// every stamp re-runs SetSpell on the OWNER's castle-spell book
+/// token with the active-cast gate SUPPRESSED (word_46 zeroed around
+/// the call, EF:61670), so the cached cast cost tracks the castle
+/// level BOTH ways mid-transform: the birth/upgrade rung the tick
+/// the castle stands, AND the downgrade rung the tick a level falls
+/// (mc2l3 t=265: the destroy's downgrade re-reads ladder level 0 →
+/// 1000/9 while the cast window is still pinned). The ladder is
+/// Gen-side, the book World-side — same-tick mail like
+/// [`Gen::mc2_cast_xp`]. Hash-transparent while empty.
+#[derive(Default)]
+pub(crate) struct Mc2LadderMail(pub Vec<u16>);
+
+impl std::hash::Hash for Mc2LadderMail {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         if !self.0.is_empty() {
             self.0.hash(state);
@@ -1477,6 +1500,7 @@ impl Gen {
             mc2_scrolls: Mc2Quiet::default(),
             mc2_spell_tokens: Mc2Quiet::default(),
             mc2_cast_xp: Mc2XpMail::default(),
+            mc2_ladder_sync: Mc2LadderMail::default(),
             bolt_fx: BoltFx::default(),
             mc2_steal_mail: Mc2StealMail::default(),
             mc2_aura_claim: Mc2SlotMap::default(),
@@ -6256,6 +6280,7 @@ snap_newtype!(
     NightShade,
     Mc2Ord,
     Mc2XpMail,
+    Mc2LadderMail,
     Mc2StealMail,
     Mc2CastleResearch,
 );
@@ -6368,6 +6393,7 @@ impl Gen {
             mc2_scrolls,
             mc2_spell_tokens,
             mc2_cast_xp,
+            mc2_ladder_sync,
             // Presentation feed, never saved — a load starts clean.
             bolt_fx: _,
             mc2_steal_mail,
@@ -6435,6 +6461,7 @@ impl Gen {
         w.put(mc2_scrolls);
         w.put(mc2_spell_tokens);
         w.put(mc2_cast_xp);
+        w.put(mc2_ladder_sync);
         w.put(mc2_steal_mail);
         w.put(mc2_aura_claim);
         w.put(mc2_wanted);
@@ -6486,6 +6513,7 @@ impl Gen {
         self.mc2_scrolls = r.get()?;
         self.mc2_spell_tokens = r.get()?;
         self.mc2_cast_xp = r.get()?;
+        self.mc2_ladder_sync = r.get()?;
         self.mc2_steal_mail = r.get()?;
         self.mc2_aura_claim = r.get()?;
         self.mc2_wanted = r.get()?;

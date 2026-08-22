@@ -91,6 +91,9 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     // its measurement; the detector below is always fed so the run can
     // report the lane's traffic even with the fold off.
     let press_edge_mode = std::env::var_os("MGC_PRESS_EDGE").is_some();
+    // Consumed-byte fire is the default (see the override below);
+    // `MGC_PRESS_LATCH=1` restores the latch-only fold for A/B.
+    let press_latch_mode = std::env::var_os("MGC_PRESS_LATCH").is_some();
     let mut prev_press: Option<(i16, i16)> = None;
     let mut press_moves = 0u64;
     // The respawn-key lane ([`respawn_key_mc2`]): the previous record's
@@ -138,6 +141,24 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
         };
         let (held, latch) = raw_input_mc2(tick.input.as_ref());
         let mut aligned = align_cmd_mc2(held, latch, prev_latch);
+        // THE CONSUMED-BYTE FIRE LAW (recover_pair_mc2's measurement,
+        // ledger §THE REPLAY VERIFIER): fire rides the consumed
+        // move/fire byte on the pair's END record — 560/560 retail
+        // arms carry the bit, and the press-latch fold's extra edges
+        // are HUD clicks the byte correctly omits (mc2l3 t=105: the
+        // equip click at press_pos (70,312) — the spell panel — folded
+        // into a phantom fireball; retail routed it to the pane select
+        // and the hand flips at t=109). The latch law's phase claim
+        // stays true — the byte simply also carries retail's own
+        // view-vs-panel routing. `MGC_PRESS_LATCH=1` restores the
+        // latch-only fold for A/B.
+        if !press_latch_mode
+            && let Some(p) = st.players.get(st.local_player as usize)
+        {
+            let (fl, fr) = mgc_formats::recover::mc1_fire(p.move_bits);
+            aligned.fire_left = fl;
+            aligned.fire_right = fr;
+        }
         let press = press_pos_mc2(tick.input.as_ref());
         // The respawn key rides the pair's END record like the aligned
         // cast bits — see [`respawn_key_mc2`] for the two witnesses
@@ -203,6 +224,19 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                 (pcmd, prev_cmd)
             } else {
                 (cmd, pcmd)
+            };
+            // The recovered PANE SELECT (recover_pair_mc2's rebind
+            // law — the free runner's lane, folded here too): a
+            // recorded hand change across the pair replays as the
+            // equip. Without it every equip pair left the port's
+            // hand one spell behind (the 12-row player0.hand_left
+            // family, mc2l3 t=108: the (70,312) panel click's flip).
+            let pair_cmd = {
+                let mut c = pair_cmd;
+                c.mc2_select =
+                    mgc_formats::recover::recover_pair_mc2(&pst, &st, false, tick.input.as_ref())
+                        .mc2_select;
+                c
             };
             if args.start.is_some_and(|s| pt < s) {
                 // Before the triage window — keep the pairing chain

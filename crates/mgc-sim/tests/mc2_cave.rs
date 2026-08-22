@@ -502,13 +502,28 @@ fn mc2_cave_behaviors_and_goldens() {
     // and the sub_377A0 completion painters. The disposition-fire
     // ghost reap was A/B-EXCLUDED (MGC_AB_NO_REAP run reproduced
     // these exact hashes with the reap off).
+    // Re-pinned (3rd-4th; the first two hold) for the MC2 HAND
+    // MIRROR: `mc2_select_spell` now keeps `Player::left/right` (the
+    // hashed import/obs lane) in step with the book — retail's
+    // SpellIndexLeft/Right is ONE lane, and the split let an equip
+    // pair's obs project the stale hand (mc2l3 t=108, the 12-row
+    // player0.hand_left family). The scripted select at the second
+    // hover is what moves the stream; checkpoints before it hold.
+    // Re-pinned (4th ONLY; 1-3 hold) for the SCATTER SPEED STAMP:
+    // `mc2_mana_spheres` now writes the rolled `rand%0x30+16` onto
+    // the sphere's actSpeed (f126) like retail's EF:26907 — the
+    // ctor's 32 is only the un-scattered default (mc2l3 t=245-260,
+    // the crush-scatter 12-row speed family). The checkpoint-4
+    // dis-fire sweep's kills scatter spheres inside the window.
+    // A/B-attributed: suppressing the single f126 write restores the
+    // old hash with every other law of the batch still in.
     assert_eq!(
         got,
         vec![
             0x30a7039ebee444b7u64,
             0xeb019cfa3c5ee5d8,
-            0xb3e17b8aaa6b4d89,
-            0x1198b51aca429fcc,
+            0xd88a658d7922fa3d,
+            0x4055b3e543a00923,
         ],
         "cave goldens moved — re-pin ONLY for an intended fidelity change"
     );

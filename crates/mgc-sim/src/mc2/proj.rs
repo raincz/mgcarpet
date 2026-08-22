@@ -1028,6 +1028,154 @@ impl Gen {
         v
     }
 
+    /// `CastCastleProjectile_66B30` (EF:58461) + its create-arm body
+    /// `sub_66D00` (EF:58556) — the MC2 (9,10) castle ball. NOT the
+    /// generic flyer: it homes on the DEST POINT (create) or the
+    /// bound castle entity (upgrade, `word_0x96_150` → f146), runs
+    /// the castle-cast SITE TEST as a per-tick tripwire, has NO
+    /// water arm (retail builds on whatever it lands on), and its
+    /// landing spawns the descriptor pair (f68,f69) — (3,2) create /
+    /// (10,43) upgrade — AT THE BALL'S POSITION, owner-stamped
+    /// (mc2l3 t=241-244: cast at 241, ball armed-unmoved at its
+    /// birth boundary, homing turn 789→810 / 205→183, terrain
+    /// contact during tick 244, castle (3,2) born same tick at the
+    /// landing tile (26368,49408) — the generic flyer's water arm
+    /// was eating exactly this build).
+    ///
+    /// The ARM state (retail byte0&2 → the imported flags bit 1):
+    /// the record shows the ball ARMED at its first boundary with
+    /// the launch site test already taken, so the cast folds the
+    /// sub_66D00 head into mint time ([`World::cast_castle`]); an
+    /// UNARMED ball here (an authored/THING spawn) takes the head
+    /// as its first tick — site test at the launch pose, no move.
+    pub(crate) fn mc2_castle_ball_tick(&mut self, i: usize) {
+        let tgt = self.ent[i].f146 as usize;
+        let upgrade_flight = tgt != 0 && tgt != PLAYER_TARGET as usize && tgt < self.ent.len();
+        if !upgrade_flight && self.ent[i].flags & 2 == 0 {
+            // sub_66D00's head: latch the arm bit, site-test the
+            // launch pose, and do NOT move. A refusal despawns (the
+            // sub_88D00 "can't build here" flash is app-side; the
+            // cast lock is derived — `mc2_castle_lock_active`).
+            self.ent[i].flags |= 2;
+            let (x, y) = (self.ent[i].x, self.ent[i].y);
+            if !self.mc2_castle_cast_site_ok(x, y) {
+                self.ent[i].flags |= 0x400;
+            }
+            return;
+        }
+        // ---- the shared flight: ease yaw/pitch toward the target
+        // at the behavior row's caps (sub_58350's v_4 arg is dead —
+        // the single-cap `turn_step` fold, the flyer's precedent),
+        // ease speed ±2 toward min, one polar step. ----
+        let (px, py, pz) = {
+            let e = &self.ent[i];
+            (e.x, e.y, e.z)
+        };
+        let (tx, ty, tz) = if upgrade_flight {
+            let c = &self.ent[tgt];
+            (c.x, c.y, c.aim_z())
+        } else {
+            let e = &self.ent[i];
+            (e.dest_x, e.dest_y, e.site_z)
+        };
+        let tgt_yaw = Self::angle_between(px, py, tx, ty);
+        let dh = Self::isqrt(Self::dist2_sq(px, py, tx, ty) as u32) as i32;
+        let tgt_pitch = Self::pitch_toward(pz, tz, dh);
+        let row = &BEHAVIOR[self.ent[i].row156 as usize];
+        let (cy, cp) = (row.v_2, row.v_6);
+        {
+            let e = &mut self.ent[i];
+            e.f34 = tgt_yaw;
+            e.f36 = tgt_pitch;
+            e.f30 = (e.f30 as i32 + Self::turn_step(e.f30, tgt_yaw, cy) as i32) as u16 & 0x7FF;
+            e.f32 = (e.f32 as i32 + Self::turn_step(e.f32, tgt_pitch, cp) as i32) as u16 & 0x7FF;
+            e.f126 += (e.f128 - e.f126).clamp(-2, 2);
+        }
+        let (yaw, pitch, speed) = {
+            let e = &self.ent[i];
+            (e.f30, e.f32, e.f126)
+        };
+        let mut pos = (px, py, pz);
+        Self::polar_step(&mut pos, yaw, pitch, speed);
+        let mut land = false;
+        let mut refused = false;
+        // Upgrade arrival: plain overlap with the target snaps the
+        // ball onto it (EF:58496-99 / the sub_106C0 test).
+        if upgrade_flight {
+            let (ox, oy, oz) = (self.ent[i].x, self.ent[i].y, self.ent[i].z);
+            self.ent[i].x = pos.0;
+            self.ent[i].y = pos.1;
+            self.ent[i].z = pos.2;
+            let hit = self.ent_overlap(i, tgt);
+            self.ent[i].x = ox;
+            self.ent[i].y = oy;
+            self.ent[i].z = oz;
+            if hit {
+                let c = &self.ent[tgt];
+                pos = (c.x, c.y, c.z);
+                land = true;
+            }
+        }
+        if !land {
+            // Terrain contact — floor, or on caves the ceiling at
+            // ceiling − fov (EF:58637-48, the same comma arm as the
+            // generic core). NO water arm (sub_66D00 has none).
+            let ground = self.ground_z(pos.0, pos.1) as i16;
+            if ground > pos.2 {
+                pos.2 = ground;
+                land = true;
+            } else if self.is_cave() {
+                let c = (self.ceiling_z(pos.0, pos.1) - self.ent[i].f84 as i32) as i16;
+                if pos.2 > c {
+                    pos.2 = c;
+                    land = true;
+                }
+            }
+        }
+        if !land {
+            // Airborne: life countdown, then the site tripwire
+            // (create only — EF:58650-56); a refusal lands HERE with
+            // the 180° back-step below.
+            self.ent[i].act_life -= 1;
+            if self.ent[i].act_life < 0 {
+                land = true;
+            } else if !upgrade_flight && !self.mc2_castle_cast_site_ok(pos.0, pos.1) {
+                land = true;
+                refused = true;
+            }
+        }
+        if refused {
+            // The retreat step (EF:58662-69): re-step from the
+            // committed position at yaw+0x400, live pitch and speed.
+            let back = yaw.wrapping_add(0x400) & 0x7FF;
+            Self::polar_step(&mut pos, back, pitch, speed);
+        }
+        self.move_relink(i, pos.0, pos.1, pos.2);
+        if !land {
+            return;
+        }
+        let own = self.ent[i].id24;
+        let (fc, fm) = (self.ent[i].f68, self.ent[i].f69);
+        // The stale-create guard (EF:58528-31): a (3,2) delivery
+        // whose owner already holds a BOUND castle just despawns.
+        if fc == 3 && self.mc2_castle_of(own).is_some() {
+            self.ent[i].flags |= 0x400;
+            return;
+        }
+        // `_4A190(&pos, byte67, byte68)` — the build. A pool-refused
+        // spawn leaves the ball ALIVE to retry next tick (EF:58540-42
+        // releases the caster's lock instead; ours is derived).
+        let spawned = match (fc, fm) {
+            (3, 2) => self.spawn_castle(pos.0, pos.1),
+            (10, 43) => self.spawn_creator(43, pos.0, pos.1, pos.2),
+            _ => None,
+        };
+        if let Some(c) = spawned {
+            self.ent[c].id24 = own;
+            self.ent[i].flags |= 0x400;
+        }
+    }
+
     pub(crate) fn mc2_flyer_tick(&mut self, i: usize, ctx: &MobCtx) {
         // Homing / acquisition (EF:62902-21).
         match self.mc2_target(self.ent[i].f146, ctx) {
@@ -1577,30 +1725,50 @@ impl Gen {
             }
         }
         if spheres {
-            // The mana-sphere list: unowned or foreign spheres only
-            // (EF:55017-31).
-            for v in 1..self.ent.len() {
+            // The mana-sphere list: unowned or foreign spheres only,
+            // AND AWAKE (`if (v26x->byte_0x39_57)`, EF:55024) — a
+            // sleeping sphere never attracts the possession lock
+            // (mc2l3 t=260: retail's bolt found no awake candidate
+            // and flew straight at the cast attitude; the ungated
+            // port snapped onto a dormant sphere). Ownership lane by
+            // model (EF:55017-31): 39 reads playerEntityIndex@0x94
+            // (f144), 57 the fused parentId (id24).
+            // Membership is the TICK-TOP ball chain (`dword_38523`),
+            // not the live pool: a sphere minted MID-tick is
+            // invisible to this tick's acquisition (mc2l3 t=260: the
+            // port locked a sphere a lower-slot kill had just
+            // scattered; retail's chain predates it and the bolt
+            // flew straight). The chain carries 39/40/57; the model
+            // test below keeps 40 out like retail's `< 0x27` skip.
+            for k in 0..self.ball_chain.list.len() {
+                let v = self.ball_chain.list[k] as usize;
                 let e = &self.ent[v];
-                if e.class64 != 10
-                    || !matches!(e.model65, 39 | 57)
+                if !matches!(e.model65, 39 | 57)
+                    || e.class64 != 10
                     || e.flags & 0x400 != 0
                     || e.act_life < 0
-                    || e.f144 == own
+                    || (e.f58 & 0xFF) == 0
                 {
+                    continue;
+                }
+                let owner_lane = if e.model65 == 57 { e.id24 } else { e.f144 };
+                if owner_lane == own {
                     continue;
                 }
                 consider(self, &mut best, v as u16, (e.x, e.y, e.aim_z()), yc, pc);
             }
         }
         if buildings {
-            // The buildings list: skip own and the un-possessable
-            // (bldgprm byte_2 & 8, EF:55053).
+            // The buildings list: skip own, the un-possessable
+            // (bldgprm byte_2 & 8, EF:55053) and the ASLEEP
+            // (`if (i3x->byte_0x39_57)`, EF:55051).
             for v in 1..self.ent.len() {
                 let e = &self.ent[v];
                 if e.class64 != 10
                     || e.model65 != 45
                     || e.flags & 0x400 != 0
                     || e.act_life < 0
+                    || (e.f58 & 0xFF) == 0
                     || e.f144 == own
                 {
                     continue;
@@ -1616,25 +1784,38 @@ impl Gen {
                 consider(self, &mut best, v as u16, (e.x, e.y, e.aim_z()), yc, pc);
             }
         }
-        if best.is_none()
-            && (spheres
-                || matches!(
+        if worms_always
+            || (best.is_none()
+                && matches!(
                     probe.model,
                     0 | 3 | 4 | 0x12 | 0x13 | 0x16 | 0x1A | 0x1C | 0x1E
                 ))
         {
-            // The worm-bucket fallback: model-22 heads + chains.
+            // The worm bucket: case 1 runs it UNCONDITIONALLY,
+            // competing with the sphere/building candidates
+            // (EF:55071 — no best-empty gate); the big case runs it
+            // only as the no-candidate fallback (EF:54825).
+            // An AWAKE model-22 HEAD admits
+            // its f54 chain members as candidates — the head itself
+            // is never scored and the members' own awake bytes are
+            // not tested (EF:55071-85).
             for v in 1..self.ent.len() {
                 let e = &self.ent[v];
                 if e.class64 != 5
                     || e.model65 != 22
                     || e.flags & 0x400 != 0
                     || e.act_life < 0
+                    || (e.f58 & 0xFF) == 0
                     || e.id24 == own
                 {
                     continue;
                 }
-                consider(self, &mut best, v as u16, (e.x, e.y, e.aim_z()), yc, pc);
+                let mut j = self.ent[v].f54 as usize;
+                while j != 0 {
+                    let s = &self.ent[j];
+                    consider(self, &mut best, j as u16, (s.x, s.y, s.aim_z()), yc, pc);
+                    j = self.ent[j].f54 as usize;
+                }
             }
         }
         best.map(|(target, _)| target)

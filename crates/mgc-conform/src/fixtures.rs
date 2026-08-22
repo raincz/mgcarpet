@@ -328,6 +328,16 @@ fn for_each_pair_mc2(
         // `--input-delay` ring either.
         let (held, latch) = crate::verify_mc2::raw_input_mc2(tick.input.as_ref());
         let mut cmd = crate::verify_mc2::align_cmd_mc2(held, latch, prev_latch);
+        // THE CONSUMED-BYTE FIRE LAW — verify_mc2's pair loop is the
+        // law (fire rides the consumed move byte on the END record; a
+        // HUD click never sets it), same `MGC_PRESS_LATCH=1` A/B.
+        if std::env::var_os("MGC_PRESS_LATCH").is_none()
+            && let Some(p) = st.players.get(st.local_player as usize)
+        {
+            let (fl, fr) = mgc_formats::recover::mc1_fire(p.move_bits);
+            cmd.fire_left = fl;
+            cmd.fire_right = fr;
+        }
         // The cursor-AT-PRESS A/B (`verify_mc2::press_edge_mc2`) must be
         // reconstructed here too or a suite run under the toggle would
         // disagree with the triage run it is meant to pin.
@@ -353,6 +363,20 @@ fn for_each_pair_mc2(
                 if isolate_worlds() {
                     world = crate::verify_mc2::build_world_mc2(baked, level)?.0;
                 }
+                // The recovered PANE SELECT (verify_mc2's fold): a
+                // recorded hand change across the pair replays as the
+                // equip — local to the pair, never the edge chain.
+                let pair_cmd = {
+                    let mut c = cmd;
+                    c.mc2_select = mgc_formats::recover::recover_pair_mc2(
+                        &pst,
+                        &st,
+                        false,
+                        tick.input.as_ref(),
+                    )
+                    .mc2_select;
+                    c
+                };
                 let (pd, _, _) = crate::verify_mc2::exec_pair_mc2(
                     &mut world,
                     &pristine,
@@ -361,7 +385,7 @@ fn for_each_pair_mc2(
                     &pst,
                     &st,
                     &obs,
-                    cmd,
+                    pair_cmd,
                     pcmd,
                     pin_n1,
                 )

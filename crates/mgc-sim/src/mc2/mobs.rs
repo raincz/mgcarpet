@@ -924,6 +924,12 @@ impl Gen {
             self.ent[b].f34 = yaw;
             let d2 = self.mc2_rand(b);
             let speed = (d2 % 0x30 + 16) as i16;
+            // Retail WRITES the roll onto the sphere's actSpeed@0x82
+            // (EF:26907), not just into the velocity step — the
+            // scattered spheres carry 16..63, the ctor's 32 is only
+            // the un-scattered default (mc2l3 t=245-260: every
+            // crush-scatter sphere read 32).
+            self.ent[b].f126 = speed;
             // Velocity into the MC1 ball's dest fields (the shared
             // ball tick consumes them), fall arc into f46 — signed
             // TRUNCATING /8 like the C idiom at EF:26909 (NOT
@@ -936,7 +942,11 @@ impl Gen {
             let zdiff = (z as i32) - (ground as i32);
             self.ent[b].f46 = ((1024 - zdiff) / 8) as i16;
         }
-        self.ent[i].f140 = 0;
+        // `TransformEntityToManaSphere_36BA0`'s tail zeroes ONLY
+        // `playerEntityIndex_0x94` — the corpse KEEPS its mana
+        // (mc2l3 t=245: crushed firebug corpses read 300 until the
+        // reap; the invented f140 wipe dirtied every corpse pair).
+        // No double-scatter: every caller raises 0x400 right after.
         self.ent[i].f144 = 0;
     }
 
@@ -3017,7 +3027,13 @@ impl Gen {
             // creature launches pre-aim, so the core serves). The
             // (9,3) meteor shot's action-3 wrapper adds the trailing
             // spark (sub_66180, mc2::proj).
-            if self.ent[i].model65 == 3 && self.ent[i].tick70 == 3 {
+            if self.ent[i].model65 == 10 && self.ent[i].tick70 == 10 {
+                // The castle ball rides its own dedicated flight
+                // (CastCastleProjectile_66B30 / sub_66D00) — the
+                // generic flyer's water arm was splashing the build
+                // away (mc2l3 t=244's (10,5) where retail builds).
+                self.mc2_castle_ball_tick(i);
+            } else if self.ent[i].model65 == 3 && self.ent[i].tick70 == 3 {
                 self.mc2_meteor_shot_tick(i, ctx);
             } else if self.ent[i].model65 == 9 && self.ent[i].tick70 == 9 {
                 // Lightning L0 (subtype 9) = the `sub_66750` one-tick

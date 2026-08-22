@@ -1635,6 +1635,35 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
     }
     let (mut world, pristine, things) = crate::verify_mc2::build_world_mc2(&args.baked, level)?;
     let mut csv = open_csv(args)?;
+    // `MGC_STATE_DUMP=<t>:<path>` — the MC1 arm's INHERITED-head
+    // instrument, same semantics (see run_mc1): one sectioned
+    // whole-world dump at the first tick at or after `t`; an anchored
+    // run dumps retail's import, a walked run dumps the port's, and
+    // the diff attributes a pair-clean free-run break.
+    let state_dump: Option<(u64, String)> = std::env::var("MGC_STATE_DUMP").ok().and_then(|s| {
+        let (t, path) = s.split_once(':')?;
+        Some((t.parse().ok()?, path.to_string()))
+    });
+    let mut state_dumped = false;
+    let mut dump_state = |world: &World, t: u64| -> Result<(), String> {
+        let Some(spec) = state_dump.as_ref() else {
+            return Ok(());
+        };
+        if t < spec.0 || state_dumped {
+            return Ok(());
+        }
+        state_dumped = true;
+        println!("  STATE DUMP at t={t} -> {}", spec.1);
+        let mut out = String::new();
+        for (name, bytes) in world.debug_state_sections() {
+            let _ = write!(out, "{name}\t{}\t", bytes.len());
+            for b in &bytes {
+                let _ = write!(out, "{b:02x}");
+            }
+            out.push('\n');
+        }
+        std::fs::write(&spec.1, out).map_err(|e| format!("state dump: {e}"))
+    };
     let mut timg = (!args.no_terrain)
         .then(|| {
             rec.header
@@ -1731,6 +1760,7 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
                     );
                 }
             }
+            dump_state(&world, tick.t)?;
             st_prev = Some((tick.t, st));
             continue;
         }
@@ -1775,6 +1805,7 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             ..PlayerCommand::default()
         };
 
+        mgc_sim::DEBUG_TICK.store(tick.t, std::sync::atomic::Ordering::Relaxed);
         if args.pose_only {
             pose_only_pair_mc2(
                 &mut world, &pristine, &things, &timg, &pst, &st, ch, slot, pt, inp, stick_ok,
@@ -1871,6 +1902,7 @@ fn run_mc2(path: &std::path::Path, args: &Args) -> Result<bool, String> {
             }
         }
         stats.seg().end = tick.t;
+        dump_state(&world, tick.t)?;
         if let Some(t) = reset_at.take() {
             let (ch, human_slot) = anchor_mc2(&mut world, &pristine, &things, &timg, &st, t)?;
             chain = Some((ch, human_slot));

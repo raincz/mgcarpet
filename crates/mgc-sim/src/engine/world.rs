@@ -686,7 +686,36 @@ pub struct World {
     /// only; 0 = none): the cave ambient tail fires when the frame
     /// walk crosses it. Native play keeps 0 and runs the tail
     /// post-pass. HASH-EXCLUDED.
-    mc2_carpet_slot: u16,
+    pub(crate) mc2_carpet_slot: u16,
+    /// Frame-transient: the purse as retail's cast gate reads it.
+    /// The gate tail (`sub_5F380` → `sub_5F660`) runs INSIDE the
+    /// wizard body BEFORE its mana block (AddPlayer03_00_5E010
+    /// EF:59967 vs EF:59995), so the gate's affordability test sees
+    /// the PRE-apply purse — a dry-out tick still re-arms off last
+    /// boundary's mana, and the manifestation's own first-tick
+    /// re-check (post-apply) then collapses the window the SAME tick
+    /// (mc2l3 t=1496: purse 450→200 vs cost 250, f26 10→0, regen
+    /// +100 stands). The port applies the MC2 wizard mana pre-walk,
+    /// so this stash carries the pre-apply reading to the gate. Set
+    /// every tick before the cast input runs. HASH-EXCLUDED.
+    pub(crate) mc2_gate_purse: u32,
+    /// Frame-transient pair: what a BELOW-CARPET manifestation's
+    /// mid-burst suppression zeroed this frame (`(token slot, taken
+    /// delta)`), handed to `_prev` at the next tick's head. Retail's
+    /// clamp (token before wizard) kills the value being applied THE
+    /// SAME frame; the port's pre-walk apply makes its suppression
+    /// land one frame late, so the token's first INERT frame pays the
+    /// taken delta back (`mc2_manifestation_tick`) — the suppression
+    /// half of `mc2_same_frame_debit`'s ordering law. Strict-import
+    /// only. HASH-EXCLUDED.
+    pub(crate) mc2_regen_owed: Option<(u16, i32)>,
+    pub(crate) mc2_regen_owed_prev: Option<(u16, i32)>,
+    /// Frame-transient: what the MC2 pre-walk mana apply actually
+    /// landed this frame (clamped) — a below-carpet first-tick debit
+    /// reverses a positive one (`mc2_same_frame_debit`), because
+    /// retail's debit REPLACES the pending regen before the wizard
+    /// body ever applies it. HASH-EXCLUDED.
+    pub(crate) mc2_applied_regen: i32,
     /// The human carpet's recorded pool slot on the MC1/HW column
     /// (conformance import only; 0 = none): the wizard pass — cast
     /// commands + mana step, retail's sub_45C90 leg — fires when the
@@ -821,6 +850,12 @@ pub struct World {
     /// jar pickup poll: jars sit low in the pool, the carpet's slot
     /// runs after them, so a jar's poll sees last frame's position).
     pub(crate) human_pose_prev: (u16, u16, i16),
+    /// The heading face of the `human_pose_prev` echo — the cave-drip
+    /// probe aims its 2560-ahead step with last tick's settled yaw
+    /// (retail reads the pool entity pre-walk). Same hash-quiet
+    /// contract as the pose echo.
+    pub(crate) human_yaw: u16,
+    pub(crate) human_yaw_prev: u16,
     /// Rival deaths this tick (player slots) — drained by the app
     /// for the death-message ticker (:55499-517).
     pub(crate) rival_deaths: Vec<u8>,
@@ -878,6 +913,15 @@ pub struct World {
     /// law exactly. Never set in normal play; config-like, not part
     /// of the state hash or snapshots.
     pub(crate) strict_retail: bool,
+    /// A MEASURED terrain channel is installed (format-2 takes,
+    /// [`Self::install_measured_terrain`]): the planes ARE ground
+    /// truth, so the import's terrain-replay heuristics (pad/riser
+    /// reconstruction, the static ground-probe inversion) must not
+    /// run — on a mid-rise castle pad they over-stamp the true
+    /// partial heights (mc2l3 t=244: reconstruct wrote the full
+    /// 48-byte pad over the measured 2, castle z 1536 vs 64).
+    /// Config-like: cleared by [`Self::restore_planes`], not hashed.
+    pub(crate) measured_terrain: bool,
     /// Retail-bug patch switches (`gameplay · patches`): each field
     /// picks the patched or the retail arm of one deliberate upstream
     /// bugfix. Constructor default = [`WorldPatches::RETAIL`], so
@@ -1640,6 +1684,10 @@ impl World {
             mc2_turn: 0,
             mc2_carpet_stall: false,
             mc2_carpet_slot: 0,
+            mc2_gate_purse: 0,
+            mc2_regen_owed: None,
+            mc2_regen_owed_prev: None,
+            mc2_applied_regen: 0,
             mc1_carpet_slot: 0,
             mc1_hand_bits: 0,
             mc1_cast_pose: PlayerPose::default(),
@@ -1661,6 +1709,7 @@ impl World {
             dev_spells: false,
             prune_owned_jars: false,
             strict_retail: false,
+            measured_terrain: false,
             patches: WorldPatches::RETAIL,
             prev_fire: (false, false),
             midtick_ground_armed: false,
@@ -1678,6 +1727,8 @@ impl World {
             start_markers,
             human_pose: (0, 0, 0),
             human_pose_prev: (0, 0, 0),
+            human_yaw: 0,
+            human_yaw_prev: 0,
             rival_deaths: Vec::new(),
             duel: None,
             mc2_duel: None,
@@ -3194,8 +3245,14 @@ impl World {
                 proj_chain.push(s as u16);
             }
             // The mana-ball chain rebuild (:52290-97, the case-10
-            // arm of the same sweep — see [`TickChain`]).
-            if e.class64 == 10 && matches!(e.model65, 39 | 40) {
+            // arm of the same sweep — see [`TickChain`]). MC2's twin
+            // (`dword_38523`, EF:40023-62) also admits the model-57
+            // fool's sphere — the possession acquisition and the
+            // sphere awake loop both walk it.
+            if e.class64 == 10
+                && (matches!(e.model65, 39 | 40)
+                    || (e.model65 == 57 && matches!(self.game, GameId::Mc2)))
+            {
                 ball_chain.push(s as u16);
             }
             if e.class64 == 3 && e.act_life >= 0 && e.flags & 0x10 == 0 {
@@ -3210,6 +3267,20 @@ impl World {
         self.g.proj_chain.cut = usize::MAX;
         self.g.mob_chains = mob_chains;
 
+        // THE MC2 MID-WALK POSE PHASE (the mc1l32 class-11 law's MC2
+        // face): retail's human carpet is IN-pool (slot 167 on l3),
+        // and its record updates when the entity walk reaches that
+        // slot — walkers BELOW it read the pose settled last tick,
+        // walkers ABOVE read this tick's. The MC2 conformance
+        // drivers feed pose@N as the arg, so under strict_retail the
+        // dispatch ctx must START on the human_pose_prev echo and
+        // ADVANCE to the arg at the carpet slot (below: the mc2 arm
+        // of the walk). Native MC2 feeds the pre-move pose and steps
+        // flight outside the walk, so the arg is already the
+        // below-walker view there — unchanged. (mc2l3 t=107: firebug
+        // 162 at slot < 167 wander-turns toward the pose@N bearing —
+        // f34 320 vs retail 317 — a ±1..9 heading drift every idle
+        // repick.)
         let mut ctx = MobCtx {
             px: player.x,
             py: player.y,
@@ -3224,6 +3295,19 @@ impl World {
         };
         self.human_pose_prev = self.human_pose;
         self.human_pose = (player.x, player.y, player.z);
+        self.human_yaw_prev = self.human_yaw;
+        self.human_yaw = player.heading;
+        // (after the echo roll: human_pose_prev now holds the pose
+        // settled last tick, the below-walker view.)
+        if self.strict_retail
+            && matches!(self.game, GameId::Mc2)
+            && self.human_pose_prev != (0, 0, 0)
+        {
+            ctx.px = self.human_pose_prev.0;
+            ctx.py = self.human_pose_prev.1;
+            ctx.pz = self.human_pose_prev.2;
+            ctx.pyaw = self.human_yaw_prev;
+        }
         // The falling carpet's tick-entry z — the touchdown
         // reconstruction's anchor (see `mc1_fall_entry_z`). The
         // tick-head `player` feed is the PRE sample under either
@@ -3297,10 +3381,25 @@ impl World {
         // the token slots, whose fire debit / mid-burst zeroing it
         // must apply the SAME frame (see `mc1_wizard_pass`).
         if matches!(self.game, GameId::Mc2) {
+            // The cast gate's purse read: retail's gate tail runs
+            // before this block in the wizard body (see
+            // `mc2_gate_purse`) — stash the pre-apply value.
+            self.mc2_gate_purse = self.player.mana;
+            // Hand last frame's below-carpet suppression stash to its
+            // pay-back window (`mc2_regen_owed` docs); an unconsumed
+            // one (window still live / re-triggered) drops here.
+            self.mc2_regen_owed_prev = self.mc2_regen_owed.take();
+            self.mc2_applied_regen = 0;
             let mc2_corpse = self.player.state != LifeState::Alive;
             if !mc2_corpse {
+                let before = self.player.mana;
                 let stepped = self.player.mana as i64 + self.player.mana_delta as i64;
                 self.player.mana = stepped.clamp(0, self.player.mana_max as i64) as u32;
+                // What actually LANDED this frame (clamp included) —
+                // a below-carpet first-tick debit takes a positive
+                // one back (`mc2_same_frame_debit`: retail's debit
+                // REPLACES the pending regen before it ever applies).
+                self.mc2_applied_regen = self.player.mana as i64 as i32 - before as i32;
                 let (at_castle, at_dolmen) = self.mc2_regen_boost();
                 self.player.mana_delta = if at_castle || at_dolmen {
                     ((self.player.mana_max / 200) as i32).max(1000)
@@ -3426,7 +3525,21 @@ impl World {
         // native play (the pooled cave carpet included) never does.
         wt_check!("tick-head passes (chains/duel/hate/mana/objective/casts/stagevar)");
         let wake_ctx = {
-            let (wx, wy) = if self.strict_retail || self.human_pose_prev == (0, 0, 0) {
+            // The MC2 face of the same polarity law (the drip block
+            // below measured it): the MC2 conformance drivers feed
+            // pose@N as the arg — free post-move, pair pinned n1 —
+            // so under strict_retail the settled-last-tick pose the
+            // pass wants is the human_pose_prev echo, one tick behind
+            // the arg. MC1 drivers feed the pre-move pose as the arg
+            // itself, so there the arg IS the settled pose (mc2l3
+            // t=99: retail arms firebug 162's f58 during 99 off the
+            // pose settled in 98; the arg held pose@99 and armed the
+            // port one tick early — a ±1 f58 cadence every wake
+            // cycle, the t=107 INHERITED heading wall).
+            let mc2_strict = self.strict_retail && matches!(self.game, GameId::Mc2);
+            let (wx, wy) = if (self.strict_retail && !mc2_strict)
+                || self.human_pose_prev == (0, 0, 0)
+            {
                 (player.x, player.y)
             } else {
                 (self.human_pose_prev.0, self.human_pose_prev.1)
@@ -3468,8 +3581,27 @@ impl World {
         // wrong tail-additive model.)
         self.mc2_turn = self.mc2_turn.wrapping_add(1);
         if self.g.is_cave() && self.mc2_turn & 7 == 0 {
-            let mut probe = (player.x, player.y, player.z);
-            Gen::polar_step(&mut probe, player.heading, 0, 2560);
+            // Retail reads the local player's POOL entity (EF:40513-15)
+            // — a pre-pass, so that's the pose SETTLED LAST TICK (the
+            // wake-pass law's MC2 face, opposite arg polarity: the
+            // conformance drivers feed pose@N as the arg — free
+            // post-move, pair pinned n1 — while native's tick-head arg
+            // is already the pre-move entry). Under strict_retail the
+            // echo is the settled pose; the import seeds it from the
+            // capture, so scratch-world pairs read it too (mc2l3
+            // t=23→24: probe y 41344 vs 41314 crosses the +128 cell
+            // round — the drip minted one row south).
+            let (hx, hy, hyaw) = if self.strict_retail {
+                (
+                    self.human_pose_prev.0,
+                    self.human_pose_prev.1,
+                    self.human_yaw_prev,
+                )
+            } else {
+                (player.x, player.y, player.heading)
+            };
+            let mut probe = (hx, hy, player.z);
+            Gen::polar_step(&mut probe, hyaw, 0, 2560);
             let ox = ((probe.0.wrapping_add(128) >> 8) as u8).wrapping_sub(10);
             let oy = ((probe.1.wrapping_add(128) >> 8) as u8).wrapping_sub(10);
             let d1 = features::lcg32(&mut self.g.rand) % 20; // col offset
@@ -3532,6 +3664,17 @@ impl World {
                 self.mc2_player_cast_pass(alive, edge, cmd, player, &ctx);
                 let turn = self.mc2_turn;
                 self.mc2_cave_carpet_tail(turn);
+                // The mid-walk pose ADVANCE (see the ctx seeding at
+                // the tick head): retail's mover tail updates the
+                // human record HERE, so walkers above this slot read
+                // this tick's settled pose — the arg under the MC2
+                // conformance drivers.
+                if self.strict_retail {
+                    ctx.px = player.x;
+                    ctx.py = player.y;
+                    ctx.pz = player.z;
+                    ctx.pyaw = player.heading;
+                }
                 wt_check!(format!("carpet_dispatch (mc2, slot {i})"));
             }
             // The MC1 twin (sub_45C90, the class-3 carpet dispatch):
@@ -4250,6 +4393,27 @@ impl World {
         if self.g.terrain_dirty {
             self.g.terrain_dirty = false;
             self.terrain_dirty = true;
+        }
+        // Drain the ladder-stamp re-sync mail first (`sub_60780`'s
+        // second half — the stamp itself ran inside the castle's own
+        // dispatch, before any same-tick XP): gate-suppressed
+        // SetSpell on the human's castle-spell token at its OWN tier.
+        if !self.g.mc2_ladder_sync.0.is_empty() {
+            let mail = std::mem::take(&mut self.g.mc2_ladder_sync.0);
+            for c in mail {
+                if self.g.ent[c as usize].id24 != crate::mc1::mobs::PLAYER_TARGET {
+                    continue;
+                }
+                let m = self.mc2_book.ent[2] as usize;
+                if m == 0 || self.g.ent[m].class64 != 15 {
+                    continue;
+                }
+                let saved = self.g.ent[m].f26;
+                self.g.ent[m].f26 = 0;
+                let tier = self.g.ent[m].f71;
+                self.mc2_set_spell(m, tier);
+                self.g.ent[m].f26 = saved;
+            }
         }
         // Drain the MC2 impact-XP mail the same tick it was pushed
         // (the pool ticks above are the `sub_6D8B0` award sites) —
@@ -5666,6 +5830,12 @@ impl World {
             mc2_turn: _,
             mc2_carpet_stall: _,
             mc2_carpet_slot: _,
+            // Frame-transient gate purse + suppression hand-over:
+            // overwritten every MC2 tick before their readers run.
+            mc2_gate_purse: _,
+            mc2_regen_owed: _,
+            mc2_regen_owed_prev: _,
+            mc2_applied_regen: _,
             // The wizard-pass anchor, the cast-arm hand bits and the
             // token-fire pose echo: conformance-reseeded / rewritten
             // at every arm — hash-quiet like the mc2 carpet pair and
@@ -5699,6 +5869,8 @@ impl World {
             // A one-tick echo of the (hashed) pose stream, fully
             // derived — hash-quiet like the dirty flags.
             human_pose_prev: _,
+            human_yaw: _,
+            human_yaw_prev: _,
             rival_deaths: _,
             duel,
             mc2_book,
@@ -5710,6 +5882,7 @@ impl World {
             dev_spells,
             prune_owned_jars: _,
             strict_retail: _,
+            measured_terrain: _,
             patches: _,
             prev_fire,
             // Conformance instrument (pose-channel ground snapshot):
@@ -6974,6 +7147,20 @@ impl World {
         {
             return;
         }
+        // THE DEBIT REPLACES THE PENDING REGEN (`sub_68DE0` first
+        // arm: `regen >= 0 → regen = -cost`): the fresh delta the
+        // pre-walk apply already landed this frame never reaches
+        // retail's mana — take back exactly what landed (the clamped
+        // amount) before paying the debit. mc2l3 t=9085+: without
+        // this, every below-carpet cast leaked one +100 (the census's
+        // -100 port-ahead family, 355 rows).
+        if self.mc2_applied_regen > 0 {
+            self.player.mana = self
+                .player
+                .mana
+                .saturating_sub(self.mc2_applied_regen as u32);
+        }
+        self.mc2_applied_regen = 0;
         let stepped = self.player.mana as i64 + self.player.mana_delta as i64;
         self.player.mana = stepped.clamp(0, self.player.mana_max as i64) as u32;
         self.player.mana_delta = 0;
@@ -6989,6 +7176,24 @@ impl World {
         if !self.dev_spells && self.player.mana_delta > 0 {
             self.player.mana_delta = 0;
         }
+    }
+
+    /// [`World::suppress_regen`] for a manifestation at pool slot `m`
+    /// under the strict import: a BELOW-CARPET token's clamp lands one
+    /// frame late on the port's apply stream (the wizard delta applies
+    /// pre-walk), so stash what this suppression takes — the token's
+    /// first INERT frame pays it back (`mc2_manifestation_tick`).
+    /// See `mc2_regen_owed`.
+    pub(crate) fn suppress_regen_owed(&mut self, m: usize) {
+        if self.strict_retail
+            && self.mc2_carpet_slot != 0
+            && m < self.mc2_carpet_slot as usize
+            && !self.dev_spells
+            && self.player.mana_delta > 0
+        {
+            self.mc2_regen_owed = Some((m as u16, self.player.mana_delta));
+        }
+        self.suppress_regen();
     }
 
     /// 16 Create Castle (sub_57610 :65862): the class-9 m10 castle
@@ -7025,7 +7230,13 @@ impl World {
         // here, an upgrade would have rebuilt in place).
         let castle = self.player_castle().filter(|&c| self.g.ent[c].f26 > 0);
         let mc2 = matches!(self.game, GameId::Mc2);
-        let (bx, by) = if mc2 || (self.patches.castle_latch_bug && !self.strict_retail) {
+        // MC2's launch is the hand muzzle too — `sub_68E50`
+        // (EF:55595) is byte-identical to [`World::muzzle`]'s 256 @
+        // yaw ∓ 512 with the inside-terrain revert (measured: mc2l3
+        // t=242's ball surfaces at carpet + (192, −168), yaw 789,
+        // left hand). Only MC1's latch-bug patch anchors at the
+        // carpet.
+        let (bx, by) = if !mc2 && self.patches.castle_latch_bug && !self.strict_retail {
             (p.x, p.y)
         } else {
             let m = self.muzzle(p, right);
@@ -7057,14 +7268,11 @@ impl World {
         let ball_mana = (self.spell_cast_cost(16) / def.count.max(1) as u32) as i32;
         let e = &mut self.g.ent[pr];
         // The carpet speed rides +126 ONLY (sub_57610 `*(v3+126) +=
-        // v4`); +128 keeps the ctor 384, so the flight eases the
-        // launch boost away at 2/tick (the recorded ball decays
-        // 464 → 462 on its first flight tick). MC2 keeps the pre-arm
-        // no-decay pairing (EF unverified).
+        // v4`; MC2's twin `sub_69AB0` EF:56130 is the same law);
+        // +128 keeps the ctor 384, so the flight eases the launch
+        // boost away at 2/tick — BOTH columns (the mc2l3 ball decays
+        // 464 → 462 on its first flight tick, EF:58612-20).
         e.f126 += p.speed;
-        if mc2 {
-            e.f128 = e.f126;
-        }
         e.id24 = PLAYER_TARGET;
         // The launch inherits the wizard's AIM — yaw and pitch both
         // (:65913-14 copies +30/+32; +34 keeps the ctor default,
@@ -7083,6 +7291,29 @@ impl World {
         } else {
             e.f68 = 3;
             e.f69 = 2;
+        }
+        if mc2 {
+            // The MC2 create dest carries its own GROUND z (sub_69AB0
+            // EF:56144-49: `dest.z = getTerrainAlt(dest)`) — the
+            // ball's pitch bearing eases toward it (the 205 → 183
+            // shallowing on the mc2l3 t=242 ball). The dest-z home is
+            // `site_z` (retail @0x9E, the non-creature dest_z lane).
+            if castle.is_none() {
+                self.g.ent[pr].site_z = self.g.ground_z(tgt.0, tgt.1) as i16;
+            }
+            // The record shows the ball ARMED at its birth boundary
+            // with the launch site test already taken (mc2l3 t=242:
+            // flags byte0 bits 1+2, unmoved, full life) — fold
+            // sub_66D00's head into the cast. A refused site despawns
+            // the fresh ball; the mana is spent and the cast lock is
+            // derived (`mc2_castle_lock_active` sees no ball).
+            self.g.ent[pr].flags |= 2;
+            if castle.is_none() {
+                let (bx2, by2) = (self.g.ent[pr].x, self.g.ent[pr].y);
+                if !self.g.mc2_castle_cast_site_ok(bx2, by2) {
+                    self.g.ent[pr].flags |= 0x400;
+                }
+            }
         }
         // The charge move (:65910-11): the castle ball banks the
         // caster's accumulated meter in its +26 and zeroes it —
@@ -12669,6 +12900,8 @@ impl World {
             // the restored `human_pose`) — exactly the value the
             // strict jar law wants; nothing to save.
             human_pose_prev: _,
+            human_yaw: _,
+            human_yaw_prev: _,
             rival_deaths,
             duel,
             mc2_duel,
@@ -12683,12 +12916,19 @@ impl World {
             // Conformance-import mode, never true in a playable world
             // — a saved game has no business carrying it.
             strict_retail: _,
+            measured_terrain: _,
             // Config-like: the app re-applies the live option set on
             // resume; saving it would resurrect stale arms after a
             // menu change.
             patches: _,
             mc2_carpet_stall: _,
             mc2_carpet_slot: _,
+            // Frame-transient gate purse + suppression hand-over:
+            // overwritten every MC2 tick before their readers run.
+            mc2_gate_purse: _,
+            mc2_regen_owed: _,
+            mc2_regen_owed_prev: _,
+            mc2_applied_regen: _,
             mc1_carpet_slot: _,
             mc1_hand_bits: _,
             mc1_cast_pose: _,
@@ -13745,6 +13985,163 @@ mod tests {
             w.player.mana_delta,
             ((w.player.mana_max / 2000) as i32).max(100),
             "afield: the slow figure"
+        );
+    }
+
+    /// The PURSE-DRY hold ends the SAME tick, regen included: retail's
+    /// cast-gate tail runs inside the wizard body BEFORE its mana
+    /// block (`sub_5F380` at AddPlayer03_00_5E010 EF:59967 vs the
+    /// apply at EF:59995), so the gate's affordability test reads the
+    /// PRE-apply purse and a dry-out tick still re-arms the held
+    /// window — whereupon the manifestation's own first-tick re-check
+    /// (`sub_68D50`, post-apply) FAILS and the collapse arm
+    /// (`word_0x2E_46 = 1`, no `sub_68DE0`) kills the window with the
+    /// freshly recomputed regen left standing. mc2l3 t=1496 is the
+    /// corpus witness: a held fireball (cost 250/tick) ran the purse
+    /// 450 → 200; retail's boundary reads f26 = 0 and manaRegen +100,
+    /// and mana climbs from the very next tick. The port's gate read
+    /// the POST-apply purse, refused the re-arm, and the mid-burst
+    /// clamp then froze regen for the whole countdown tail (up to
+    /// f28−1 ticks) — the census's ±100/±1000 human-mana family, 489
+    /// resets.
+    #[test]
+    fn mc2_purse_dry_hold_collapses_the_window_and_resumes_regen_same_tick() {
+        let mut w = mc2_flat_world();
+        let m = w.mc2_book.ent[0] as usize;
+        assert_ne!(m, 0, "fireball manifestation seeded");
+        // The retail l3 fireball tier-0 row (the synthetic assets
+        // table is empty): cost 250, window 11, RAPID (held re-arms).
+        w.g.ent[m].f28 = 11;
+        w.g.ent[m].max_life = 250;
+        w.g.ent[m].f140 = 22;
+        w.g.ent[m].f59 = 0;
+        w.g.ent[m].f136 = 0;
+        w.player.mana = 500;
+        let pose = PlayerPose::from_tiles(10.0, 105.0 / 8.0, 10.0, 0.0, 0.0, 0.0);
+        let fire = PlayerCommand {
+            fire_left: true,
+            ..Default::default()
+        };
+        // Press-edge arm + first-tick debit.
+        w.tick(pose, fire);
+        assert_eq!(w.g.ent[m].f26, 10, "armed, first manifestation tick done");
+        assert_eq!(w.player.mana_delta, -250, "the debit rides the delta");
+        // Held re-arm; the purse still pays (apply 500 → 250).
+        w.tick(pose, fire);
+        assert_eq!(w.player.mana, 250);
+        assert_eq!(w.player.mana_delta, -250, "the hold keeps draining");
+        // The dry-out tick: apply 250 → 0. The gate re-arms off the
+        // PRE-apply 250, the first-tick re-check fails post-apply,
+        // the window collapses NOW and the recompute stands.
+        w.tick(pose, fire);
+        assert_eq!(w.player.mana, 0, "purse dry");
+        assert_eq!(
+            w.g.ent[m].f26, 0,
+            "collapse: f26 = 1, then the countdown zeroes it this tick"
+        );
+        assert_eq!(
+            w.player.mana_delta,
+            ((w.player.mana_max / 2000) as i32).max(100),
+            "regen resumes the same tick — no suppressed countdown tail"
+        );
+        // The resumed rate pays out (the mc2l3 t=1497 witness: 200 →
+        // 300 while the port sat at 200).
+        w.tick(pose, fire);
+        assert_eq!(w.player.mana, 100, "the +100 lands the very next tick");
+    }
+
+    /// A BELOW-CARPET manifestation's regen block lifts the frame
+    /// after its window's last tick — not one later. Retail's
+    /// mid-burst clamp (`sub_68DE0` else-arm, run at the token's own
+    /// pool slot) kills the delta recomputed LAST frame, i.e. the
+    /// value the wizard body above it is about to apply THIS frame;
+    /// once f26 hits 0 the token is inert and the wizard's fresh
+    /// recompute pays immediately. The port applies the wizard delta
+    /// pre-walk, so a suppression on the expiry tick would poison the
+    /// NEXT frame's apply — one extra frozen tick per cast. mc2l3
+    /// t=9033-9057 is the witness: possession spam (token slot 109 <
+    /// carpet 167, window 3) put one +100 row at every cast cycle's
+    /// end, ~340 of the census's 484 mana resets. The suppression
+    /// half of `mc2_same_frame_debit`'s ordering law, same
+    /// strict-import gate.
+    #[test]
+    fn mc2_below_carpet_window_expiry_frees_the_regen_same_frame() {
+        let mut w = mc2_flat_world();
+        let m = w.mc2_book.ent[1] as usize;
+        assert_ne!(m, 0, "possession manifestation seeded");
+        // The strict-import shape: pooled human ABOVE the token.
+        w.strict_retail = true;
+        w.mc2_carpet_slot = 500;
+        // A mid-burst possession window one tick from expiry
+        // (retail row: window 3, cost 100), delta as the pre-walk
+        // recompute leaves it.
+        w.g.ent[m].tick70 = 3;
+        w.g.ent[m].f28 = 3;
+        w.g.ent[m].f26 = 2;
+        w.g.ent[m].max_life = 100;
+        w.g.ent[m].f136 = 0;
+        w.player.mana = 500;
+        let pose = PlayerPose::from_tiles(10.0, 105.0 / 8.0, 10.0, 0.0, 0.0, 0.0);
+        // f26 2 → 1: a live mid-burst tick — clamped, mana frozen.
+        w.tick(pose, PlayerCommand::default());
+        assert_eq!(w.g.ent[m].f26, 1);
+        assert_eq!(w.player.mana, 500, "mid-burst: frozen");
+        assert_eq!(w.player.mana_delta, 0, "mid-burst: regen clamped");
+        // f26 1 → 0: the last WINDOW tick — retail clamps this one
+        // too (the retrigger family pins f26 at 1 and clamps every
+        // hold tick, so the port must not skip it).
+        w.tick(pose, PlayerCommand::default());
+        assert_eq!(w.g.ent[m].f26, 0, "window expired");
+        assert_eq!(w.player.mana, 500, "the last window tick is still clamped");
+        // The token's first INERT frame: retail's wizard body (above
+        // the token) applies the fresh delta here; the port's
+        // pre-walk apply ran with last frame's suppressed 0, so the
+        // stashed pay-back restores it (the mc2l3 t=9037 witness:
+        // 41259 → 41359 while the port sat one more tick).
+        w.tick(pose, PlayerCommand::default());
+        assert_eq!(w.player.mana, 600, "the pay-back lands on the inert frame");
+        assert_eq!(
+            w.player.mana_delta,
+            ((w.player.mana_max / 2000) as i32).max(100),
+            "and the recompute stands"
+        );
+        // Steady state resumes.
+        w.tick(pose, PlayerCommand::default());
+        assert_eq!(w.player.mana, 700, "regen flows again");
+    }
+
+    /// The BELOW-CARPET first-tick debit REPLACES the pending regen:
+    /// `sub_68DE0`'s debit arm (`regen >= 0 → regen = -cost`) runs at
+    /// the token's slot BEFORE the wizard body applies, so the fresh
+    /// +rate recomputed last frame never reaches retail's mana. The
+    /// port's pre-walk apply already landed it this frame —
+    /// `mc2_same_frame_debit` takes back exactly what landed before
+    /// paying the debit. mc2l3 t=9085+ is the witness: without the
+    /// reversal every below-carpet cast leaked one +100 (the census's
+    /// port-ahead −100 family, 355 rows).
+    #[test]
+    fn mc2_below_carpet_first_tick_debit_replaces_the_pending_regen() {
+        let mut w = mc2_flat_world();
+        let m = w.mc2_book.ent[1] as usize;
+        w.strict_retail = true;
+        w.mc2_carpet_slot = 500;
+        // An inert-last-frame token re-armed for a fresh cast this
+        // frame (f26 == f28: the first manifestation tick), the +100
+        // recomputed last frame still pending in the delta.
+        w.g.ent[m].tick70 = 3;
+        w.g.ent[m].f28 = 3;
+        w.g.ent[m].f26 = 3;
+        w.g.ent[m].max_life = 100;
+        w.g.ent[m].f136 = 0;
+        w.player.mana = 500;
+        w.player.mana_delta = 100;
+        let pose = PlayerPose::from_tiles(10.0, 105.0 / 8.0, 10.0, 0.0, 0.0, 0.0);
+        w.tick(pose, PlayerCommand::default());
+        // Retail: the debit replaced the +100 and applied −100 →
+        // 400. A leak would read 500 (the +100 landed, then −100).
+        assert_eq!(
+            w.player.mana, 400,
+            "the pending regen is replaced by the debit, not applied"
         );
     }
 
@@ -24206,7 +24603,7 @@ mod tests {
         let bz = ground + 512;
         // Both candidates level with the bolt (f78 zeroed so aim_z is
         // the raw z): the pick is the score's alone, not the cone's.
-        let mut creature = |w: &mut World, x: u16, y: u16| -> usize {
+        let creature = |w: &mut World, x: u16, y: u16| -> usize {
             let v = w.g.spawn_creature(16, x, y, ground).expect("creature");
             let e = &mut w.g.ent[v];
             e.id24 = 0;

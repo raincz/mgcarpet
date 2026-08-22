@@ -707,6 +707,11 @@ impl World {
         if spell == 2 {
             let m = self.mc2_book.ent[2] as usize;
             if m != 0 {
+                // `sub_6D8B0`'s own SetSpell, UNsuppressed — a
+                // short-arm no-op while the cast window is open; the
+                // suppressed mid-transform re-sync is the LADDER
+                // stamp's (`sub_60780` → the mc2_ladder_sync mail,
+                // drained just before this one).
                 self.mc2_set_spell(m, self.mc2_book.sel[2]);
             }
         }
@@ -789,8 +794,10 @@ impl World {
             // the pane's empty-slot commit).
             if hand == 0 {
                 self.mc2_book.left = -1;
+                self.player.left = None;
             } else {
                 self.mc2_book.right = -1;
+                self.player.right = None;
             }
             return;
         }
@@ -818,10 +825,16 @@ impl World {
         };
         let t = tier.min(cap);
         self.mc2_book.sel[s] = t;
+        // Retail's SpellIndexLeft/Right is ONE lane; the port splits
+        // it into the book (the cast machine's read) and the Player
+        // mirror (the import/obs lane) — keep both in step, or an
+        // equip pair's obs projects the stale hand (mc2l3 t=108).
         if hand == 0 {
             self.mc2_book.left = spell as i8;
+            self.player.left = Some(crate::mc1::spells::SpellId(spell));
         } else {
             self.mc2_book.right = spell as i8;
+            self.player.right = Some(crate::mc1::spells::SpellId(spell));
         }
         let m = self.mc2_book.ent[s] as usize;
         self.mc2_set_spell(m, t);
@@ -1141,8 +1154,13 @@ impl World {
         }
         // THE MANA GATE (EF:60953): caster mana vs the tier's full
         // cost. Insufficient → UI flash + sound 29 (EF:60964-67).
+        // Reads the PRE-apply purse: retail's gate tail sits before
+        // the wizard body's mana block (`mc2_gate_purse`), so a
+        // dry-out tick still re-arms and the manifestation's own
+        // post-apply first-tick re-check collapses the window the
+        // same tick — regen resumes immediately, not f26 ticks late.
         let cost = self.g.ent[m].max_life;
-        if !self.dev_spells && (self.player.mana as u64) < cost as u64 {
+        if !self.dev_spells && (self.mc2_gate_purse as u64) < cost as u64 {
             self.g.snd_player(29);
             return;
         }
@@ -1265,6 +1283,22 @@ impl World {
                 }
                 return;
             }
+            // The below-carpet suppression's pay-back (see the
+            // suppression note below): retail's wizard body applies
+            // the fresh delta on the token's first INERT frame, but
+            // the port's pre-walk apply already ran this frame with
+            // the value last frame's suppression zeroed — restore it.
+            // A still-live (or re-triggered) window never reaches
+            // this: f26 > 0 re-suppresses instead, and the stale
+            // stash was dropped by this tick's hand-over.
+            if self.g.ent[m].f26 == 0
+                && let Some((om, amt)) = self.mc2_regen_owed_prev
+                && om as usize == m
+            {
+                self.mc2_regen_owed_prev = None;
+                let stepped = self.player.mana as i64 + amt as i64;
+                self.player.mana = stepped.clamp(0, self.player.mana_max as i64) as u32;
+            }
             if self.g.ent[m].f26 > 0 {
                 // `sub_68DE0` (EF:55569) has two halves keyed on the
                 // FIRST burst tick (`word_0x2E_46 == word_0x30_48`):
@@ -1274,7 +1308,8 @@ impl World {
                 // regeneration" law (docs/spell-audit/mana-regen.md).
                 // Read `first` before the countdown.
                 let first = self.g.ent[m].f26 as u16 == self.g.ent[m].f28.max(1);
-                if self.mc2_afford(m) {
+                let afford = self.mc2_afford(m);
+                if afford {
                     if first {
                         self.mc2_spell_fire(spell, m, p, ctx);
                         let cost = self.g.ent[m].max_life;
@@ -1317,8 +1352,35 @@ impl World {
                 // `mana_delta` negative, so the `> 0` guard preserves
                 // it; every later tick clamps the positive regen the
                 // wizard tick recomputed this frame (world.rs:1225).
-                if !first {
-                    self.suppress_regen();
+                // AFFORD-GATED: every retail handler calls sub_68DE0
+                // only on the afford-success path — the collapse arm
+                // (`word_0x2E_46 = 1`, EF:55885/56021/56349/56468/
+                // 56690) skips it, so the wizard's fresh recompute
+                // stands on the very tick the window dies (mc2l3
+                // t=1496: purse 200 < fireball 250, retail regen +100
+                // lands immediately, the port held it one tick).
+                //
+                // BELOW-CARPET ORDERING: retail's clamp at frame F
+                // hits the delta recomputed at F-1 — the value the
+                // wizard body (above the token) is about to apply
+                // THIS frame — so the clamped applies run exactly
+                // while the token still SEES a live window, and regen
+                // pays on the token's first INERT frame. The port
+                // applies the wizard delta pre-walk, so a suppression
+                // here poisons NEXT frame's apply instead: one extra
+                // frozen tick per window end (mc2l3 t=9037-9055, the
+                // possession spam — token slot 109 < carpet 167, one
+                // +100 row per cast cycle). Stash what the
+                // suppression takes; the token's next INERT tick pays
+                // it back (`mc2_manifestation_tick` head) — the
+                // suppression half of `mc2_same_frame_debit`'s
+                // ordering law, same strict-import gate. A skip on
+                // the f26==1 tick is NOT equivalent: the retrigger
+                // family (shield/invis re-presses, EF:60914-28) pins
+                // f26 at 1 for the whole hold and retail clamps every
+                // one of those ticks.
+                if !first && afford {
+                    self.suppress_regen_owed(m);
                 }
                 // SPEED's slipstream trail (`GetScroll_69DB0`
                 // EF:56251-59): every 4th tick of the live window
