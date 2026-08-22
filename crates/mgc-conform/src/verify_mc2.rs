@@ -152,9 +152,7 @@ pub(crate) fn run(path: &std::path::Path, args: &Args) -> Result<bool, String> {
         // stays true — the byte simply also carries retail's own
         // view-vs-panel routing. `MGC_PRESS_LATCH=1` restores the
         // latch-only fold for A/B.
-        if !press_latch_mode
-            && let Some(p) = st.players.get(st.local_player as usize)
-        {
+        if !press_latch_mode && let Some(p) = st.players.get(st.local_player as usize) {
             let (fl, fr) = mgc_formats::recover::mc1_fire(p.move_bits);
             aligned.fire_left = fl;
             aligned.fire_right = fr;

@@ -1935,9 +1935,7 @@ impl World {
         // and the painter's own delta solved to 0 — no crush sweep,
         // no rise).
         let off = std::env::var("MGC_NO_PAD_REPLAY").unwrap_or_default();
-        let off = |arm: &str| {
-            self.measured_terrain || off == "1" || off == "all" || off == arm
-        };
+        let off = |arm: &str| self.measured_terrain || off == "1" || off == "all" || off == arm;
         if !off("castle") {
             for i in 0..self.g.ent.len() {
                 if self.g.ent[i].class64 == 3 && self.g.ent[i].model65 == 2 {
@@ -2499,9 +2497,7 @@ fn import_ent_mc2(r: &RetailEntMc2, slot: u16, row156: u8, tr: &dyn Fn(u16) -> u
     // grew a TRANSPOSED 2×8 footprint and its GROW arm missed
     // retail's convergence tick (mc2l3 t=15/16/18: slots 195/196/203
     // life retail 3 port 1 — the built-seal transition).
-    let ramp2c = m27
-        || (r.class3f == 5 && r.model40 == 23)
-        || (r.class3f == 14 && r.model40 == 2);
+    let ramp2c = m27 || (r.class3f == 5 && r.model40 == 23) || (r.class3f == 14 && r.model40 == 2);
     let mut e = Ent {
         rand: r.rand as u32,
         max_life: r.max_life.max(0) as u32,

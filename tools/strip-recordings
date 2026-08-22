@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# Batch-convert retail .mgcr takes into SHAREABLE input-only port takes.
+#
+#     ./tools/strip-recordings recordings/*.mgcr
+#     ./tools/strip-recordings --out /tmp/share recordings/mc1l0.mgcr
+#
+# A retail take is ~500 KB/tick and nearly all of it is the two channels
+# a replay never hands to the sim: `state` (61%) and `obs` (39%). The
+# tick's player input is 0.0% of the file — and it is NOT the `input`
+# channel, which holds the raw DOSBox externals (keys/mouse) that
+# retail's consume loop filters and latches before the mover sees them.
+# The replayable signal is RECOVERED from the state closure pair. So
+# this is not a channel filter: each take is replayed once, the input is
+# recovered, and `--record` writes it back out exact. Typically ~150x
+# smaller, and it plays with `--replay` on any machine, with no
+# recording rig and no retail binaries.
+#
+# THE ORIGINALS STAY. The retail channels ARE the conformance oracle —
+# `mgc-conform` grades against them, and an input-only take has nothing
+# to grade. Never hand these to the fixture runner.
+#
+# Each output is verified by replaying it: a take that cannot reproduce
+# its own hash channel is reported and left behind as a FAILURE.
+set -u
+
+OUT=share
+while [ $# -gt 0 ]; do
+	case "$1" in
+	--out)
+		[ $# -ge 2 ] || {
+			echo "strip-recordings: --out needs a directory" >&2
+			exit 2
+		}
+		OUT=$2
+		shift 2
+		;;
+	--out=*)
+		OUT=${1#--out=}
+		shift
+		;;
+	-h | --help)
+		sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'
+		exit 0
+		;;
+	*) break ;;
+	esac
+done
+
+[ $# -gt 0 ] || {
+	echo "usage: $0 [--out DIR] <take.mgcr>…" >&2
+	exit 2
+}
+
+BIN=target/release/mgcarpet
+[ -x "$BIN" ] || {
+	echo "strip-recordings: building $BIN" >&2
+	cargo build --release -p mgc-app --bin mgcarpet || exit 1
+}
+
+mkdir -p "$OUT" || exit 1
+fail=0
+
+for src in "$@"; do
+	[ -f "$src" ] || {
+		echo "skip $src (not a file)" >&2
+		continue
+	}
+	name=$(basename "$src")
+	dst="$OUT/$name"
+	printf '== %s\n' "$name"
+	if ! "$BIN" --replay-check "$src" --record "$dst" >"$dst.log" 2>&1; then
+		# A non-zero exit is the SOURCE diverging from retail (an
+		# uncertified level), not a conversion failure — the take is
+		# still written and still self-consistent. Only a missing
+		# output is fatal.
+		:
+	fi
+	sed -n 's/^\(record:\|replay-check:\) /   src: /p' "$dst.log" | head -3
+	[ -f "$dst" ] || {
+		echo "   FAILED — no output; see $dst.log" >&2
+		fail=1
+		continue
+	}
+	# The verification that matters: does the cropped take reproduce
+	# its own recorded hash channel?
+	if "$BIN" --replay-check "$dst" >"$dst.verify.log" 2>&1; then
+		verdict="verified bit-exact"
+	else
+		verdict="SELF-DIVERGENT — see $dst.verify.log"
+		fail=1
+	fi
+	a=$(wc -c <"$src")
+	b=$(wc -c <"$dst")
+	awk -v a="$a" -v b="$b" -v v="$verdict" \
+		'BEGIN{printf "   %d -> %d bytes (%.0fx smaller) — %s\n", a, b, a/b, v}'
+done
+
+exit $fail

@@ -23,6 +23,7 @@ use mgc_formats::mgcr::{
 };
 use mgc_formats::recover;
 use mgc_sim::engine::features::Planes;
+use mgc_sim::engine::world::ImportPin;
 use mgc_sim::engine::world::conformance::{self, ThingTable};
 use mgc_sim::flight::Mc2Ext;
 use mgc_sim::mc1::spells::SpellId;
@@ -59,6 +60,10 @@ pub struct ReplayFile {
     /// refuses on.
     pub sim_pool_slots: Option<usize>,
     pub sim_awake_range: Option<u32>,
+    /// The import pin the take was recorded under
+    /// ([`mgc_sim::engine::world::World::import_pin`]); all-default
+    /// for a native session, which needs no re-establishing.
+    pub sim_import_pin: ImportPin,
     pub snapshot: Option<Vec<u8>>,
 }
 
@@ -123,6 +128,66 @@ impl ReplayFile {
             sim_patches: s("patches"),
             sim_pool_slots: n("entity_pool_size").map(|v| v as usize),
             sim_awake_range: n("awake_range").map(|v| v as u32),
+            sim_import_pin: sim
+                .and_then(|s| s.get("import_pin"))
+                .map(|p| ImportPin {
+                    strict_retail: p
+                        .get("strict_retail")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    measured_terrain: p
+                        .get("measured_terrain")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false),
+                    carpet_slot: p.get("carpet_slot").and_then(|v| v.as_u64()).unwrap_or(0) as u16,
+                    castle_reg: pin_u16s(p, "castle_reg"),
+                    human_pose_prev: {
+                        let a = pin_i64s::<3>(p, "human_pose_prev");
+                        (a[0] as u16, a[1] as u16, a[2] as i16)
+                    },
+                    human_yaw: pin_u64(p, "human_yaw") as u16,
+                    human_yaw_prev: pin_u64(p, "human_yaw_prev") as u16,
+                    mc1_hand_bits: pin_u64(p, "mc1_hand_bits") as u32,
+                    mc1_cast_pose: {
+                        let a = pin_i64s::<6>(p, "mc1_cast_pose");
+                        mgc_sim::engine::world::PlayerPose {
+                            x: a[0] as u16,
+                            y: a[1] as u16,
+                            z: a[2] as i16,
+                            heading: a[3] as u16,
+                            pitch: a[4] as u16,
+                            speed: a[5] as i16,
+                        }
+                    },
+                    mc1_acq: pin_u16s(p, "mc1_acq"),
+                    mc2_turn: pin_u64(p, "mc2_turn") as u32,
+                    mc2_carpet_stall: pin_bool(p, "mc2_carpet_stall"),
+                    mc1_v14: pin_bool(p, "mc1_v14"),
+                    accel_veto: {
+                        let a = p.get("accel_veto").and_then(|v| v.as_array());
+                        let at = |i: usize| {
+                            a.and_then(|a| a.get(i))
+                                .and_then(|v| v.as_bool())
+                                .unwrap_or(false)
+                        };
+                        (at(0), at(1))
+                    },
+                    pending_teleport: pin_f32s::<3>(p, "pending_teleport")
+                        .map(|a| (a[0], a[1], Some(a[2]))),
+                    pending_respawn: pin_f32s::<3>(p, "pending_respawn")
+                        .map(|a| (a[0], a[1], a[2])),
+                    pending_restart: pin_bool(p, "pending_restart"),
+                    wiz_charge: {
+                        let mut r = [0u8; 8];
+                        if let Some(a) = p.get("wiz_charge").and_then(|v| v.as_array()) {
+                            for (slot, v) in r.iter_mut().zip(a) {
+                                *slot = v.as_u64().unwrap_or(0) as u8;
+                            }
+                        }
+                        r
+                    },
+                })
+                .unwrap_or_default(),
             snapshot,
             rec,
         })
@@ -159,6 +224,49 @@ impl ReplayFile {
             Some(other) => Err(format!("unknown patches policy {other:?}")),
         }
     }
+}
+
+/// Import-pin field readers. A MISSING key reads as the default, so
+/// the pin can grow without invalidating takes written before the
+/// field existed — they were recorded when it was not yet carried, and
+/// nothing else can be said about them.
+fn pin_u64(p: &serde_json::Value, key: &str) -> u64 {
+    p.get(key).and_then(|v| v.as_u64()).unwrap_or(0)
+}
+
+fn pin_bool(p: &serde_json::Value, key: &str) -> bool {
+    p.get(key).and_then(|v| v.as_bool()).unwrap_or(false)
+}
+
+/// `None` for an absent or null key — these lanes are `Option`s whose
+/// emptiness is meaningful, not a missing-field default.
+fn pin_f32s<const N: usize>(p: &serde_json::Value, key: &str) -> Option<[f32; N]> {
+    let a = p.get(key)?.as_array()?;
+    let mut out = [0f32; N];
+    for (slot, v) in out.iter_mut().zip(a) {
+        *slot = v.as_f64().unwrap_or(0.0) as f32;
+    }
+    Some(out)
+}
+
+fn pin_u16s<const N: usize>(p: &serde_json::Value, key: &str) -> [u16; N] {
+    let mut out = [0u16; N];
+    if let Some(a) = p.get(key).and_then(|v| v.as_array()) {
+        for (slot, v) in out.iter_mut().zip(a) {
+            *slot = v.as_u64().unwrap_or(0) as u16;
+        }
+    }
+    out
+}
+
+fn pin_i64s<const N: usize>(p: &serde_json::Value, key: &str) -> [i64; N] {
+    let mut out = [0i64; N];
+    if let Some(a) = p.get(key).and_then(|v| v.as_array()) {
+        for (slot, v) in out.iter_mut().zip(a) {
+            *slot = v.as_i64().unwrap_or(0);
+        }
+    }
+    out
 }
 
 enum RetailPrev {
@@ -634,6 +742,7 @@ impl PortRecorder {
         altitude: AltitudeModel,
         pool_slots: Option<usize>,
         awake_range: Option<u32>,
+        pin: ImportPin,
     ) -> Result<PortRecorder, String> {
         let mut header = serde_json::json!({
             "format": 1,
@@ -672,6 +781,50 @@ impl PortRecorder {
             }
             if let Some(n) = awake_range {
                 sim.insert("awake_range".into(), serde_json::json!(n));
+            }
+            // The import pin (`World::import_pin`): CONFIG the
+            // snapshot deliberately skips, so a take whose start state
+            // came from a retail import has to carry it or its replay
+            // takes the deviating arms and desyncs against its own
+            // hash channel. Omitted entirely for a native session,
+            // whose pin is all-default.
+            if pin != ImportPin::default() {
+                sim.insert(
+                    "import_pin".into(),
+                    serde_json::json!({
+                        "strict_retail": pin.strict_retail,
+                        "measured_terrain": pin.measured_terrain,
+                        "carpet_slot": pin.carpet_slot,
+                        "castle_reg": pin.castle_reg,
+                        "human_pose_prev": [
+                            pin.human_pose_prev.0,
+                            pin.human_pose_prev.1,
+                            pin.human_pose_prev.2,
+                        ],
+                        "human_yaw": pin.human_yaw,
+                        "human_yaw_prev": pin.human_yaw_prev,
+                        "mc1_hand_bits": pin.mc1_hand_bits,
+                        "mc1_cast_pose": [
+                            pin.mc1_cast_pose.x as i64,
+                            pin.mc1_cast_pose.y as i64,
+                            pin.mc1_cast_pose.z as i64,
+                            pin.mc1_cast_pose.heading as i64,
+                            pin.mc1_cast_pose.pitch as i64,
+                            pin.mc1_cast_pose.speed as i64,
+                        ],
+                        "mc1_acq": pin.mc1_acq,
+                        "mc2_turn": pin.mc2_turn,
+                        "mc2_carpet_stall": pin.mc2_carpet_stall,
+                        "mc1_v14": pin.mc1_v14,
+                        "accel_veto": [pin.accel_veto.0, pin.accel_veto.1],
+                        "pending_teleport": pin.pending_teleport
+                            .map(|(x, y, z)| serde_json::json!([x, y, z])),
+                        "pending_respawn": pin.pending_respawn
+                            .map(|(x, y, z)| serde_json::json!([x, y, z])),
+                        "pending_restart": pin.pending_restart,
+                        "wiz_charge": pin.wiz_charge,
+                    }),
+                );
             }
         }
         Ok(PortRecorder {
@@ -717,6 +870,9 @@ fn port_input_from(i: &FlightInput) -> PortInput {
         barrel_roll: i.barrel_roll,
         raw_dx: i.raw_dx,
         mc1_move_byte: i.mc1_move_byte,
+        mc2_cmd_speed: i.mc2_cmd_speed,
+        mc2_park: i.mc2_park,
+        suicide: i.suicide,
     }
 }
 
@@ -738,16 +894,18 @@ fn flight_input_from(p: &PortInput) -> FlightInput {
         full_stop: p.full_stop,
         respawn: p.respawn,
         demolish: p.demolish,
-        // Retail's suicide is a direct life write in the key
-        // handler, never a control word — no capture carries it.
-        suicide: false,
+        // Retail's own captures cannot carry these three — suicide is
+        // a direct life write in the key handler, and the MC2 cruise
+        // lanes come out of the RECOVERY, not the raw channel. A port
+        // take can: `--record` under `--replay` writes the recovered
+        // input, so the stream has to round-trip every field the
+        // driver sets or an MC2 re-record cannot reproduce itself.
+        suicide: p.suicide,
         barrel_roll: p.barrel_roll,
         raw_dx: p.raw_dx,
         mc1_move_byte: p.mc1_move_byte,
-        // Retail-recovery lanes — a port take's exact input stream
-        // never carries them.
-        mc2_cmd_speed: None,
-        mc2_park: false,
+        mc2_cmd_speed: p.mc2_cmd_speed,
+        mc2_park: p.mc2_park,
     }
 }
 
@@ -759,7 +917,16 @@ fn flight_input_from(p: &PortInput) -> FlightInput {
 /// results must match `mgc-conform replay`'s, which certifies the
 /// integer-pose faithful path end to end). Exit truth: `Ok(true)` =
 /// zero divergence.
-pub fn replay_check(mut level: LoadedLevel, mut file: ReplayFile) -> Result<bool, String> {
+/// `record` is the headless twin of `--replay --record`: batch
+/// conversion without a window, on the same two rules
+/// ([`begin_replay_recording`]).
+pub fn replay_check(
+    mut level: LoadedLevel,
+    mut file: ReplayFile,
+    record: Option<&Path>,
+) -> Result<bool, String> {
+    let game = level.game;
+    let lvl = file.level;
     let w = level.world.take().ok_or("level built no world")?;
     let mut sim = Simulation::with_world(w);
     let (thrust, altitude) = file.models()?;
@@ -773,12 +940,108 @@ pub fn replay_check(mut level: LoadedLevel, mut file: ReplayFile) -> Result<bool
         sim.restore(&snap).map_err(|e| format!("snapshot: {e}"))?;
     }
     let mut d = ReplayDriver::install(file, &mut sim)?;
+    let mut rec: Option<PortRecorder> = None;
+    let mut cut_at = None;
     while let Some(input) = d.next(&mut sim) {
+        if let Some(path) = record {
+            let anchored = d.take_anchored();
+            match &rec {
+                // Rule 1: the world only becomes the take's world once
+                // the driver has anchored, which happens inside the
+                // first `next`.
+                None => rec = Some(begin_replay_recording(path, &sim, game, lvl, None, None)?),
+                // A LATER anchor is a capture gap the take healed by
+                // re-seeding from the next closure. Input alone cannot
+                // cross a gap — the missing ticks are missing — so the
+                // recording ends here rather than emitting a stream
+                // whose own hashes it could not reproduce.
+                Some(_) if anchored => {
+                    cut_at = Some(sim.tick);
+                    break;
+                }
+                Some(_) => {}
+            }
+        }
+        // The `--record` phase convention: t/hash describe the state
+        // the step is ABOUT to consume, `input` is what it consumed.
+        let pre = rec.as_ref().map(|_| (sim.tick, sim.state_hash()));
         sim.step(&input);
         d.grade(&sim);
+        if let (Some(r), Some((t, hash))) = (rec.as_mut(), pre) {
+            r.record(t, &input, hash)?;
+        }
     }
     println!("replay-check: {}", d.summary());
+    if let Some(r) = rec {
+        let (path, n, res) = r.finish();
+        res?;
+        println!(
+            "record: {} — {n} tick(s), input-only port take",
+            path.display()
+        );
+        if let Some(t) = cut_at {
+            println!(
+                "record: STOPPED at t={t} — the take re-anchors there (capture \
+                 gap); input alone cannot cross a gap, so only the first \
+                 segment was recorded"
+            );
+        }
+    }
     Ok(d.diverged.is_none())
+}
+
+/// Begin a port recording for a session that is REPLAYING one.
+///
+/// `--record` under `--replay` was refused outright, which left no way
+/// to turn a retail take into something shareable. A retail take is
+/// ~500 KB/tick and nearly all of it is the two channels the replay
+/// does not hand to the sim: `state` (61%) and `obs` (39%). The
+/// tick's player input is 0.0% of the file — and it is not the `input`
+/// channel either, which holds the raw DOSBox externals
+/// (`keys_down`/`mouse`) that retail's consume loop filters and
+/// latches before the mover sees them. The replayable signal is
+/// RECOVERED from the state closure pair by `mgc_formats::recover`.
+/// So the crop cannot be a channel filter — but a replay ALREADY
+/// recovers that input every tick, and `--record` already writes
+/// exactly the input-only format. Letting them meet is the whole
+/// feature.
+///
+/// TWO RULES make the result reproduce, and both are why this is not
+/// simply `PortRecorder::begin` at session start:
+///
+/// 1. START AFTER THE ANCHOR. A retail take seeds the world from its
+///    first closure INSIDE the driver's first `next` call, so a
+///    snapshot taken at session install captures a pre-seed world and
+///    the take desyncs against its own hash channel on tick one.
+/// 2. CARRY THE IMPORT PIN. The seeding is an import, and
+///    [`ImportPin`] is the part of an imported world a snapshot
+///    deliberately does not hold.
+pub fn begin_replay_recording(
+    path: &Path,
+    sim: &Simulation,
+    game: mgc_sim::ids::GameId,
+    level: u32,
+    pool_slots: Option<usize>,
+    awake_range: Option<u32>,
+) -> Result<PortRecorder, String> {
+    PortRecorder::begin(
+        path,
+        sim,
+        match game {
+            mgc_sim::ids::GameId::Mc1 => "mc1",
+            mgc_sim::ids::GameId::Mc1Hw => "mc1hw",
+            mgc_sim::ids::GameId::Mc2 => "mc2",
+        },
+        level,
+        sim.thrust_model,
+        sim.altitude_model,
+        pool_slots,
+        awake_range,
+        sim.world
+            .as_ref()
+            .map(|w| w.import_pin())
+            .unwrap_or_default(),
+    )
 }
 
 /// The ghost's translucent billboard, if the session can resolve the
@@ -817,6 +1080,7 @@ mod tests {
             a.altitude_model,
             None,
             None,
+            ImportPin::default(),
         )
         .unwrap();
         for t in 0..200u64 {
@@ -855,6 +1119,79 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    /// **THE PORT INPUT CHANNEL CARRIES EVERY FIELD THE SIM STEPS ON.**
+    ///
+    /// `PortInput` is the serialization mirror of `FlightInput`, and a
+    /// field missing from it is silently dropped by every port take.
+    /// Three were: `mc2_cmd_speed` and `mc2_park` — which the MC2
+    /// recovery sets on EVERY pair, so no MC2 take could reproduce
+    /// itself — and `suicide`, which a live `--record` session lost the
+    /// moment the player pressed Shift+K. Found by re-recording a
+    /// replay, where a dropped lane shows up immediately as a take that
+    /// desyncs against its own hash channel.
+    ///
+    /// Guard shape: build a `FlightInput` with EVERY field non-default,
+    /// round-trip it, and compare field by field. A new `FlightInput`
+    /// field fails this the moment it is stepped on and not mirrored.
+    #[test]
+    fn port_input_round_trips_every_flight_input_field() {
+        let want = FlightInput {
+            thrust: 0.25,
+            strafe: -0.5,
+            lift: 0.75,
+            yaw_delta: 1.5,
+            pitch_delta: -2.5,
+            stick_x: 11,
+            stick_y: -22,
+            fire_left: true,
+            fire_right: true,
+            equip_left: Some(SpellId(3)),
+            equip_right: Some(SpellId(7)),
+            mc2_select: Some((1, 2, 3)),
+            spell_ring: Some((4, 5)),
+            full_stop: true,
+            respawn: true,
+            demolish: true,
+            suicide: true,
+            barrel_roll: true,
+            raw_dx: -9,
+            mc1_move_byte: Some(0x2A),
+            mc2_cmd_speed: Some(-1234),
+            mc2_park: true,
+        };
+        let got = flight_input_from(&port_input_from(&want));
+        assert_eq!(got.mc2_cmd_speed, want.mc2_cmd_speed, "MC2 cruise lane");
+        assert_eq!(got.mc2_park, want.mc2_park, "MC2 park lane");
+        assert_eq!(got.suicide, want.suicide, "Shift+K");
+        assert_eq!(got.mc1_move_byte, want.mc1_move_byte);
+        assert_eq!(got.mc2_select, want.mc2_select);
+        assert_eq!(got.spell_ring, want.spell_ring);
+        assert_eq!(
+            (got.equip_left.map(|s| s.0), got.equip_right.map(|s| s.0)),
+            (Some(3), Some(7))
+        );
+        assert_eq!(
+            (
+                got.thrust,
+                got.strafe,
+                got.lift,
+                got.yaw_delta,
+                got.pitch_delta,
+                got.raw_dx
+            ),
+            (0.25, -0.5, 0.75, 1.5, -2.5, -9)
+        );
+        assert_eq!((got.stick_x, got.stick_y), (11, -22));
+        assert!(
+            got.fire_left
+                && got.fire_right
+                && got.full_stop
+                && got.respawn
+                && got.demolish
+                && got.barrel_roll
+        );
+    }
+
     /// **A TAKE CARRIES THE OFFLINE CHASSIS OVERRIDES IT WAS RECORDED
     /// WITH.**
     ///
@@ -886,6 +1223,7 @@ mod tests {
                 a.altitude_model,
                 pool,
                 awake,
+                ImportPin::default(),
             )
             .unwrap();
             rec.finish().2.unwrap();

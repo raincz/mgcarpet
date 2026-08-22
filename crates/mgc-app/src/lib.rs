@@ -1871,6 +1871,8 @@ struct App {
     /// `--record`: the destination path, then the live recorder.
     record_path: Option<PathBuf>,
     recorder: Option<replay::PortRecorder>,
+    /// A deferred replay recording ended at a re-anchor; do not restart.
+    recorder_cut: bool,
     /// The MC2 world-map screen assets (lazy-loaded on first entry;
     /// stays None when the mc2-ui bundle is absent).
     worldmap: Option<worldmap::WorldMap>,
@@ -2084,6 +2086,7 @@ impl App {
             replay: None,
             record_path,
             recorder: None,
+            recorder_cut: false,
             worldmap: None,
             mainmenu: None,
             mc1menu: None,
@@ -2128,6 +2131,7 @@ impl App {
     fn attach_replay_record(&mut self) {
         if let Some(mut file) = self.replay_pending.take() {
             let snap = file.snapshot.take();
+            let pin = file.sim_import_pin;
             let res = (|| -> Result<replay::ReplayDriver, String> {
                 let sess = self.session.as_deref_mut().ok_or("level did not install")?;
                 if let Some(snap) = &snap {
@@ -2140,6 +2144,10 @@ impl App {
                     if let Some(w) = sess.sim.world.as_mut() {
                         w.terrain_dirty = true;
                         w.entities_dirty = true;
+                        // The snapshot restored the pool and the
+                        // terrain but not the MODE they were
+                        // established in (`World::import_pin`).
+                        w.set_import_pin(pin);
                     }
                 }
                 replay::ReplayDriver::install(file, &mut sess.sim)
@@ -2149,11 +2157,18 @@ impl App {
                 Err(e) => eprintln!("error: replay: {e}"),
             }
         }
-        if let Some(path) = self.record_path.take() {
-            if self.replay.is_some() {
-                eprintln!("record: disabled — a replay is the input source");
-                return;
+        if self.replay.is_some() {
+            // `--record` UNDER `--replay` re-records the take as an
+            // input-only port take. The recorder cannot begin here: a
+            // retail take seeds the world inside the driver's first
+            // `next`, so the start snapshot has to wait for the tick
+            // loop (`begin_deferred_recorder`).
+            if let Some(p) = &self.record_path {
+                println!("record: {} — re-recording the replay", p.display());
             }
+            return;
+        }
+        if let Some(path) = self.record_path.take() {
             let res = {
                 let cfg = &self.cfg;
                 let (thrust, altitude) = (
@@ -2178,6 +2193,10 @@ impl App {
                             altitude,
                             cfg.sim.parameters.entity_pool_size.map(|n| n as usize),
                             cfg.sim.parameters.awake_range,
+                            // A live session never imports, so its pin
+                            // is all-default; only a replay recording
+                            // carries a real one.
+                            Default::default(),
                         )
                     })
             };
@@ -2196,6 +2215,58 @@ impl App {
 
     /// Finalize a live recording (level switch, app exit) — the zstd
     /// stream needs its frame end to reopen cleanly.
+    /// The tick-loop half of `--replay --record`: begin the port
+    /// recording at the first tick the driver has produced input for,
+    /// and stop it at a later re-anchor. See
+    /// [`replay::begin_replay_recording`] for both rules.
+    fn begin_deferred_recorder(&mut self) {
+        if self.recorder.is_some() || self.record_path.is_none() {
+            return;
+        }
+        let anchored = self.replay.as_mut().is_some_and(|d| d.take_anchored());
+        if self.recorder_cut {
+            return;
+        }
+        let path = self.record_path.clone().expect("checked");
+        let (pool, awake) = (
+            self.cfg.sim.parameters.entity_pool_size.map(|n| n as usize),
+            self.cfg.sim.parameters.awake_range,
+        );
+        let Some(sess) = self.session.as_deref() else {
+            return;
+        };
+        let (game, level) = (sess.level.game, sess.level.level_number);
+        match replay::begin_replay_recording(&path, &sess.sim, game, level, pool, awake) {
+            Ok(r) => {
+                let _ = anchored;
+                self.recorder = Some(r);
+            }
+            Err(e) => {
+                eprintln!("error: record: {e}");
+                self.record_path = None;
+            }
+        }
+    }
+
+    /// A replay re-anchor after recording started: input alone cannot
+    /// cross a capture gap, so the recording ends rather than emit a
+    /// stream whose own hashes it could not reproduce.
+    fn cut_recorder_at_reanchor(&mut self) {
+        if self.recorder.is_none() || self.replay.is_none() {
+            return;
+        }
+        if self.replay.as_mut().is_some_and(|d| d.take_anchored()) {
+            self.recorder_cut = true;
+            println!(
+                "record: STOPPED — the take re-anchors here (capture gap); \
+                 input alone cannot cross a gap, so only the first segment \
+                 was recorded"
+            );
+            self.finish_recorder();
+            self.record_path = None;
+        }
+    }
+
     fn finish_recorder(&mut self) {
         if let Some(r) = self.recorder.take() {
             let (path, n, res) = r.finish();
@@ -5638,6 +5709,14 @@ impl App {
             // `--record`: t/hash describe the PRE-step state; the
             // input is what the step consumes (the phase convention,
             // docs/RECORDING.md).
+            // `--replay --record`: the driver has produced this
+            // tick's input, so the world is now the take's world —
+            // the first legal moment to snapshot it (and a re-anchor
+            // past that point ends the recording).
+            if self.replay.is_some() {
+                self.cut_recorder_at_reanchor();
+                self.begin_deferred_recorder();
+            }
             let pre = self.recorder.is_some().then(|| {
                 let sess = sess!(self);
                 (sess.sim.tick, sess.sim.state_hash())
@@ -8324,7 +8403,11 @@ fn parse_args() -> Result<Args, String> {
                      the session; level from the header)] \
                      [--replay-check take.mgcr (headless: whole take + drift \
                      summary; exit 0 = zero divergence)] \
-                     [--record out.mgcr (write this session as a port recording)] \
+                     [--record out.mgcr (write this session as a port recording; \
+                     WITH --replay/--replay-check it re-records the take as an \
+                     INPUT-ONLY port take — the recovered input, no state/obs \
+                     channels, ~150x smaller and shareable. The originals stay \
+                     the conformance oracle)] \
                      [--flock-probe out.csv [--probe-ticks N] [--probe-every N] \
                      [--probe-pose far|start|hover[:ALT]|approach[:ALT]|orbit[:ALT]] \
                      [--probe-species CLASS,MODEL] [--probe-strip] [--probe-dis N,N..]]\n\
@@ -9634,10 +9717,6 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
     // recorded sim closure.
     let mut replay_boot: Option<replay::ReplayFile> = None;
     if let Some(path) = args.replay.as_ref().or(args.replay_check.as_ref()) {
-        if args.record.is_some() {
-            eprintln!("error: --record cannot run under --replay (the take is the input source)");
-            return std::process::ExitCode::from(2);
-        }
         let file = match replay::ReplayFile::open(path) {
             Ok(f) => f,
             Err(e) => {
@@ -9777,11 +9856,17 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
         let file = replay_boot.expect("--replay-check opened the take");
         // The headless path bypasses apply_instruments — hand the
         // pinned patch policy (cfg was set by the replay pin block)
-        // to the world directly.
+        // to the world directly. `strict_retail` rides along: it is
+        // CONFIG the snapshot skips, and an exported take was free-run
+        // under it (a retail take raises it at its own import, so the
+        // retail path needs no help here).
         if let Some(w) = level.world.as_mut() {
             w.set_patches(world_patches(&cfg.gameplay.patches));
+            // The snapshot restored the pool and the terrain but not
+            // the MODE they were established in.
+            w.set_import_pin(file.sim_import_pin);
         }
-        return match replay::replay_check(level, file) {
+        return match replay::replay_check(level, file, args.record.as_deref()) {
             Ok(true) => std::process::ExitCode::SUCCESS,
             Ok(false) => std::process::ExitCode::FAILURE,
             Err(e) => {

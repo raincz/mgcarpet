@@ -2119,6 +2119,17 @@ pub struct PortInput {
     /// transcoders, never by live play.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mc1_move_byte: Option<u8>,
+    /// MC2's absolute cruise command (`FlightInput::mc2_cmd_speed`);
+    /// the recovery sets it on every MC2 pair, so a take without it
+    /// cannot reproduce an MC2 run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mc2_cmd_speed: Option<i16>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub mc2_park: bool,
+    /// Shift+K. Live-play only (no recovery lane), but a `--record`
+    /// session that omitted it lost the player's own suicide.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub suicide: bool,
 }
 
 /// The `.mgcr` WRITER (the port recorder's sink; the retail twin is

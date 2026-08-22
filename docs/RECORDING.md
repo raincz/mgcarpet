@@ -521,6 +521,50 @@ remains the path for any unpatched exe.
   every invocation including the one that recorded it. A take from
   before these keys reads as "not overridden", i.e. the faithful
   default it was recorded under.
+- **`--replay <in.mgcr> --record <out.mgcr>`** (LANDED) — re-record a
+  take as an INPUT-ONLY port take, for sharing. The combination used to
+  be refused. A retail take is ~500 KB/tick and nearly all of it is the
+  two channels the replay never hands to the sim: `state` (61%) and
+  `obs` (39%); the tick's player input is 0.0% of the file. It is NOT
+  the `input` channel either — that holds the raw DOSBox externals
+  (`keys_down`/`mouse`) that retail's consume loop filters and latches
+  before the mover sees them, so the crop cannot be a channel filter.
+  But a replay ALREADY recovers the exact input every tick and
+  `--record` already writes exactly that format, so letting them meet
+  is the whole feature. Measured 104-264x smaller. `--replay-check
+  <in> --record <out>` is the headless twin; `tools/strip-recordings`
+  batches it and VERIFIES each output by replaying it.
+  Two rules make the result reproduce, both in `begin_replay_recording`:
+  1. **Start after the anchor.** A retail take seeds the world from its
+     first closure inside the driver's first `next`, so a snapshot taken
+     at session install captures a pre-seed world and the take desyncs
+     on tick one.
+  2. **Carry the import pin** (`World::import_pin`). The seeding is an
+     import, and an imported world holds config/state the snapshot
+     deliberately skips — `strict_retail`, `measured_terrain`, the
+     carpet slot, `castle_reg`, and the rest of the residue. Missing
+     one shows up as a take that cannot reproduce its own hash channel
+     (mc1l0 without it: 17 ticks; with `strict_retail` only: 59; with
+     the pin: all 7,097). Grow the list as more turn up — the recipe is
+     to read the divergence tick's INPUT record, which names the event
+     that first touched the missing lane: mc1l4 desynced at t=105 and
+     t=104 is its first `fire_left`, which is `wiz_charge` (stamped
+     onto the manifestation's `f26` at spawn, so invisible until a
+     spell is actually cast). Note that enumerating the importer's
+     writes needs indexed and nested assignments too, not just
+     `self.field =` — `wiz_charge` is written as `self.wiz_charge[i]`.
+     STILL OPEN: mc1l1 desyncs at t=2850, which is a `demolish`
+     (`mc1_move_byte: 48`) — so the lane is something
+     `World::player_castle` resolves through, the `wizext+50`/
+     `castle_reg` side. `castle_reg` itself is already pinned and reads
+     all-zero there, so it is one hop further out.
+  A re-recorded take is NOT a conformance fixture: the retail channels
+  ARE the oracle, and an input-only take has nothing to grade. Keep the
+  originals; `mgc-conform` reads those.
+  Multi-segment takes are out of scope by ruling — a re-anchor is a
+  capture gap that input alone cannot cross, so the recording stops
+  there and says so (all takes should be single-segment; fix the rig,
+  not the consumer).
 - **Puppet playback** (any recording, retail included): drive the
   recorded poses through the renderer with **no sim** — watch the
   actual retail run inside the port. Presentation styling is free

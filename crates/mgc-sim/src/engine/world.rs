@@ -481,7 +481,7 @@ pub struct LoadoutView {
 /// 8.8 fixed-point tile coordinates, z is altitude in engine units
 /// (256 = one tile of height, i.e. 32 per height byte), heading is the
 /// engine's 11-bit angle (0 = north/-Z, matching the flyer's yaw 0).
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PlayerPose {
     pub x: u16,
     pub y: u16,
@@ -1573,6 +1573,58 @@ struct PoseGameBits {
     life_frac: Option<f32>,
     blend: u8,
     map_only: bool,
+}
+
+/// The import-established world config a snapshot does not carry —
+/// see [`World::import_pin`] for why it exists and what goes wrong
+/// without it. Small, closed and `Copy`: it is a pin, not a state
+/// channel.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct ImportPin {
+    pub strict_retail: bool,
+    pub measured_terrain: bool,
+    /// The pool slot holding the imported carpet (`mc1_carpet_slot` /
+    /// `mc2_carpet_slot` by game); 0 = a native world, no pooled
+    /// carpet.
+    pub carpet_slot: u16,
+    /// `Gen::castle_reg` — the ESTABLISHED-castle register. Hash-silent
+    /// and snapshot-silent by the same reasoning (its consequences ride
+    /// hashed entity lanes), and NOT derivable from the pool: a freshly
+    /// planted level-0 castle is bound while an authored level-0 flag
+    /// is not, which no scan can tell apart. A conformance import seeds
+    /// it from the recorded wizext, so a resumed import must carry it.
+    pub castle_reg: [u16; 8],
+    /// The rest of the import residue — every remaining field
+    /// `retail_import_mc1`/`_mc2` writes that the snapshot skips.
+    /// Grow this as more turn up; a missing one shows as a take that
+    /// cannot reproduce its own hash channel, which is exactly what
+    /// `tools/strip-recordings` checks per file.
+    pub human_pose_prev: (u16, u16, i16),
+    pub human_yaw: u16,
+    pub human_yaw_prev: u16,
+    pub mc1_hand_bits: u32,
+    pub mc1_cast_pose: PlayerPose,
+    pub mc1_acq: [u16; crate::mc1::spells::SPELL_COUNT],
+    pub mc2_turn: u32,
+    pub mc2_carpet_stall: bool,
+    /// `mc1_v14` is retail's Type_160 v_14 — "a speed press moved the
+    /// flight target last dispatch", which the speed-spell tokens read
+    /// a walk pass LATER. Cross-tick by construction, so a resumed
+    /// import that starts it false ends an Accelerate burst on the
+    /// wrong tick. The pendings are the same shape: a teleport or a
+    /// respawn armed before the snapshot and consumed after it.
+    pub mc1_v14: bool,
+    pub accel_veto: (bool, bool),
+    pub pending_teleport: Option<(f32, f32, Option<f32>)>,
+    pub pending_respawn: Option<(f32, f32, f32)>,
+    pub pending_restart: bool,
+    /// `wiz_charge` — the per-wizard charge lane the import seeds from
+    /// the recorded wizext. Snapshot-skipped, and INVISIBLE until a
+    /// spell is actually cast: it is stamped onto the manifestation's
+    /// `f26` at spawn, so a resumed import looks identical right up to
+    /// the first cast and then diverges (mc1l4 fires at t=104 and
+    /// desyncs at t=105).
+    pub wiz_charge: [u8; 8],
 }
 
 impl World {
@@ -3537,13 +3589,12 @@ impl World {
             // port one tick early — a ±1 f58 cadence every wake
             // cycle, the t=107 INHERITED heading wall).
             let mc2_strict = self.strict_retail && matches!(self.game, GameId::Mc2);
-            let (wx, wy) = if (self.strict_retail && !mc2_strict)
-                || self.human_pose_prev == (0, 0, 0)
-            {
-                (player.x, player.y)
-            } else {
-                (self.human_pose_prev.0, self.human_pose_prev.1)
-            };
+            let (wx, wy) =
+                if (self.strict_retail && !mc2_strict) || self.human_pose_prev == (0, 0, 0) {
+                    (player.x, player.y)
+                } else {
+                    (self.human_pose_prev.0, self.human_pose_prev.1)
+                };
             MobCtx {
                 px: wx,
                 py: wy,
@@ -5804,6 +5855,79 @@ impl World {
     /// The live patch set (the app's menu view reads it back).
     pub fn patches(&self) -> WorldPatches {
         self.patches
+    }
+
+    /// The import-established world config a SNAPSHOT DOES NOT CARRY.
+    ///
+    /// `retail_import_mc1/mc2` establish four things that live outside
+    /// the snapshot stream on purpose — `strict_retail` and
+    /// `measured_terrain` sit with `patches`/`prune_owned_jars` as
+    /// "config the loader re-supplies", and the carpet slot is pure
+    /// import bookkeeping a native world never has (slot 0, no pooled
+    /// carpet). That is correct for a save: a `.mgcs` reloads under the
+    /// player's current settings into a natively-built world.
+    ///
+    /// It is NOT sufficient for anything that resumes an IMPORTED
+    /// world — the snapshot restores the pool and the terrain but not
+    /// the mode those were established in, so the resumed run silently
+    /// takes the deviating arms, rebuilds pads the measured terrain
+    /// should have suppressed, and looks for the carpet in slot 0.
+    /// Recording a replay is exactly that case: the take's start state
+    /// is a retail import, and its input stream only reproduces under
+    /// the same pin. Measured on mc1l0 — without it the re-run holds
+    /// for 17 ticks, with `strict_retail` alone 59, with the whole pin
+    /// all 7,097 bit-exact.
+    pub fn import_pin(&self) -> ImportPin {
+        ImportPin {
+            strict_retail: self.strict_retail,
+            measured_terrain: self.measured_terrain,
+            carpet_slot: match self.game {
+                GameId::Mc2 => self.mc2_carpet_slot,
+                _ => self.mc1_carpet_slot,
+            },
+            castle_reg: self.g.castle_reg.0,
+            human_pose_prev: self.human_pose_prev,
+            human_yaw: self.human_yaw,
+            human_yaw_prev: self.human_yaw_prev,
+            mc1_hand_bits: self.mc1_hand_bits,
+            mc1_cast_pose: self.mc1_cast_pose,
+            mc1_acq: self.mc1_acq,
+            mc2_turn: self.mc2_turn,
+            mc2_carpet_stall: self.mc2_carpet_stall,
+            mc1_v14: self.mc1_v14,
+            accel_veto: self.accel_veto,
+            pending_teleport: self.pending_teleport,
+            pending_respawn: self.pending_respawn,
+            pending_restart: self.pending_restart,
+            wiz_charge: self.wiz_charge,
+        }
+    }
+
+    /// Re-establish [`Self::import_pin`] on a world resumed from a
+    /// snapshot. Call it right after `Simulation::restore`, before the
+    /// first step.
+    pub fn set_import_pin(&mut self, p: ImportPin) {
+        self.strict_retail = p.strict_retail;
+        self.measured_terrain = p.measured_terrain;
+        match self.game {
+            GameId::Mc2 => self.mc2_carpet_slot = p.carpet_slot,
+            _ => self.mc1_carpet_slot = p.carpet_slot,
+        }
+        self.g.castle_reg.0 = p.castle_reg;
+        self.human_pose_prev = p.human_pose_prev;
+        self.human_yaw = p.human_yaw;
+        self.human_yaw_prev = p.human_yaw_prev;
+        self.mc1_hand_bits = p.mc1_hand_bits;
+        self.mc1_cast_pose = p.mc1_cast_pose;
+        self.mc1_acq = p.mc1_acq;
+        self.mc2_turn = p.mc2_turn;
+        self.mc2_carpet_stall = p.mc2_carpet_stall;
+        self.mc1_v14 = p.mc1_v14;
+        self.accel_veto = p.accel_veto;
+        self.pending_teleport = p.pending_teleport;
+        self.pending_respawn = p.pending_respawn;
+        self.pending_restart = p.pending_restart;
+        self.wiz_charge = p.wiz_charge;
     }
 
     /// Allocations dropped on pool exhaustion since the last call —
