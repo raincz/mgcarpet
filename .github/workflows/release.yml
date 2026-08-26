@@ -31,7 +31,16 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # PINNED like ci.yml — and here it is not optional bookkeeping:
+      # `rust-toolchain.toml` is a rustup DIRECTORY override, so it wins
+      # over whatever this step makes default the moment cargo runs
+      # inside the repo. Leaving `@stable` here would have shipped a
+      # binary built by 1.96.1 under a workflow line claiming stable,
+      # and made the runner download a second toolchain to do it.
+      # Releases are therefore built by the same compiler the
+      # conformance corpus was certified against.
+      # ⚠ Must equal rust-toolchain.toml's `channel` and ci.yml's.
+      - uses: dtolnay/rust-toolchain@1.96.1
         with:
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@v2

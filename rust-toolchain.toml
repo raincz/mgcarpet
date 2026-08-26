@@ -1,0 +1,40 @@
+# THE TOOLCHAIN PIN — so a green local run means a green CI run.
+#
+# Why this file exists: `cargo fmt` is already version-stable (the
+# crates are edition 2024, so rustfmt uses style edition 2024), but
+# CLIPPY IS NOT. Tracking `stable` meant every rustc release could add
+# lints the developer's toolchain does not have, and it did: the
+# 1.96 -> 1.97 bump reddened CI on 11 errors that passed locally, most
+# of them one new lint (`doc_lazy_continuation`). Pinning makes the
+# lint set a property of the repo instead of a property of whichever
+# day CI ran.
+#
+# ⚠ THIS FILE IS INERT WITHOUT RUSTUP. It is a rustup directory
+# override; a distro-packaged cargo (gentoo's /usr/bin/cargo, which is
+# what this project is developed against) ignores it entirely. So it
+# pins CI and any rustup-based contributor, NOT the maintainer's box —
+# keep `channel` equal to whatever `rustc --version` says locally, or
+# the guarantee runs backwards.
+#
+# ⚠ KEEP IN SYNC WITH `.github/workflows/ci.yml`'s
+# `dtolnay/rust-toolchain@<version>` step. If the two disagree, this
+# file wins (rustup applies the override when cargo runs inside the
+# repo) and CI silently downloads a second toolchain.
+#
+# BUMPING: raise both, then run
+#   cargo clean -p mgc-sim -p mgc-app -p mgc-import -p mgc-formats \
+#               -p mgc-render -p mgc-audio -p mgc-conform
+#   cargo clippy --workspace --all-targets -- -D warnings
+# ⚠ A clippy run that finishes in under a second linted NOTHING and
+# still exits 0 — judge it by its `Checking <crate>` lines, never by
+# the exit code. Expect a wave of new lints on any bump; that is the
+# cost the pin converts from "random CI failure" into "a scheduled
+# piece of work".
+#
+# `profile = "default"` (NOT "minimal") is deliberate: minimal omits
+# rustdoc, and `cargo test --workspace` runs doc-tests.
+
+[toolchain]
+channel = "1.96.1"
+profile = "default"
+components = ["rustfmt", "clippy"]

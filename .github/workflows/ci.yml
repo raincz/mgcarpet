@@ -16,7 +16,13 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # PINNED, not `@stable` — see rust-toolchain.toml for why (clippy's
+      # lint set is not version-stable, unlike rustfmt's style edition).
+      # ⚠ Must equal rust-toolchain.toml's `channel`, and both should
+      # track the MAINTAINER's distro rustc: that file is a rustup
+      # directory override and the maintainer's cargo is not rustup's,
+      # so local is the thing being matched, not the thing being pinned.
+      - uses: dtolnay/rust-toolchain@1.96.1
       - uses: Swatinem/rust-cache@v2
       - name: Linux build dependencies (ALSA headers for cpal)
         if: runner.os == 'Linux'
