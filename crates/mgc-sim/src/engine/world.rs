@@ -1676,7 +1676,23 @@ fn drawable(game: GameId, class: u16, model: u16) -> bool {
                 // for its 128-tick life (player retail-verified) —
                 // exported as a map-only pose (live_poses_mc1). MC2's
                 // aura stays out pending its own retail check.
-                || (!mc2 && model == 54)))
+                || (!mc2 && model == 54)
+                // MC1's (10,52) CRAB EGG: sprite-stats row 205 (art
+                // 228, the grey cracked shell), assigned by its ctor
+                // sub_3B860 :47627 — the whole class of bug the magic
+                // mine note above describes, in its second costume.
+                // The egg incubates and hatches bit-exactly (mc1l32 is
+                // certified over its one egg, t=21644..22246, and the
+                // port's type86 reads 205 there), but it was never in
+                // this allowlist, so it ticked its ~600 ticks invisible
+                // and a crab simply appeared out of nowhere.
+                // Player-reported. The graded projection carries no
+                // type86/frame88 lane, which is exactly why
+                // certification could not see it. MC1-gated: MC2's
+                // (10,52) is the invisible castle anchor (mc2::tail).
+                // Row 205 is the ONLY stats row pointing at sprite 228
+                // — that art was unreachable until now.
+                || (!mc2 && model == 52)))
 }
 
 /// The game-keyed per-entity presentation decisions for
@@ -9198,17 +9214,38 @@ impl World {
                 self.entities_dirty = true;
             }
             // Retail's poll geometry (sub_55A40 :64798-842 →
-            // sub_11950, the plain summed-extents AABB) — but read
-            // against the carpet's PREVIOUS-frame position: the
-            // wizard slot runs AFTER the jars in the pass, so a
-            // jar's poll sees last frame's carpet (measured on
-            // mc1hwl0 jar 17: current-pose grants at t=10 where
-            // retail granted at t=13; prev-pose reproduces it).
+            // sub_11950, the plain summed-extents AABB), read
+            // against the carpet as of THIS WALK POSITION.
+            //
+            // ⭐ THE PHASE IS SLOT ORDER, NOT A FIXED FRAME. Retail's
+            // poll reads the wizard's own record off bucket[0]
+            // (`sub_11950(v7x, a1x)`), and the carpet record is
+            // installed at the carpet's OWN walk slot — so a jar
+            // below that slot sees the pre-move pose and a jar above
+            // it sees the settled one. `human_pose` is exactly that
+            // register (`adopt_walk_pose` advances it mid-walk); the
+            // record itself cannot be read directly because a pinned
+            // pair leaves it uninstalled until the walk slot.
+            //
+            // The old fixed `human_pose_prev` fit only jars BELOW the
+            // carpet — where the two agree, pre-move being last
+            // tick's settled pose — which is why mc1hwl0 (jar 17,
+            // carpet 472: current-pose granted at t=10 against
+            // retail's t=13) certified it. mc1l32-quick is the
+            // opposite witness and the take's FIRST divergence:
+            // carpet 14, jar 85, t=6719 spell 7. |Δx| is 662 against
+            // last tick's carpet and 421 against this tick's, over a
+            // 487 half-extent sum — the settled pose grants, the
+            // stale one misses. Every certified take's grants sit
+            // deep inside the box, so none of them could tell the
+            // rules apart. The NATIVE pickup (`try_pickup`, via
+            // `player_overlap(i, ctx)`) already read the mid-walk
+            // ctx; this only brings the strict-retail arm in line.
             //
             // An OWNED spell's jar still runs the poll: the hit
             // arms the rivals' learn timers (:64806-15) and only
             // the grant is skipped (:64843-44 resumes the walk).
-            let (px, py, pz) = self.human_pose_prev;
+            let (px, py, pz) = self.human_pose;
             let hit = {
                 let e = &self.g.ent[i];
                 let wd = |p: u16, q: u16| (p.wrapping_sub(q) as i16 as i32).abs();
@@ -17966,6 +18003,52 @@ mod tests {
             }
         }
         assert_eq!(seen, vec![220, 237, 201], "materialize sequence");
+    }
+
+    /// THE CRAB EGG DRAWS (player-reported: crabs multiplied out of
+    /// thin air). The (10,52) egg's ctor assigns sprite-stats row 205
+    /// — the grey cracked shell, art 228, and row 205 is the ONLY
+    /// stats row that points at it — but the egg was missing from
+    /// `drawable`, so it incubated its whole life invisible. The sim
+    /// side was never wrong: mc1l32 is certified across its one egg
+    /// (t=21644..22246) and the port's `type86` reads 205 there. The
+    /// graded projection carries no `type86` lane, which is why
+    /// certification could not see this.
+    ///
+    /// The paired negative is the guard that keeps the fix MC1-only:
+    /// MC2's (10,52) is the invisible castle anchor.
+    #[test]
+    fn crab_egg_is_drawable_with_its_shell_sprite() {
+        let mut w = flat_world();
+        let egg =
+            w.g.spawn_creator(52, 100 << 8, 100 << 8, 100)
+                .expect("the egg spawns");
+        assert_eq!(
+            (
+                w.g.ent[egg].class64,
+                w.g.ent[egg].model65,
+                w.g.ent[egg].type86
+            ),
+            (10, 52, 205),
+            "the ctor's own labels and sprite row"
+        );
+        let pose = w
+            .live_poses()
+            .into_iter()
+            .find(|p| p.slot == egg as u16)
+            .expect("the egg is drawn");
+        assert_eq!(pose.type_index, 205, "the pose carries the shell sprite");
+        assert!(!pose.map_only, "retail plots it in-world, not map-only");
+        assert_eq!(
+            crate::mc1::sprite_stats::SPRITE_STATS[205].sprite_base,
+            228,
+            "row 205 resolves to the cracked-shell art"
+        );
+        // MC2's (10,52) is the castle anchor — an invisible controller.
+        assert!(
+            !drawable(GameId::Mc2, 10, 52),
+            "the MC2 castle anchor must not acquire the egg's sprite"
+        );
     }
 
     #[test]

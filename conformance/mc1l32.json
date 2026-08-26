@@ -1,210 +1,216 @@
 {
-  "dir": "fixtures/mc1l32",
-  "pin_pose": "n1",
-  "fixtures": [
-    {
-      "t": 465,
-      "file": "10-0-fire-z-lane-the-terrain-datum-class-rides-g.mgcr",
-      "source": "mc1l32",
-      "note": "(10,0) fire z lane - the terrain-datum class rides grounded fires (bee-session cause A ledger entry)"
-    },
-    {
-      "t": 152,
-      "file": "10-12-9-1-flags-lane.mgcr",
-      "source": "mc1l32",
-      "note": "[carried from bee-height take] (10,12)+(9,1) flags lane; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
-    },
-    {
-      "t": 262,
-      "file": "10-12-flags-lane.mgcr",
-      "source": "mc1l32",
-      "note": "[carried from bee-height take] (10,12) flags lane; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
-    },
-    {
-      "t": 156,
-      "file": "10-39-balloon-flags-9-1-flags.mgcr",
-      "source": "mc1l32",
-      "note": "[carried from bee-height take] (10,39) balloon flags + (9,1) flags; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
-    },
-    {
-      "t": 182,
-      "file": "10-39-balloon-flags-bit-0x20000000-l32-known-bal.mgcr",
-      "source": "mc1l32",
-      "note": "[carried from bee-height take] (10,39) balloon flags bit 0x20000000 (l32 known balloon family)"
-    },
-    {
-      "t": 2032,
-      "file": "m9-materialize-state-is-damage-deaf.mgcr",
-      "source": "mc1l32-bee-height",
-      "note": "THE DAMAGE-DEAF STATES: (9,0) sub_1CFF0 :23591-623 carries no mailbox prologue, so a materializing mound is damage-DEAF - act_life holds 1000 while its area mail snowballs 400->800->1200 unread. Ledger 2026-08-16b."
-    },
-    {
-      "t": 870,
-      "file": "9-0-extra-in-port.mgcr",
-      "source": "mc1l32-bee-height",
-      "note": "(9,0) extra-in-port; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
-    },
-    {
-      "t": 1392,
-      "file": "9-0-flags-lane.mgcr",
-      "source": "mc1l32-bee-height",
-      "note": "(9,0) flags lane"
-    },
-    {
-      "t": 148,
-      "file": "9-1-flags-lane.mgcr",
-      "source": "mc1l32",
-      "note": "[carried from bee-height take] (9,1) flags lane; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
-    },
-    {
-      "t": 129,
-      "file": "9-1-projectile-lane-extra-in-port.mgcr",
-      "source": "mc1l32",
-      "note": "[carried from bee-height take] (9,1) projectile lane: extra-in-port; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
-    },
-    {
-      "t": 5432,
-      "file": "9-10-castle-ball-extra-in-port-castle-latch-sess.mgcr",
-      "source": "mc1l32",
-      "note": "(9,10) castle-ball extra-in-port - castle-latch session leads family (painter ctor fields); f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
-    },
-    {
-      "t": 414,
-      "file": "bee-z-law-fixed-residual-9-0-extra.mgcr",
-      "source": "mc1l32",
-      "note": "[carried from bee-height take] bee z-law FIXED; residual: (9,0) extra; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
-    },
-    {
-      "t": 981,
-      "file": "bee-z-law-fixed-residual-9-0-flags.mgcr",
-      "source": "mc1l32-bee-height",
-      "note": "bee z-law FIXED; residual: (9,0) flags; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
-    },
-    {
-      "t": 991,
-      "file": "bee-z-law-fixed-residual-9-0-pitch.mgcr",
-      "source": "mc1l32-bee-height",
-      "note": "bee z-law FIXED; residual: (9,0) pitch; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
-    },
-    {
-      "t": 951,
-      "file": "bee-z-law-regression-guard-was-the-take-s-story.mgcr",
-      "source": "mc1l32-bee-height",
-      "note": "BEE Z-LAW regression guard - was the take's story: retail sub_1B3C0 z-nudge sign(z-target.z)*v_14, FIXED 2026-08-08 (bee_chase vertical aim + promotion lunge-arm)"
-    },
-    {
-      "t": 1181,
-      "file": "bee-z-law-the-bee-speed-atom-closed-2026-08-11-w.mgcr",
-      "source": "mc1l32-bee-height",
-      "note": "bee z-law (see t=951); the bee-speed atom closed 2026-08-11 with the chase-exit trailers (death-tick restore)"
-    },
-    {
-      "t": 5473,
-      "file": "cast-reconstruction-mana-3-0-player-mana-pair-ra.mgcr",
-      "source": "mc1l32",
-      "note": "cast-reconstruction mana ((3,0)+player.mana pair) - raw-input +/-1 caveat, kept open pending an mc1 roster rule"
-    },
-    {
-      "t": 81,
-      "file": "phase-2-spell-jar-remints-itself.mgcr",
-      "source": "mc1l32",
-      "note": "THE PHASE-2 JAR RE-MINTS ITSELF: sub_55D30 :64875-84 runs the spell's own ctor thunk at the jar's position after the grant, so a phase-2 pickup point is permanent. Ledger 2026-08-16b."
-    },
-    {
-      "t": 127,
-      "file": "equip-cast-input-reconstruction-recording-md-raw.mgcr",
-      "source": "mc1l32",
-      "note": "[carried from bee-height take] equip/cast input reconstruction (RECORDING.md raw-input +/-1 caveat): wizard0.hand_right"
-    },
-    {
-      "t": 412,
-      "file": "equip-cast-input-reconstruction-wizard0-hand-lef.mgcr",
-      "source": "mc1l32",
-      "note": "[carried from bee-height take] equip/cast input reconstruction: wizard0.hand_left"
-    },
-    {
-      "t": 3771,
-      "file": "meteor-storm-pool-churn-9-0-10-0-extra-in-port-l.mgcr",
-      "source": "mc1l32",
-      "note": "meteor-storm pool churn: (9,0)+(10,0) extra-in-port (l32-full intake, ledger); f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
-    },
-    {
-      "t": 9218,
-      "file": "the-resisting-press-kills-the-boost-and-the-pair.mgcr",
-      "source": "mc1l32",
-      "note": "THE RESISTING PRESS KILLS THE BOOST AND THE PAIR READS V_14 FROM THE CAPTURE: during a speed burst retail's Type_160 v_12 sits OUTSIDE the +/-80 band (the token overrides target AND actual), so the band test at :55766-73 resolves by SIGN alone - the sustaining press never moves it, the resisting press always does, arming v_14 (:55780), and the token's next pass kills the burst (:65146-50: +48 snaps to 0, no contrail puff, no regen pin). The pair never runs the carpet dispatch, so the import seeds mc1_v14 from the captured Type_160 +14 (sampled post-tick = exactly what a below-carpet token reads) and player.accel from the human's mid-burst (12,2)/(12,21) token. Pre-law pair 9218->9219: retail (12,2) f48 7->0 against the port's decrement to 6, one +100 regen missed, an extra (10,2) contrail - five cancels across the take's accel play."
-    },
-    {
-      "t": 15112,
-      "file": "the-portal-vortex-ctor-stamps-sclass-sub-3b300-w.mgcr",
-      "source": "mc1l32",
-      "note": "THE PORTAL VORTEX CTOR STAMPS SCLASS: sub_3B300 writes +66=3 / +67=-1 (:47343-44) and +154 takes the ground+640 hover z (:47353); the port's model-34 arm left sclass at the NewEvent 255 - one unstamped byte that capped the whole take's free-run horizon at the portal's mid-take birth (t=15113, the graded sclass shadow lane)."
-    },
-    {
-      "t": 15113,
-      "file": "the-portal-hum-is-a-first-tick-latch-sub-26a60-o.mgcr",
-      "source": "mc1l32",
-      "note": "THE PORTAL HUM IS A FIRST-TICK LATCH: sub_26A60 opens on flags bit 1 (:29186-89) - latch + positional sound 21, the same shape as the MC2 pad's - and a timed portal's expiry carries sound 20 (:29196-97). The port's portal_tick had neither; the fresh vortex's flags read 6, not 4, from its first tick on. Retail's warp scan walks EVERY wizard (var_u16_10) - the rival-warp arm stays owed, the register the MC2 pad already carries."
-    },
-    {
-      "t": 22114,
-      "file": "the-crab-eats-in-two-dimensions-sub-1c170-s-abso.mgcr",
-      "source": "mc1l32",
-      "note": "THE CRAB EATS IN TWO DIMENSIONS: sub_1C170's absorb probe is sub_423D0 (:23068) - x/y ALONE - and the port's added z term made a ball under the crab read past the 5*actSpeed absorb ring, so the port kept chasing where retail ate: mana 1500 vs 1000, the 5000-step growth ladder (sub_38820: a size-up adds 5000 max life) one rung behind, the eaten ball's 0x400 unflipped, and every later life row skewed. The eat and steer ball tests are +64/+65 ALONE (:23063 - no 0x400; a soft-killed ball stays a target until the reap)."
-    },
-    {
-      "t": 23672,
-      "file": "the-crab-s-nearest-ball-scan-walks-the-tick-top.mgcr",
-      "source": "mc1l32",
-      "note": "THE CRAB'S NEAREST-BALL SCAN WALKS THE TICK-TOP BALL CHAIN (+36466, bucket[1]) with the +65==39 per-node gate ALONE (:22928-45): no 0x400, no life test - a ball eaten mid-tick still scores, a ball born mid-tick is invisible. The port scanned the LIVE POOL with class/model/0x400 gates - the chain-vs-pool bug in its fourth costume. Pre-law pair 23672->23673: retail acquires slot 825, the port holds 0."
-    },
-    {
-      "t": 24700,
-      "file": "the-meteor-trail-puffs-after-the-core-the-m3-wra.mgcr",
-      "source": "mc1l32",
-      "note": "THE METEOR TRAIL PUFFS AFTER THE CORE: the m3 wrapper sub_53070 runs sub_52770 FIRST (flight step, detonation payload, soft kill) and only then mints the damage-suppressed (10,1) seeder at the POST-step position, gated on +64 alone (:63027-38) - the dying detonation tick still puffs. The port minted the puff pre-move: every trail puff born one flight step behind (the take's ~1,450-pair (10,1)/(10,0)/(10,17) x/y/z families, ~99% of all dirty rows), and on the detonation tick the payload/puff free-stack pops landed in swapped slots (this pair: retail (10,17)@53 + (10,1)@20, the port inverted)."
-    },
-    {
-      "t": 29834,
-      "file": "a-newborn-blast-ring-s-first-tick-scans-its-own.mgcr",
-      "source": "mc1l32",
-      "note": "A NEWBORN BLAST RING'S FIRST TICK SCANS ITS OWN TILE ALONE: retail's ch0 area window radius is (+80+255)>>8 with NO floor - a (10,17) field born on its victim (slot 260, minted by the meteor at 971 during the previous tick, walk-cursor law: not dispatched on its birth tick) runs its first dispatched tick with entry f26=0, extents 0, so its window is the single ch0 back-biased tile ((pos-128)/256), which does not even cover the ring's own position tile - the crab standing ON the impact point is missed for exactly that one tick. The port's .max(1) 3x3 floor (held back 2026-08-12 as corpus-inert; mc1l32 pays the receipt) landed the newborn's f44/max_life=1000 one tick early: this pair retail deals 883, the port dealt 1883. The floor stays MC2-only (the arrow direct-hit / chord-march compensating family)."
-    },
-    {
-      "t": 29840,
-      "file": "the-m5-regen-trailer-runs-on-the-death-tick-too.mgcr",
-      "source": "mc1l32",
-      "note": "THE M5 REGEN TRAILER RUNS ON THE DEATH TICK TOO: sub_1BF60 (:22959-65) and sub_1C110 (:22976-82) call the shared creature core and then run 'if (act < max) act += max >> 7' UNCONDITIONALLY - the fatal hit returns out of the core back into the wrapper, whose trailer credits the fresh corpse (act deep negative, trivially < max). The port's Inbox::Dead arm returned before the trailer, so every crab death overshoot read exactly max>>7 low: this pair the 15000-max crab at 324 dies retail -1007 = -1124 + 117; siblings pin the quantum at 39/78/312 for max 5000/10000/40000."
-    },
-    {
-      "t": 30954,
-      "file": "the-death-tick-regen-quantum-scales-with-max-lif.mgcr",
-      "source": "mc1l32",
-      "note": "THE DEATH-TICK REGEN QUANTUM SCALES WITH MAX LIFE: the same m5 wrapper-trailer law as t=29840, on the biggest crab in the take - slot 63's overshoot reads retail -330 vs the trailer-less port's -642, a delta of 312 = 8*39 = max_life >> 7 for a 40000-max crab. One law, two receipt sizes."
-    },
-    {
-      "t": 37298,
-      "file": "a-trigger-volume-probes-the-carpet-as-of-its-own.mgcr",
-      "source": "mc1l32",
-      "note": "A TRIGGER VOLUME PROBES THE CARPET AS OF ITS OWN WALK SLOT: the class-11 handlers read the pose the mid-walk swap has produced by their slot - sub_5A090's bucket[0] carpet walk and sub_5A120's wizext sweep read live records, and mc1l32's carpet sits at slot 14, BELOW the village volumes, so retail probes them with the SETTLED pose. The (11,0) one-shot at slot 17 fires its house-pair disposition off the post-move overlap: this pair retail mints the (2,1) house at 18 + the (11,0) spawner at 19 (life 300, village id 10) and soft-kills 17; the port - feeding every volume the human_pose_prev echo, an overfit of mc1l1's carpet-above-all-volumes slot layout - fired ~250 ticks late (the t=37544/37809 slot-allocation echoes were its late mints)."
-    },
-    {
-      "t": 37308,
-      "file": "the-repeating-trigger-s-rearm-counts-on-the-mid.mgcr",
-      "source": "mc1l32",
-      "note": "THE REPEATING TRIGGER'S REARM COUNTS ON THE MID-WALK POSE: sub_59AE0's rearm arm decrements +26 only while sub_5A120's wizard sweep misses (:67253-57) - the same settled-pose law as the t=37298 fire, on the (11,2) village heart at slot 28. The prev-echo port held where retail counted (f26 retail 9, port 10); the whole +-1 cadence family (17 pairs, 37308..43570) is this one probe reading yesterday's pose."
-    },
-    {
-      "t": 21715,
-      "file": "the-owned-spell-register-is-derived-sub-45c10-55.mgcr",
-      "source": "mc1l32",
-      "note": "THE OWNED-SPELL REGISTER IS DERIVED (sub_45C10 :55310-19, called as sub_45C90's FIRST statement :55342): memset var_676 then re-register every +532 acquisition entry under its record's model byte, every tick, at the carpet's own walk slot. The phase-2 heal jar at 84 grants at 21715 (seat write above the carpet); its re-minted twin at 355 polls the same pickup point at 21716 and must take the already-known FLAG-TOUCH - the carpet's 21716 rebuild registered 84 before slot 355 polled. The port's hand-maintained register (imported +676 = pre-rebuild) re-granted and minted an extra (12,1) at 823. NOT the banked +628 timer: learn[] is empty through the whole incident."
-    },
-    {
-      "t": 39873,
-      "file": "the-touchdown-breaks-settled-minus-step-the-mc1l.mgcr",
-      "source": "mc1l32",
-      "note": "THE TOUCHDOWN BREAKS SETTLED-MINUS-STEP (the mc1l42 law's pair face): the death-fall trail's (10,1) rides the post-move pre-gravity scratch, reconstructed in a pinned pair as settled z minus the applied +46 - exact while the mover's ride is in the settled pose, broken on the touchdown tick where the floor clamp lands the carpet at 6375 and back-derivation reads 6403 against the true 6391 (= the frozen-stick tick-entry z). The trail child minted 12 high and the whole death-cascade mint chain shifted one draw (slot 51 z, slot 75 rand)."
-    }
-  ]
+ "dir": "fixtures/mc1l32",
+ "pin_pose": "n1",
+ "fixtures": [
+  {
+   "t": 81,
+   "file": "phase-2-spell-jar-remints-itself.mgcr",
+   "source": "mc1l32",
+   "note": "THE PHASE-2 JAR RE-MINTS ITSELF: sub_55D30 :64875-84 runs the spell's own ctor thunk at the jar's position after the grant, so a phase-2 pickup point is permanent. Ledger 2026-08-16b."
+  },
+  {
+   "t": 127,
+   "file": "equip-cast-input-reconstruction-recording-md-raw.mgcr",
+   "source": "mc1l32",
+   "note": "[carried from bee-height take] equip/cast input reconstruction (RECORDING.md raw-input +/-1 caveat): wizard0.hand_right"
+  },
+  {
+   "t": 129,
+   "file": "9-1-projectile-lane-extra-in-port.mgcr",
+   "source": "mc1l32",
+   "note": "[carried from bee-height take] (9,1) projectile lane: extra-in-port; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
+  },
+  {
+   "t": 148,
+   "file": "9-1-flags-lane.mgcr",
+   "source": "mc1l32",
+   "note": "[carried from bee-height take] (9,1) flags lane; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
+  },
+  {
+   "t": 152,
+   "file": "10-12-9-1-flags-lane.mgcr",
+   "source": "mc1l32",
+   "note": "[carried from bee-height take] (10,12)+(9,1) flags lane; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
+  },
+  {
+   "t": 156,
+   "file": "10-39-balloon-flags-9-1-flags.mgcr",
+   "source": "mc1l32",
+   "note": "[carried from bee-height take] (10,39) balloon flags + (9,1) flags; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
+  },
+  {
+   "t": 182,
+   "file": "10-39-balloon-flags-bit-0x20000000-l32-known-bal.mgcr",
+   "source": "mc1l32",
+   "note": "[carried from bee-height take] (10,39) balloon flags bit 0x20000000 (l32 known balloon family)"
+  },
+  {
+   "t": 262,
+   "file": "10-12-flags-lane.mgcr",
+   "source": "mc1l32",
+   "note": "[carried from bee-height take] (10,12) flags lane; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
+  },
+  {
+   "t": 412,
+   "file": "equip-cast-input-reconstruction-wizard0-hand-lef.mgcr",
+   "source": "mc1l32",
+   "note": "[carried from bee-height take] equip/cast input reconstruction: wizard0.hand_left"
+  },
+  {
+   "t": 414,
+   "file": "bee-z-law-fixed-residual-9-0-extra.mgcr",
+   "source": "mc1l32",
+   "note": "[carried from bee-height take] bee z-law FIXED; residual: (9,0) extra; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
+  },
+  {
+   "t": 465,
+   "file": "10-0-fire-z-lane-the-terrain-datum-class-rides-g.mgcr",
+   "source": "mc1l32",
+   "note": "(10,0) fire z lane - the terrain-datum class rides grounded fires (bee-session cause A ledger entry)"
+  },
+  {
+   "t": 870,
+   "file": "9-0-extra-in-port.mgcr",
+   "source": "mc1l32-bee-height",
+   "note": "(9,0) extra-in-port; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
+  },
+  {
+   "t": 951,
+   "file": "bee-z-law-regression-guard-was-the-take-s-story.mgcr",
+   "source": "mc1l32-bee-height",
+   "note": "BEE Z-LAW regression guard - was the take's story: retail sub_1B3C0 z-nudge sign(z-target.z)*v_14, FIXED 2026-08-08 (bee_chase vertical aim + promotion lunge-arm)"
+  },
+  {
+   "t": 981,
+   "file": "bee-z-law-fixed-residual-9-0-flags.mgcr",
+   "source": "mc1l32-bee-height",
+   "note": "bee z-law FIXED; residual: (9,0) flags; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
+  },
+  {
+   "t": 991,
+   "file": "bee-z-law-fixed-residual-9-0-pitch.mgcr",
+   "source": "mc1l32-bee-height",
+   "note": "bee z-law FIXED; residual: (9,0) pitch; f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
+  },
+  {
+   "t": 1181,
+   "file": "bee-z-law-the-bee-speed-atom-closed-2026-08-11-w.mgcr",
+   "source": "mc1l32-bee-height",
+   "note": "bee z-law (see t=951); the bee-speed atom closed 2026-08-11 with the chase-exit trailers (death-tick restore)"
+  },
+  {
+   "t": 1392,
+   "file": "9-0-flags-lane.mgcr",
+   "source": "mc1l32-bee-height",
+   "note": "(9,0) flags lane"
+  },
+  {
+   "t": 2032,
+   "file": "m9-materialize-state-is-damage-deaf.mgcr",
+   "source": "mc1l32-bee-height",
+   "note": "THE DAMAGE-DEAF STATES: (9,0) sub_1CFF0 :23591-623 carries no mailbox prologue, so a materializing mound is damage-DEAF - act_life holds 1000 while its area mail snowballs 400->800->1200 unread. Ledger 2026-08-16b."
+  },
+  {
+   "t": 3771,
+   "file": "meteor-storm-pool-churn-9-0-10-0-extra-in-port-l.mgcr",
+   "source": "mc1l32",
+   "note": "meteor-storm pool churn: (9,0)+(10,0) extra-in-port (l32-full intake, ledger); f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
+  },
+  {
+   "t": 5432,
+   "file": "9-10-castle-ball-extra-in-port-castle-latch-sess.mgcr",
+   "source": "mc1l32",
+   "note": "(9,10) castle-ball extra-in-port - castle-latch session leads family (painter ctor fields); f26/charge raw-lane surfacing \u2014 lanes not compared at freeze"
+  },
+  {
+   "t": 5473,
+   "file": "cast-reconstruction-mana-3-0-player-mana-pair-ra.mgcr",
+   "source": "mc1l32",
+   "note": "cast-reconstruction mana ((3,0)+player.mana pair) - raw-input +/-1 caveat, kept open pending an mc1 roster rule"
+  },
+  {
+   "t": 6718,
+   "source": "mc1l32-quick",
+   "note": "jar pickup polls the carpet at ITS OWN walk slot; retail's poll reads the wizard RECORD off bucket[0] (sub_11950) and the carpet record is installed at the carpet's own walk slot, so a jar ABOVE that slot sees the settled pose and one below it the pre-move pose. mc1l32-quick 6718->6719: carpet slot 14, jar slot 85, spell 7 - |dx| is 662 against last tick's carpet and 421 against this tick's, over a 487 half-extent sum, so only the settled pose grants. The old fixed human_pose_prev fit jars BELOW the carpet only (mc1hwl0 jar 17 / carpet 472), where pre-move and last-tick-settled are the same pose; every certified take's grants sit deep inside the box.",
+   "file": "jar-pickup-polls-the-carpet-at-its-own-walk-slot.mgcr"
+  },
+  {
+   "t": 9218,
+   "file": "the-resisting-press-kills-the-boost-and-the-pair.mgcr",
+   "source": "mc1l32",
+   "note": "THE RESISTING PRESS KILLS THE BOOST AND THE PAIR READS V_14 FROM THE CAPTURE: during a speed burst retail's Type_160 v_12 sits OUTSIDE the +/-80 band (the token overrides target AND actual), so the band test at :55766-73 resolves by SIGN alone - the sustaining press never moves it, the resisting press always does, arming v_14 (:55780), and the token's next pass kills the burst (:65146-50: +48 snaps to 0, no contrail puff, no regen pin). The pair never runs the carpet dispatch, so the import seeds mc1_v14 from the captured Type_160 +14 (sampled post-tick = exactly what a below-carpet token reads) and player.accel from the human's mid-burst (12,2)/(12,21) token. Pre-law pair 9218->9219: retail (12,2) f48 7->0 against the port's decrement to 6, one +100 regen missed, an extra (10,2) contrail - five cancels across the take's accel play."
+  },
+  {
+   "t": 15112,
+   "file": "the-portal-vortex-ctor-stamps-sclass-sub-3b300-w.mgcr",
+   "source": "mc1l32",
+   "note": "THE PORTAL VORTEX CTOR STAMPS SCLASS: sub_3B300 writes +66=3 / +67=-1 (:47343-44) and +154 takes the ground+640 hover z (:47353); the port's model-34 arm left sclass at the NewEvent 255 - one unstamped byte that capped the whole take's free-run horizon at the portal's mid-take birth (t=15113, the graded sclass shadow lane)."
+  },
+  {
+   "t": 15113,
+   "file": "the-portal-hum-is-a-first-tick-latch-sub-26a60-o.mgcr",
+   "source": "mc1l32",
+   "note": "THE PORTAL HUM IS A FIRST-TICK LATCH: sub_26A60 opens on flags bit 1 (:29186-89) - latch + positional sound 21, the same shape as the MC2 pad's - and a timed portal's expiry carries sound 20 (:29196-97). The port's portal_tick had neither; the fresh vortex's flags read 6, not 4, from its first tick on. Retail's warp scan walks EVERY wizard (var_u16_10) - the rival-warp arm stays owed, the register the MC2 pad already carries."
+  },
+  {
+   "t": 21715,
+   "file": "the-owned-spell-register-is-derived-sub-45c10-55.mgcr",
+   "source": "mc1l32",
+   "note": "THE OWNED-SPELL REGISTER IS DERIVED (sub_45C10 :55310-19, called as sub_45C90's FIRST statement :55342): memset var_676 then re-register every +532 acquisition entry under its record's model byte, every tick, at the carpet's own walk slot. The phase-2 heal jar at 84 grants at 21715 (seat write above the carpet); its re-minted twin at 355 polls the same pickup point at 21716 and must take the already-known FLAG-TOUCH - the carpet's 21716 rebuild registered 84 before slot 355 polled. The port's hand-maintained register (imported +676 = pre-rebuild) re-granted and minted an extra (12,1) at 823. NOT the banked +628 timer: learn[] is empty through the whole incident."
+  },
+  {
+   "t": 22114,
+   "file": "the-crab-eats-in-two-dimensions-sub-1c170-s-abso.mgcr",
+   "source": "mc1l32",
+   "note": "THE CRAB EATS IN TWO DIMENSIONS: sub_1C170's absorb probe is sub_423D0 (:23068) - x/y ALONE - and the port's added z term made a ball under the crab read past the 5*actSpeed absorb ring, so the port kept chasing where retail ate: mana 1500 vs 1000, the 5000-step growth ladder (sub_38820: a size-up adds 5000 max life) one rung behind, the eaten ball's 0x400 unflipped, and every later life row skewed. The eat and steer ball tests are +64/+65 ALONE (:23063 - no 0x400; a soft-killed ball stays a target until the reap)."
+  },
+  {
+   "t": 23672,
+   "file": "the-crab-s-nearest-ball-scan-walks-the-tick-top.mgcr",
+   "source": "mc1l32",
+   "note": "THE CRAB'S NEAREST-BALL SCAN WALKS THE TICK-TOP BALL CHAIN (+36466, bucket[1]) with the +65==39 per-node gate ALONE (:22928-45): no 0x400, no life test - a ball eaten mid-tick still scores, a ball born mid-tick is invisible. The port scanned the LIVE POOL with class/model/0x400 gates - the chain-vs-pool bug in its fourth costume. Pre-law pair 23672->23673: retail acquires slot 825, the port holds 0."
+  },
+  {
+   "t": 24700,
+   "file": "the-meteor-trail-puffs-after-the-core-the-m3-wra.mgcr",
+   "source": "mc1l32",
+   "note": "THE METEOR TRAIL PUFFS AFTER THE CORE: the m3 wrapper sub_53070 runs sub_52770 FIRST (flight step, detonation payload, soft kill) and only then mints the damage-suppressed (10,1) seeder at the POST-step position, gated on +64 alone (:63027-38) - the dying detonation tick still puffs. The port minted the puff pre-move: every trail puff born one flight step behind (the take's ~1,450-pair (10,1)/(10,0)/(10,17) x/y/z families, ~99% of all dirty rows), and on the detonation tick the payload/puff free-stack pops landed in swapped slots (this pair: retail (10,17)@53 + (10,1)@20, the port inverted)."
+  },
+  {
+   "t": 29834,
+   "file": "a-newborn-blast-ring-s-first-tick-scans-its-own.mgcr",
+   "source": "mc1l32",
+   "note": "A NEWBORN BLAST RING'S FIRST TICK SCANS ITS OWN TILE ALONE: retail's ch0 area window radius is (+80+255)>>8 with NO floor - a (10,17) field born on its victim (slot 260, minted by the meteor at 971 during the previous tick, walk-cursor law: not dispatched on its birth tick) runs its first dispatched tick with entry f26=0, extents 0, so its window is the single ch0 back-biased tile ((pos-128)/256), which does not even cover the ring's own position tile - the crab standing ON the impact point is missed for exactly that one tick. The port's .max(1) 3x3 floor (held back 2026-08-12 as corpus-inert; mc1l32 pays the receipt) landed the newborn's f44/max_life=1000 one tick early: this pair retail deals 883, the port dealt 1883. The floor stays MC2-only (the arrow direct-hit / chord-march compensating family)."
+  },
+  {
+   "t": 29840,
+   "file": "the-m5-regen-trailer-runs-on-the-death-tick-too.mgcr",
+   "source": "mc1l32",
+   "note": "THE M5 REGEN TRAILER RUNS ON THE DEATH TICK TOO: sub_1BF60 (:22959-65) and sub_1C110 (:22976-82) call the shared creature core and then run 'if (act < max) act += max >> 7' UNCONDITIONALLY - the fatal hit returns out of the core back into the wrapper, whose trailer credits the fresh corpse (act deep negative, trivially < max). The port's Inbox::Dead arm returned before the trailer, so every crab death overshoot read exactly max>>7 low: this pair the 15000-max crab at 324 dies retail -1007 = -1124 + 117; siblings pin the quantum at 39/78/312 for max 5000/10000/40000."
+  },
+  {
+   "t": 30954,
+   "file": "the-death-tick-regen-quantum-scales-with-max-lif.mgcr",
+   "source": "mc1l32",
+   "note": "THE DEATH-TICK REGEN QUANTUM SCALES WITH MAX LIFE: the same m5 wrapper-trailer law as t=29840, on the biggest crab in the take - slot 63's overshoot reads retail -330 vs the trailer-less port's -642, a delta of 312 = 8*39 = max_life >> 7 for a 40000-max crab. One law, two receipt sizes."
+  },
+  {
+   "t": 37298,
+   "file": "a-trigger-volume-probes-the-carpet-as-of-its-own.mgcr",
+   "source": "mc1l32",
+   "note": "A TRIGGER VOLUME PROBES THE CARPET AS OF ITS OWN WALK SLOT: the class-11 handlers read the pose the mid-walk swap has produced by their slot - sub_5A090's bucket[0] carpet walk and sub_5A120's wizext sweep read live records, and mc1l32's carpet sits at slot 14, BELOW the village volumes, so retail probes them with the SETTLED pose. The (11,0) one-shot at slot 17 fires its house-pair disposition off the post-move overlap: this pair retail mints the (2,1) house at 18 + the (11,0) spawner at 19 (life 300, village id 10) and soft-kills 17; the port - feeding every volume the human_pose_prev echo, an overfit of mc1l1's carpet-above-all-volumes slot layout - fired ~250 ticks late (the t=37544/37809 slot-allocation echoes were its late mints)."
+  },
+  {
+   "t": 37308,
+   "file": "the-repeating-trigger-s-rearm-counts-on-the-mid.mgcr",
+   "source": "mc1l32",
+   "note": "THE REPEATING TRIGGER'S REARM COUNTS ON THE MID-WALK POSE: sub_59AE0's rearm arm decrements +26 only while sub_5A120's wizard sweep misses (:67253-57) - the same settled-pose law as the t=37298 fire, on the (11,2) village heart at slot 28. The prev-echo port held where retail counted (f26 retail 9, port 10); the whole +-1 cadence family (17 pairs, 37308..43570) is this one probe reading yesterday's pose."
+  },
+  {
+   "t": 39873,
+   "file": "the-touchdown-breaks-settled-minus-step-the-mc1l.mgcr",
+   "source": "mc1l32",
+   "note": "THE TOUCHDOWN BREAKS SETTLED-MINUS-STEP (the mc1l42 law's pair face): the death-fall trail's (10,1) rides the post-move pre-gravity scratch, reconstructed in a pinned pair as settled z minus the applied +46 - exact while the mover's ride is in the settled pose, broken on the touchdown tick where the floor clamp lands the carpet at 6375 and back-derivation reads 6403 against the true 6391 (= the frozen-stick tick-entry z). The trail child minted 12 high and the whole death-cascade mint chain shifted one draw (slot 51 z, slot 75 rand)."
+  }
+ ]
 }

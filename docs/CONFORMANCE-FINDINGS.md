@@ -19675,3 +19675,110 @@ carries `demolish` at t=584 and t=15903 ONLY (traced). It is not
 enumerating what can write a (3,2)'s `life_0x8 = -1` in the tick
 BEFORE slot 252's own dispatch — the ordering fits a kill landing
 first and case 3 running afterwards on a dead record.
+
+## SESSION 2026-08-26b — THE CRAB EGG'S DRAW GATE + THE JAR POLL'S WALK
+## PHASE (mc1l32-quick opened at 6718 → 9927)
+
+Two fixes, one visual and one conformance, and they share a shape: a
+lane the graded projection cannot see, and a phase question the
+certified corpus never posed.
+
+`mc1l32-quick.mgcr` is swept for the first time — a SECOND playthrough
+of the certified level 32, 41,600 ticks, 1 segment, 0 gaps.
+
+### THE CRAB EGG WAS NEVER DRAWN — `(10,52)` missing from `drawable`
+
+Player-reported ("crabs multiply, nothing visible to multiply from"),
+and banked as a suspected MISLABEL with the wrong sprite. It was
+neither. Retail's ctor `sub_3B860` (:47613; HW `sub_3BBE0` :43740,
+byte-identical) stamps class 10 / model 52 / sprite-stats **row 205**,
+and the port's arm is verbatim — `dump-state --port` on mc1l32 t=21700
+slot 62 shows every lane equal, `type86 = 205` included. The egg
+incubates and hatches bit-exactly (mc1l32 is certified across its one
+egg, t=21644..22246; retail leaves the ctor's `f26 = 600` standing
+rather than the layer's 100..190 timer at :22947 — measured, do not
+"fix" it on a code read). Row 205 is the ONLY `SPRITE_STATS` row
+pointing at TMAPS 228, the grey cracked shell — unreachable art.
+
+**It was simply absent from the MC1 class-10 allowlist in
+`world.rs::drawable`.** The `(10,78)` Magic Mine bug (ROADMAP, landed
+2026-07-21) in its second costume, with its own warning comment four
+lines above the missing line.
+
+⭐⭐⭐ **A CERTIFIED TAKE PROVES NOTHING ABOUT WHAT IS DRAWN.** The
+graded observable projection carries no `type86`/`frame88` lane,
+`mgc-conform` never calls `live_poses`, and the app's `--replay-check`
+grades the HUMAN pose only — **nothing in the harness grades entity
+draw at all.** Confirm which projection a lane is in before concluding
+certification covers it.
+
+Swept the family rather than the bug: every MC1 creator-table ctor's
+`sub_36FA0_37360` argument, crossed against a `(class,model)` census
+of all 14 MC1 recordings. `(10,52)` was the ONLY corpus-occurring MC1
+class-10 model carrying a ctor sprite and not drawn. `(10,12)` (possess
+flash, row 41) carries one and stays excluded deliberately; models
+9/11/15/17/18/41/42/53/55 occur and correctly carry none. Retail also
+minimap-plots the egg (case 0xA falls to `LABEL_32` for every model but
+18/34/39), which the restored pose brings back. MC1-gated — MC2's
+`(10,52)` is the invisible castle anchor. Pinned by
+`crab_egg_is_drawable_with_its_shell_sprite`.
+
+### LAW — THE JAR PICKUP POLL READS THE CARPET AT ITS OWN WALK SLOT
+### (mc1l32-quick 6718 → 9927, +3,209)
+
+The take's FIRST divergence, and the only dirty pair in its first
+6,720: at t=6719 retail grants spell 7 off jar slot 85 — `+70` 23 → 21
+(`spell*3`), bit0 set, `+42` = 14, `hand_left` → 7 — and re-mints the
+phase-2 twin at slot 33. The port did nothing.
+
+The port had the whole grant machine; the gate that failed was the
+AABB, polled against a fixed `human_pose_prev`. **The phase is SLOT
+ORDER, not a fixed frame.** Retail's poll reads the wizard's own record
+off bucket[0] (`sub_11950(v7x, a1x)`), and the carpet record is
+installed at the carpet's OWN walk slot — so a jar below that slot sees
+the pre-move pose and a jar above it the settled one. `human_pose` is
+exactly that register (`adopt_walk_pose` advances it mid-walk); the
+record itself cannot be read directly because a pinned pair leaves it
+uninstalled until the walk slot.
+
+The numbers: carpet slot 14, jar slot 85, half-extent sum 487. |Δx| is
+**662** against last tick's carpet and **421** against this tick's — the
+settled pose grants, the stale one misses.
+
+⭐⭐ **THE OLD RULE FIT ONLY JARS BELOW THE CARPET**, where pre-move and
+last-tick-settled are the same pose. That is the whole mc1hwl0
+measurement it was built on (jar 17, carpet 472: current-pose granted
+at t=10 against retail's t=13). Every certified take's grants sit deep
+inside the box — mc1l32's own slot-23 grant at t=10298 is ABOVE carpet
+14 and both rules hit it — so the corpus could not tell them apart
+until a take put a grant near the box edge above the carpet.
+
+⚠ **The NATIVE pickup was already right**: `try_pickup` polls via
+`player_overlap(i, ctx)`, the mid-walk ctx. Two arms of the same
+mechanic disagreed and only the strict-retail one was wrong. *When two
+paths model one retail behavior, diff them before trusting either.*
+
+Same family as the already-pinned `a-trigger-volume-probes-the-carpet-
+as-of-its-own` (t=37298) and the mid-walk pose law — MC1 has a walk-
+phase question wherever a walker reads the carpet.
+
+Fixture `jar-pickup-polls-the-carpet-at-its-own-walk-slot.mgcr`
+(t=6718, source mc1l32-quick — the level's first fixture drawn from the
+second take), A/B-proven: with the arm reverted it is the ONLY one of
+the 35 that fails.
+
+### NON-REGRESSION
+
+All eight MC1 + both MC2 certified takes hold END, and every guard line
+is byte-identical to the session-44 baseline — mc1hwl0 included, which
+is the one that matters here (its jar sits below its carpet).
+
+### NEXT HEAD ON THIS TAKE
+
+t=9928, `(9,0) slot 2: x,y,z,speed` — a fireball parting in position
+and speed.
+
+⚠ HYGIENE, unrelated: two mc1l32 manifest rows (t=81, t=2032) carry
+hand-shortened `file` names that no longer match the slug their note
+generates, so `cut_fixture_files.py` would re-cut them as duplicates
+under the slug name. The runner is unaffected (it reads `file`).

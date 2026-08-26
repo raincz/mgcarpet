@@ -51,6 +51,57 @@ and lists what remains; history lives in the archive and git.
 
 ## Remaining work
 
+### MC1 crab eggs — CLOSED 2026-08-26 (the mine bug's MC1 twin)
+
+Player-reported: crabs multiply, but nothing is ever visible to multiply
+*from*. The suspicion was a mislabelled entity wearing the wrong sprite.
+It was neither — **`(10,52)` was missing from the MC1 class-10 draw
+allowlist** (`world.rs::drawable`), the same defect as the Magic Mine's
+`(10,78)` below, in its second costume.
+
+Everything else was already right, and measured so:
+- Retail's ctor `sub_3B860` (:47613; HW `sub_3BBE0` :43740, identical)
+  stamps class 10 / model 52 / sprite-stats **row 205**, and the port's
+  arm is verbatim. `dump-state --port` on mc1l32 t=21700 slot 62 shows
+  every lane equal, `type86 = 205` included.
+- The egg incubates and hatches bit-exactly. mc1l32 is certified across
+  its one egg (t=21644..22246, ~600 ticks — retail leaves the ctor's
+  `f26 = 600` standing rather than the layer's 100..190 timer).
+- The import label is `"Crab egg"` and row 205 is the **only**
+  `SPRITE_STATS` row pointing at TMAPS sprite 228 (the grey cracked
+  shell, 49x49, single frame) — so that art was unreachable art, which
+  is why nobody noticed it sitting in the bake.
+
+**Why certification could not see it:** the graded observable projection
+carries no `type86`/`frame88` lane. A take can be bit-exact for 52,140
+ticks with the entity drawing nothing. Same lesson as the mine: entity
+counts and "the player can see it" are different assertions.
+
+**Swept the family, not just the egg.** Cross-referencing every MC1
+creator-table ctor's `sub_36FA0_37360` sprite argument against the
+allowlist, and against a `(class, model)` census of all 14 MC1
+recordings: `(10,52)` was the *only* sprite-carrying MC1 class-10 model
+that occurs in the corpus and was not drawn. `(10,12)` (possess flash,
+sprite row 41) also carries a sprite and stays excluded deliberately —
+retail's ctor clears its draw bit. Models 9/11/15/17/18/41/42/53/55 do
+occur and correctly carry no ctor sprite.
+
+Retail also plots the egg on the minimap (the class-0xA arm falls
+through to `LABEL_32` for any model that is not 18/34/39), which the
+restored pose brings back for free, in wild magenta.
+
+MC1-gated: MC2's `(10,52)` is the invisible castle anchor (`mc2::tail`).
+Pinned by `crab_egg_is_drawable_with_its_shell_sprite`, A/B-proven to
+fail with the arm reverted.
+
+⚠ Corpus note: `mc1l32-quick` carries **6,088** egg-ticks against
+`mc1l32`'s 603 — by far the better egg witness. It was swept in the
+same session and paid immediately: its FIRST divergence (t=6719) was a
+real MC1 law, the jar pickup poll's walk phase, worth +3,209 ticks. See
+CONFORMANCE-FINDINGS.md § "SESSION 2026-08-26b"; the take is now a
+guard line in `conformance/brief-baseline.txt` and its next head is
+t=9928 `(9,0) slot 2`.
+
 ### MC1 castle datum — CLOSED as FAITHFUL 2026-07-22 (opt-in candidate banked)
 
 The reported "peak castle sinks as it upgrades" is retail MC1 behavior,
