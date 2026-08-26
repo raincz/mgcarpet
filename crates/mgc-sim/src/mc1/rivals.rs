@@ -1171,7 +1171,10 @@ impl World {
     /// timers freeze. The per-slot gate is `+676 == 0` alone
     /// (:19407) — no allowed test, no known test.
     fn rival_learn_tick(&mut self, ri: usize) {
-        if self.player.state != LifeState::Alive {
+        // The clock is the TICK-TOP roster's model-0 entry, so a
+        // mid-tick death still clocks this tick (`human_bucket_alive`,
+        // the :52254 membership sample).
+        if !self.human_bucket_alive {
             return;
         }
         for s in 0..SPELL_COUNT {
@@ -1327,6 +1330,106 @@ impl World {
             if self.rivals[ri].mana_delta > 0 {
                 self.rivals[ri].mana_delta = 0;
             }
+        }
+        if self.g.ent[m].f26 > 0 {
+            self.g.ent[m].f26 -= 1;
+        }
+    }
+
+    /// THE REBOUND TOKEN'S OWN MACHINE — retail's `sub_573F0_57920`
+    /// (remc1 :65774 / remc1hw :61996, class-12 state 0x2A), run at
+    /// the token's pool slot from `class12_tick` in both encodings;
+    /// the human's twin is `manifestation_tick`'s spell-14 arm. The
+    /// bare skeleton: while the `+48` burst is live, the WHOLE
+    /// `sub_55DD0` gate runs every tick (owner alive, Rebound's 8000
+    /// castle store, FULL tick adds the purse); a pass sets the
+    /// OWNER's +17 bit 7 — our 0x8000, the deflection bit
+    /// `proj_move_and_hit` reads — runs `sub_55E80` (full → the debit
+    /// on the regen delta, mid-burst → the positive-delta pin) and
+    /// takes the shared decrement; a refusal drops the burst to 1 for
+    /// that same decrement, and the bit it leaves standing falls to
+    /// the NEXT pass's `+48 <= 0` clear arm — the gate-fail path
+    /// touches no flags.
+    ///
+    /// mc1hwl0 t=5592: rival 1's defense cast arms token 479 to 101
+    /// at the carpet's slot 473, and retail's SAME-TICK token pass
+    /// (479 walks after 473) gates, publishes carpet `flags`
+    /// 12 → 32780 and decrements to 100. The port used to drive this
+    /// from `rival_refresh_buffs` at the RIVAL's own tick — which
+    /// runs before the defense cast — so the bit lagged one tick and
+    /// the counter sat one above retail for the burst's whole life.
+    pub(crate) fn rival_rebound_token_tick(&mut self, m: usize, ri: usize) {
+        let i = self.rivals[ri].ent as usize;
+        if i == 0 {
+            return;
+        }
+        if self.g.ent[m].f26 <= 0 {
+            self.g.ent[i].flags &= !0x8000;
+            return;
+        }
+        let def = &self.spells()[14];
+        let full = self.g.ent[m].f26 == def.count as i16;
+        let cost = def.possess_mana;
+        if self.rival_token_gate(ri, 14, full) {
+            self.g.ent[i].flags |= 0x8000;
+            // sub_55E80 from the token (:64942-56).
+            let r = &mut self.rivals[ri];
+            if full {
+                let c = cost.min(i32::MAX as u32) as i32;
+                r.mana_delta = if r.mana_delta >= 0 {
+                    -c
+                } else {
+                    r.mana_delta - c
+                };
+            } else if r.mana_delta > 0 {
+                r.mana_delta = 0;
+            }
+        } else {
+            self.g.ent[m].f26 = 1;
+        }
+        if self.g.ent[m].f26 > 0 {
+            self.g.ent[m].f26 -= 1;
+        }
+    }
+
+    /// THE SHIELD TOKEN'S OWN MACHINE — retail's `sub_566C0` (:65266,
+    /// class-12 state 12), the rival twin of
+    /// [`World::mc1_shield_token_tick`]: the same `sub_573F0` skeleton
+    /// as Rebound's, but the owner bit is +17 0x40 (our 0x4000) and
+    /// there is NO clear arm — the bit is SET-only here and cleared
+    /// PER-ABSORB by the damage intake (:55700-07,
+    /// [`Self::rival_mail_block`]'s quarter), so an expired shield
+    /// still quarters exactly one more hit.
+    ///
+    /// mc1hwl0 t=5593: rival 1's defense ladder falls through to
+    /// Shield (Rebound live from 5592), the commit debits −1000 and
+    /// retail's same-tick token pass publishes carpet 473's `flags`
+    /// 0x800C → 0xC00C. The refresh-driven port paid but never
+    /// published, and no rival shield ever quartered a hit.
+    pub(crate) fn rival_shield_token_tick(&mut self, m: usize, ri: usize) {
+        let i = self.rivals[ri].ent as usize;
+        if i == 0 || self.g.ent[m].f26 <= 0 {
+            return;
+        }
+        let def = &self.spells()[4];
+        let full = self.g.ent[m].f26 == def.count as i16;
+        let cost = def.possess_mana;
+        if self.rival_token_gate(ri, 4, full) {
+            self.g.ent[i].flags |= 0x4000;
+            // sub_55E80 from the token (:64942-56).
+            let r = &mut self.rivals[ri];
+            if full {
+                let c = cost.min(i32::MAX as u32) as i32;
+                r.mana_delta = if r.mana_delta >= 0 {
+                    -c
+                } else {
+                    r.mana_delta - c
+                };
+            } else if r.mana_delta > 0 {
+                r.mana_delta = 0;
+            }
+        } else {
+            self.g.ent[m].f26 = 1;
         }
         if self.g.ent[m].f26 > 0 {
             self.g.ent[m].f26 -= 1;
@@ -1588,10 +1691,19 @@ impl World {
             }
             self.g.ent[m].f26 > 0
         };
-        let shield = get(4);
         let invisible = get(12);
-        let rebound = get(14);
-        let driving = self.rival_token(ri, 14).is_some();
+        // Shield (4) and Rebound (14) are NOT clocked here: their
+        // tokens run retail's own machines at the token's pool slot
+        // ([`Self::rival_shield_token_tick`] /
+        // [`Self::rival_rebound_token_tick`], both encodings), which
+        // own the counter, the owner's 0x4000/0x8000 bits and the
+        // regen pin. The planner flags just mirror the live bursts.
+        let shield = self
+            .rival_token(ri, 4)
+            .is_some_and(|m| self.g.ent[m].f26 > 0);
+        let rebound = self
+            .rival_token(ri, 14)
+            .is_some_and(|m| self.g.ent[m].f26 > 0);
         // Heal channel (1): 5% per tick while live, paid per tick.
         let heal_m = self.rival_token(ri, 1).unwrap_or(0);
         let healing = heal_m != 0 && self.g.ent[heal_m].f26 > 0;
@@ -1626,29 +1738,6 @@ impl World {
                 self.g.ent[i].flags |= 0x20;
             } else {
                 self.g.ent[i].flags &= !0x20;
-            }
-        }
-        // Mirror the Rebound token onto the entity's +17 bit 7 (our
-        // 0x8000) — the ONLY thing that makes a rival's Rebound do
-        // anything. The token's own tick is what publishes the bit in
-        // retail: the class-12 handler 0x2A (`str_2563D8` entry 0x2A,
-        // :4996) is `sub_573F0_57920` (remc1 :65774 / remc1hw :61996),
-        // which sets `owner->+17 |= 0x80` on every tick the burst is
-        // live and clears it the tick the burst runs out. The port
-        // skips rival-owned manifestations in `class12_tick` (they are
-        // driven from here instead), so the bit was never published and
-        // the deflection reader (`proj_move_and_hit`, `flags & 0x8000`,
-        // :62848-62890) never saw a rival Rebound — nothing ever
-        // bounced off an AI wizard. Retail's clear arm is
-        // unconditional, so the port clears here too — but ONLY while
-        // the port is the one driving the token (`rival_token`): under
-        // a conformance import the bit belongs to retail's own token
-        // tick and the port must not touch it.
-        if driving {
-            if rebound {
-                self.g.ent[i].flags |= 0x8000;
-            } else {
-                self.g.ent[i].flags &= !0x8000;
             }
         }
     }
@@ -2273,7 +2362,10 @@ impl World {
             }
             false
         };
-        if self.player.state == LifeState::Alive
+        // Candidacy is TICK-TOP bucket[0] membership, not live state
+        // (mc1hwl0 t=7592: the rival's own kill lands before its
+        // selector runs, and retail still picks the corpse).
+        if self.human_bucket_alive
             && judge(
                 PLAYER_TARGET,
                 self.human_pose.0,
@@ -2718,8 +2810,19 @@ impl World {
                     if cast && facing < 28 {
                         self.g.ent[t].f144 = self.rivals[ri].ent;
                         // Settled balls never re-run the tick's
-                        // re-derive — recolor at the claim.
-                        self.g.ball_resize(t);
+                        // re-derive — recolor at the claim. BALLS
+                        // ONLY: the re-derive this stands in for is
+                        // the (10,39) tick's own (sub_274D0), which a
+                        // claimed GRAVE never runs — retail's grave
+                        // keeps sprite 65 (+78 100) after a rival
+                        // claim, and the recolored port grave's
+                        // +78 25 skewed every acquire measured at its
+                        // aim-z (mc1hwl0 t=7853: the human's claim
+                        // bolt pitches 2046 against retail's 2041 and
+                        // the whole flight parts by 7 z-units).
+                        if self.g.ent[t].model65 == 39 {
+                            self.g.ball_resize(t);
+                        }
                         self.g.snd(4, t); // the claim chime (:29444)
                         // The state STAYS Possess (:18250-56 writes
                         // no +415): the ball is now MINE, so the
@@ -4207,11 +4310,10 @@ mod tests {
             "the token armed short of its {} count",
             SPELLS[14].count
         );
-        // The bit lands one tick behind the arm: the token publishes
-        // on its OWN tick, which for a rival is the next pass of
-        // `rival_refresh_buffs` (retail: the class-12 handler's own
-        // slot in the entity loop).
-        w.tick(away(), PlayerCommand::default());
+        // The token publishes on its OWN pool slot's tick
+        // (sub_573F0): minted after the carpet, it gates and sets the
+        // bit the SAME tick the defense cast arms it — by the time
+        // the arm is observable the bit is up.
         assert!(
             rebound_bit(&w, 0),
             "the armed token did not publish the 0x8000 deflection bit"
@@ -4242,12 +4344,31 @@ mod tests {
             }
         }
         assert_eq!(token(&w, 0), 0, "the token never expired");
+        // The clear is the token's NEXT pass (sub_573F0's `+48 <= 0`
+        // arm): the tick the counter reaches 0 still ran the gate arm
+        // and left the bit standing.
+        w.tick(away(), PlayerCommand::default());
         assert!(
             !rebound_bit(&w, 0),
             "the lapsed token left the deflection bit set"
         );
 
         // ---- re-up ----------------------------------------------------
+        // The burst now really pays: sub_55E80's full-tick −1000 debit
+        // plus its 101-tick regen pin drained the purse, and both the
+        // commit readiness (:19260-63) and the token's own full-tick
+        // gate refuse a broke wizard — retail behavior. Let the
+        // economy restock before the fresh threat.
+        for _ in 0..32 {
+            if w.rivals[0].mana >= SPELLS[14].possess_mana {
+                break;
+            }
+            w.tick(away(), PlayerCommand::default());
+        }
+        assert!(
+            w.rivals[0].mana >= SPELLS[14].possess_mana,
+            "the economy never restocked the re-up purse"
+        );
         plant_threat(&mut w, 0);
         let mut re_upped = false;
         for _ in 0..8 {

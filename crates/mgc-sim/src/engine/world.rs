@@ -878,6 +878,16 @@ pub struct World {
     /// the rival scans (the original reads the wizard entity; ours
     /// lives outside the pool).
     pub(crate) human_pose: (u16, u16, i16),
+    /// The human's TICK-TOP bucket[0] membership — retail's class-3
+    /// chain rebuild (`actLife >= 0 && !(flags & 0x10)`, :52254)
+    /// sampled once at the tick head, which is what every roster walk
+    /// tests, NOT the live `player.state`. A human dying MID-tick is
+    /// still a candidate for every walker after his slot that tick
+    /// (and the respawn tick's chain was built without him). mc1hwl0
+    /// t=7592: rival 473's own kill lands at slot 472, and the
+    /// selector at 473 must still pick the corpse — the live-state
+    /// port fell through to the ball claim, `chase` 472 vs 574.
+    pub(crate) human_bucket_alive: bool,
     /// The previous tick's settled pose — retail pass order for laws
     /// that read the carpet BEFORE its slot runs (the strict-retail
     /// jar pickup poll: jars sit low in the pool, the carpet's slot
@@ -1909,6 +1919,7 @@ impl World {
             kill_tally: [[0; 8]; 8],
             start_markers,
             human_pose: (0, 0, 0),
+            human_bucket_alive: true,
             human_pose_prev: (0, 0, 0),
             human_yaw: 0,
             human_yaw_prev: 0,
@@ -4023,7 +4034,18 @@ impl World {
     /// law (the carpet must not lag a rising tower by one tick).
     pub fn tick_flight(&mut self, drive: &mut FlightDrive<'_>, cmd: PlayerCommand) {
         let entry = conformance::integer_pose(drive.s);
-        self.tick_inner(entry, cmd, Some(drive), None)
+        self.tick_inner(entry, cmd, Some(&mut *drive), None);
+        // "Next frame's token fires measure from THIS frame's settled
+        // carpet" — the cast-phase stamp can only see the ENTRY pose
+        // (settled last tick), so re-stamp from the post-walk state.
+        // Retail's token emission reads the wizard RECORD's own lanes
+        // (sub_56510 :65243-51), which for the below-carpet token
+        // slots are exactly this settled pose. mc1hwl0 t=7853: the
+        // claim bolt's dest projection wants (yaw 178, pitch 72, z
+        // 3238) — the stale entry stamp held last tick's aim mid
+        // mouse-flick (pitch ≈ −2, z 7 low) and skewed the spawn and
+        // the homing re-aim.
+        self.mc1_cast_pose = conformance::integer_pose(drive.s);
     }
 
     /// The shared turn body. `player` feeds the trigger volume probes,
@@ -4273,6 +4295,11 @@ impl World {
         self.g.ball_chain.cut = usize::MAX;
         self.g.wiz_chain.list = wiz_chain;
         self.g.wiz_chain.cut = usize::MAX;
+        // The out-of-pool human's bucket[0] membership, sampled HERE
+        // like every pool member's (`actLife >= 0` at the rebuild):
+        // a mid-tick death or respawn does not move it until the next
+        // tick top.
+        self.human_bucket_alive = self.player.state == LifeState::Alive;
         self.g.proj_chain.list = proj_chain;
         self.g.proj_chain.cut = usize::MAX;
         self.g.bldg_chain.list = bldg_chain;
@@ -6420,6 +6447,20 @@ impl World {
         // corpse was still censusing).
         self.player.mana_max = WIZARD_BASE_MANA;
         self.player.mana = WIZARD_BASE_MANA;
+        // THE GRUDGE AMNESTY (:55037-40): every OTHER wizard body on
+        // the tick-top chain (`+65 <= 1`, `+24 != mine`) has its hate
+        // toward the respawned one stamped to `(u16)-24609` = 40927 —
+        // freshly UNDER the wealth-scaled hated bar, so the killers
+        // let the pauper alone until hate regrows. mc1hwl0 t=7629:
+        // rival 1's hate[0] drops 56998 → 40927 on the respawn, and
+        // at t=7796 its selector therefore STAYS on the mana ball
+        // where the port's unreset 56xxx re-elected AttackWizard
+        // (`chase` 574 vs 472).
+        for r in 0..self.rivals.len() {
+            if self.rivals[r].ent != 0 && !self.rivals[r].eliminated {
+                self.rivals[r].hate[0] = 40927;
+            }
+        }
         // Jar re-instantiation (:54884-923): every remembered model
         // returns as an owned manifestation AT THE WIZARD'S SEAT
         // (:54894 spawns on `v2x->+72`); the scattered decaying jars
@@ -6471,6 +6512,14 @@ impl World {
             if self.player.death_owned[s] && !order.contains(&s) {
                 order.push(s);
             }
+        }
+        if std::env::var_os("MGC_ACQ_TRACE").is_some() {
+            eprintln!(
+                "[regrant] t={} seat={seat:?} order={order:?} acq={:?} owned={:?}",
+                crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                self.mc1_acq,
+                self.player.owned
+            );
         }
         for s in order {
             if !self.player.death_owned[s] {
@@ -6943,7 +6992,13 @@ impl World {
             return Some(self.player.owned[id] as usize);
         }
         let m = self.g.new_event()?;
-        let f44 = self.spells()[id].damage.min(u16::MAX as u32) as u16;
+        // ⚠ The GAME's table, not the base one: HW forks spell 20's
+        // whole row (count 26, req 60000, damage 5000 — `sub_3C2B0`
+        // hw:44266). The respawn re-mint caught a base-table read
+        // here: mc1hwl0 t=7629 re-mints (12,20) at slot 24 with
+        // retail `+50` 26 / `+140` 192 against the port's 51 / 98.
+        let def = self.spells()[id];
+        let f44 = def.damage.min(u16::MAX as u32) as u16;
         {
             let e = &mut self.g.ent[m];
             e.class64 = 12;
@@ -6971,7 +7026,6 @@ impl World {
             // The retail arm of the `castle_recast_cost` patch READS
             // the +136 cache (and the castle tick's re-stamp); the
             // patched arm live-derives and ignores it.
-            let def = SPELLS[id];
             e.f50 = def.count as i16;
             e.f136 = def.possess_mana as i32;
             e.f140 = def.possess_mana as i32 / def.count.max(1) as i32;
@@ -7275,6 +7329,10 @@ impl World {
             wiz_charge: _,
             kill_tally,
             human_pose,
+            // Re-stamped at every tick top before any reader (the
+            // bucket[0] membership sample) — hash-quiet like the
+            // dirty flags.
+            human_bucket_alive: _,
             // A one-tick echo of the (hashed) pose stream, fully
             // derived — hash-quiet like the dirty flags.
             human_pose_prev: _,
@@ -7984,6 +8042,17 @@ impl World {
                 e.f80 *= 2;
                 e.f82 *= 2;
                 e.f84 *= 2;
+                // The return-path dest (:65247-49): the CASTER's own
+                // position — raw z, not the muzzle's lifted one —
+                // projected 10240 along the live aim (sub_41EC0).
+                // mc1hwl0 t=7853 replays it to the unit: (39016,
+                // 15164, 3238) + (yaw 178, pitch 72) → (44204, 6627,
+                // 995).
+                let mut d = (p.x, p.y, p.z);
+                Gen::polar_step(&mut d, p.heading, pitch, 10240);
+                e.dest_x = d.0;
+                e.dest_y = d.1;
+                e.site_z = d.2;
             }
             // Meteor detonates into the growing fire-ring blast (c10
             // m17): rings of fires along the round SEARCH annuli +
@@ -9079,8 +9148,9 @@ impl World {
             // tokens (the mint registry, same discriminator as the
             // strict arm below); a RIVAL's launcher tokens run their
             // own burst machine at this slot (retail's sub_56090 —
-            // fire at full, debit, freeze, decrement), the buff set
-            // stays with the rival tick's refresh.
+            // fire at full, debit, freeze, decrement) and Rebound
+            // runs its sub_573F0 skeleton here too; the remaining
+            // buff set stays with the rival tick's refresh.
             let spell = (t - MANIFEST_BASE) as usize;
             if spell < SPELL_COUNT {
                 if self.player.owned[spell] == i as u16 {
@@ -9096,6 +9166,15 @@ impl World {
                         // (sub_57610 — fire once at full, then the
                         // in-transit charge pin).
                         self.rival_castle_token_tick(i, ri);
+                    } else if spell == 14 {
+                        // Rebound's bare skeleton (sub_573F0 — the
+                        // per-tick 55DD0 gate, the owner's 0x8000
+                        // deflection bit, the 55E80 debit/pin).
+                        self.rival_rebound_token_tick(i, ri);
+                    } else if spell == 4 {
+                        // Shield's twin (sub_566C0 — the SET-only
+                        // 0x4000 absorb bit).
+                        self.rival_shield_token_tick(i, ri);
                     } else {
                         self.rival_manifestation_tick(i, ri, spell);
                     }
@@ -9231,6 +9310,20 @@ impl World {
                         // (sub_57610 — fire once at full, then the
                         // in-transit charge pin).
                         self.rival_castle_token_tick(i, ri);
+                    } else if spell == 14 {
+                        // Rebound's bare skeleton (sub_573F0 — the
+                        // per-tick 55DD0 gate, the owner's 0x8000
+                        // deflection bit, the 55E80 debit/pin).
+                        // mc1hwl0 t=5592: the defense cast arms
+                        // token 479 at carpet 473 and retail's
+                        // same-tick token pass publishes the bit
+                        // and decrements — refresh-driven, both
+                        // lagged a tick.
+                        self.rival_rebound_token_tick(i, ri);
+                    } else if spell == 4 {
+                        // Shield's twin (sub_566C0, mc1hwl0 t=5593
+                        // — the SET-only 0x4000 absorb bit).
+                        self.rival_shield_token_tick(i, ri);
                     } else {
                         self.rival_manifestation_tick(i, ri, spell);
                     }
@@ -9300,6 +9393,14 @@ impl World {
                 && owned_already
                 && self.g.ent[i].flags & 1 == 0
             {
+                if std::env::var_os("MGC_ACQ_TRACE").is_some() {
+                    eprintln!(
+                        "[acq] t={} jar={i} spell={spell} owned={} acq={:?}",
+                        crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                        self.player.owned[spell],
+                        self.mc1_acq
+                    );
+                }
                 self.g.ent[i].flags |= 1;
                 self.entities_dirty = true;
             }
@@ -14784,6 +14885,9 @@ impl World {
             wiz_charge: _,
             kill_tally,
             human_pose,
+            // Re-stamped at the first tick top after a restore —
+            // nothing to save.
+            human_bucket_alive: _,
             // Re-derived on the first tick after a restore (prev :=
             // the restored `human_pose`) — exactly the value the
             // strict jar law wants; nothing to save.
@@ -15191,6 +15295,74 @@ mod tests {
             w.g.ent[b].flags |= 0x400;
             w.g.ent[b].class64 = 0;
         }
+    }
+
+    /// The m4/m8 wanted scan GATES ITS ELECTION WINNER, not its
+    /// candidates (:22613/:23500, hw 21170-72/22057 — `if (v25 &&
+    /// *(v25+65) <= 1 && *(*(v25+160)+528))`): the nearest class-3
+    /// body wins on range+cone alone, and only the WINNER must be a
+    /// wanted wizard body — a nearer balloon/castle poisons the whole
+    /// scan and the caller falls to its next rung. mc1hwl0 t=3286:
+    /// griffon 79 packs up with the human wanted (aggro 197) at
+    /// d≈5904 because a mana balloon sits in cone at d≈1375; the
+    /// in-loop port skipped the balloon and chased. The genie's
+    /// `+65 <= 1` stays PER-CANDIDATE (:24487 tests it inside the
+    /// loop).
+    ///
+    /// NON-VACUITY: the old in-loop gates skip the balloon and return
+    /// the human on the second assertion.
+    #[test]
+    fn the_wanted_scan_gates_the_election_winner_not_the_candidates() {
+        use crate::mc1::behavior::BEHAVIOR;
+        use crate::mc1::mobs::MobCtx;
+
+        let mut w = flat_world();
+        let s = w.g.spawn_creature(8, 100 << 8, 100 << 8, 100).unwrap(); // griffon
+        w.g.ent[s].id24 = 0;
+        let (ex, ey) = (w.g.ent[s].x, w.g.ent[s].y);
+        let v28 = BEHAVIOR[w.g.ent[s].row156 as usize].v_28 as i32;
+        // The human: wanted, in range, dead ahead.
+        let px = ex.wrapping_add((v28 / 2) as u16);
+        let ctx = MobCtx {
+            px,
+            py: ey,
+            pz: 100,
+            pyaw: 0,
+            pmana: 0,
+            pmana_max: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        w.g.player_aggro = 200;
+        w.g.ent[s].f30 = Gen::angle_between(ex, ey, px, ey);
+        w.g.rebuild_wiz_chain();
+        assert_eq!(
+            w.g.nearest_wizard_target(s, &ctx, true, true),
+            Some(PLAYER_TARGET),
+            "alone and wanted, the human is the pick"
+        );
+        // A balloon between them, same bearing: it WINS the election
+        // and FAILS the winner gate — the scan comes home empty.
+        let b =
+            w.g.spawn_class3(3, ex.wrapping_add((v28 / 4) as u16), ey, 100)
+                .unwrap();
+        w.g.ent[b].id24 = 7;
+        w.g.rebuild_wiz_chain();
+        assert_eq!(
+            w.g.nearest_wizard_target(s, &ctx, true, true),
+            None,
+            "a nearer non-wizard body must poison the wanted scan"
+        );
+        // The genie's bodies-only mode keeps filtering per candidate:
+        // the same balloon is skipped in-loop and the human still
+        // wins.
+        assert_eq!(
+            w.g.nearest_wizard_target(s, &ctx, true, false),
+            Some(PLAYER_TARGET),
+            "the genie's +65<=1 gate is per-candidate, not a poison"
+        );
     }
 
     /// The shared chase re-bears BEFORE the target-lost test (:21656
@@ -18400,6 +18572,77 @@ mod tests {
         assert_eq!(e.f140, 40, "+140 = price/count, the HUD dot unit");
         assert_eq!((e.max_life, e.act_life), (0, 0), "both life words zeroed");
         assert_eq!(e.f44, SPELLS[0].damage as u16, "+44 = the row damage");
+
+        // AND THE GAME'S OWN TABLE, NOT THE BASE CONST: HW forks
+        // spell 20's whole ctor row (count 26, castle_req 60000,
+        // damage 5000 — `sub_3C2B0` hw:44266), and the mint must read
+        // it through `self.spells()`. mc1hwl0 t=7629: the respawn
+        // re-mint took `f44` from the game table but +50/+136/+140
+        // from the static base, building the (12,20) token at
+        // `+50` 51 / `+140` 98 against retail's 26 / 192. No fixture
+        // can pin the respawn face yet (a pair cannot anchor inside
+        // the dead window — the importer holds no record for the
+        // corpse), so the mint law is pinned here.
+        let mut w = bare_creature_world(2);
+        w.game = GameId::Mc1Hw;
+        let m = w
+            .grant_spell(crate::mc1::spells::SpellId(20))
+            .expect("granted");
+        let e = &w.g.ent[m];
+        assert_eq!(
+            (e.f50, e.f136, e.f140, e.f44),
+            (26, 5000, 192, 5000),
+            "the HW spell-20 row reaches the token lanes"
+        );
+    }
+
+    /// THE CLAIM BOLT'S DEST IS THE CASTER PROJECTED 10240 ALONG THE
+    /// LIVE AIM: `sub_56510` (:65247-49) copies the caster's own
+    /// position into +150/+152/+154 and steps it 10240 through
+    /// `sub_41EC0` on the caster's +30/+32 before copying the aim
+    /// onto the bolt. mc1hwl0 t=7853 measures the whole projection
+    /// to the unit: record (39016, 15164, 3238) + (yaw 178, pitch 72)
+    /// → dest (44204, 6627, 995) — `SIN[72]·10240 = 2243` of drop.
+    /// The dest lanes are conformance-dumped but not pair-graded and
+    /// the cast-pose echo is import-reseeded, so no fixture can pin
+    /// this; the free-run horizon and this unit are the guards.
+    #[test]
+    fn the_claim_bolt_carries_the_aim_projected_dest() {
+        use crate::mc1::mobs::MobCtx;
+        let mut w = bare_creature_world(2);
+        let m = w
+            .grant_spell(crate::mc1::spells::SpellId(3))
+            .expect("granted");
+        let pose = PlayerPose {
+            x: 39016,
+            y: 15164,
+            z: 3238,
+            heading: 178,
+            pitch: 72,
+            speed: 80,
+        };
+        let ctx = MobCtx {
+            px: pose.x,
+            py: pose.y,
+            pz: pose.z,
+            pyaw: pose.heading,
+            pmana: 0,
+            pmana_max: 0,
+            pdead: false,
+            strict: false,
+            patches: crate::patches::WorldPatches::RETAIL,
+            mc2_turn: 0,
+        };
+        w.emit_spell(3, m, pose, false, &ctx);
+        let pr = (1..w.g.ent.len())
+            .find(|&j| w.g.ent[j].class64 == 9 && w.g.ent[j].model65 == 1)
+            .expect("the (9,1) claim bolt spawned");
+        let e = &w.g.ent[pr];
+        assert_eq!(
+            (e.dest_x, e.dest_y, e.site_z),
+            (44204, 6627, 995),
+            "sub_56510's 10240 aim projection, mc1hwl0 t=7853 to the unit"
+        );
     }
 
     /// `sub_37220_375E0` (:43825): the free/recycle REBUILD is a
@@ -18591,6 +18834,53 @@ mod tests {
         );
         assert!(w.take_restart(), "castle-less death restarts the level");
         assert!(w.vitals().lost);
+    }
+
+    /// THE GRUDGE AMNESTY (:55037-40): the respawn init walks the
+    /// tick-top chain and stamps every OTHER wizard body's hate
+    /// toward the reborn one to `(u16)-24609` = 40927 — freshly
+    /// under the wealth-scaled hated bar, so the killers let the
+    /// pauper alone until hate regrows. mc1hwl0 t=7629: rival 1's
+    /// hate[0] drops 56998 → 40927 on the human's respawn, and at
+    /// t=7796 its selector therefore stays on the mana ball where
+    /// the unreset port re-elected AttackWizard. No fixture can pin
+    /// this: `hate[]` is import-restored every pair.
+    ///
+    /// NON-VACUITY: without the respawn stamp the final read holds
+    /// the decayed 56xxx.
+    #[test]
+    fn the_respawn_amnesties_rival_hate_for_the_reborn_wizard() {
+        let mut w = rival_world(false, 0);
+        let c =
+            w.g.spawn_castle((140 << 8) + 128, (140 << 8) + 128)
+                .unwrap();
+        w.g.ent[c].id24 = PLAYER_TARGET;
+        w.g.ent[c].f144 = PLAYER_TARGET;
+        for _ in 0..60 {
+            w.tick(away(), PlayerCommand::default());
+        }
+        w.rivals[0].hate[0] = 56998;
+        w.player.grace = 0;
+        hit_player(&mut w, 30000, 1);
+        w.tick(away(), PlayerCommand::default());
+        w.tick(grounded_line(), PlayerCommand::default());
+        assert_eq!(w.vitals().state, LifeState::Dead);
+        assert!(
+            w.rivals[0].hate[0] > 50_000,
+            "hate only decays until the respawn"
+        );
+        w.tick(
+            grounded_line(),
+            PlayerCommand {
+                respawn: true,
+                ..Default::default()
+            },
+        );
+        assert_eq!(w.vitals().state, LifeState::Alive);
+        assert_eq!(
+            w.rivals[0].hate[0], 40927,
+            "(u16)-24609, the :55040 amnesty stamp"
+        );
     }
 
     #[test]

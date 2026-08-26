@@ -20042,3 +20042,84 @@ carries the launch boost where retail keeps the ctor's base 384
 nonzero in retail and zeroed in the port (the stale-slot family — free
 clears +64 only). The pair at 9927 is CLEAN, so this is INHERITED: the
 one-tick logic is right and the break rides earlier ungraded state.
+
+## SESSION 2026-08-26f — mc1hwl0 3289 → 7992 ON SEVEN LAWS (segmented
+## devs 3,289 → 2,187; the app's pose channel 3,060 → 10,715)
+
+Full narrative in `conformance/brief-baseline.txt`'s SESSION 48 block.
+The laws, by witness tick:
+
+1. **t=3286 — the m4/m8 wanted scan gates its ELECTION WINNER, not its
+   candidates** (`nearest_wizard_target`): retail elects the nearest
+   class-3 body on range+cone alone (:22613/:23500, hw 21170-72/22057)
+   and only the winner must be a wanted wizard body; a nearer mana
+   balloon (d≈1375 against the wanted human's d≈5904) poisons the whole
+   scan and griffon 79 packs with griffon 72 instead of chasing. The
+   genie's `+65 <= 1` stays per-candidate (:24487). Unit-pinned
+   (pair-invisible: f70/f52 are ungraded and import-restored).
+2. **t=5592 — the rival Rebound token runs retail's own `sub_573F0`
+   machine at the token's pool slot** (`rival_rebound_token_tick`, both
+   encodings): the whole `sub_55DD0` gate per burst tick, the owner's
+   0x8000 deflection bit, the `sub_55E80` debit/pin, the shared
+   decrement — the refresh-driven port published a tick late and held
+   `+48` one high for every burst. Fixture-pinned.
+3. **t=5593 — Shield is the same skeleton with a SET-only 0x4000**
+   (`rival_shield_token_tick`, sub_566C0): no clear arm — the damage
+   intake clears per absorb. No rival shield ever quartered a hit in
+   the port before this. Fixture-pinned.
+4. **t=7629 — the mint reads the GAME's spell table**: `grant_spell`
+   took `f44` from `self.spells()` but `+50/+136/+140` from the base
+   `SPELLS` const, so HW's forked spell-20 row (26/60000/5000,
+   `sub_3C2B0` hw:44266) never reached a re-minted token (51/98 vs
+   retail 26/192). Unit-pinned (the pair cannot anchor in the dead
+   window — see the OPEN below).
+5. **t=7592 — the human's bucket[0] candidacy is the TICK-TOP sample**
+   (`World::human_bucket_alive`, stamped at the chain rebuild): the
+   rival wizard-pick judged the human on live `player.state`, but the
+   rival's own kill lands at slot 472 before its selector runs at 473
+   and retail still picks the corpse. The learn clock rides the same
+   flag.
+6. **t=7629 — the grudge amnesty** (:55037-40): the respawn init stamps
+   every other wizard's hate toward the reborn one to `(u16)-24609` =
+   40927, freshly under the hated bar — at t=7796 the killer stays on
+   its mana ball where the unreset port re-elected AttackWizard.
+   Unit-pinned (hate[] is import-restored).
+7. **t=7853 — token fires measure from the SETTLED carpet, and the
+   claim bolt carries the aim-projected dest**: `tick_flight` now
+   re-stamps `mc1_cast_pose` post-walk (the entry-pose stamp was
+   settled TWO ticks back at fire time), and spell 3 stamps
+   `dest = caster pos stepped 10240 through sub_41EC0` — verified to
+   the unit: (39016,15164,3238)+(178,72) → (44204,6627,995). Plus the
+   rival's Possess claim of a (10,40) GRAVE no longer
+   `ball_resize`-recolors it (the re-derive it stands in for is the
+   (10,39) ball tick's own, which a grave never runs) — the recolored
+   grave's `+78` 25-vs-100 skewed every acquire measured at its aim-z.
+
+### OPEN — THE t=7993 WALL IS ACQ-LIST ARCHAEOLOGY
+
+The port's `+532` acquisition list diverges from retail across this
+take's two deaths (a survived landing ≈t=4420 whose scatter was
+re-collected, then the real death at 7592). A stale slot-form `17`
+(written by the find-based restore during the t=4438 alive-retry, whose
+`find(e == s)` for s=0 matches the FIRST FREE entry — fireball's model
+id 0 IS the port's free sentinel; retail's is −1) aliases the (9,1)
+claim bolt that reuses slot 17 at ~7991 into phantom `owned[1]` via the
+blind `+676` rebuild, and heal jar 106 stamps its "already known" bit
+at t=7993 where retail — starved entries ZEROED at :54917, spells
+permanently lost — never owned heal. Structural fixes (landing-fill
+convert-or-zero, starve-zero, push/restore dedup) were built, measured
+WORSE (7992 → 7616: the old artifacts were load-bearing for the
+scatter's draw mapping through the list ORDER), and reverted. The dig
+needs retail's −1 sentinel semantics and the death#1 aftermath list
+reconstructed first. `MGC_ACQ_TRACE=1` prints the jar-stamp and
+regrant state.
+
+### OPEN — THE PAIR MACHINERY CANNOT ANCHOR INSIDE THE DEAD WINDOW
+
+The importer holds no record for the corpse: a pair anchored at t=7628
+reads slot 472 as all-zero and the in-pair respawn grades hopeless (a
+t=7628 fixture was cut, measured, and withdrawn). Laws 4-6 are
+unit-pinned instead of fixture-pinned because of this. Import-side
+dead-window support (materialize the dead carpet record; derive the
+death bank from the +532 MODEL entries rather than the corpse's
+garbage +676) is its own future dig.

@@ -994,9 +994,25 @@ impl Gen {
     /// take the whole list.
     ///
     /// `wanted_only` is the m4 militia (:22613) / m8 griffon (:23500)
-    /// hostility gate: a wizard is a candidate only while its village-
-    /// wanted timer is live (the human's `player_aggro`, a rival's
+    /// hostility gate: the winner must be a wizard whose village-wanted
+    /// timer is live (the human's `player_aggro`, a rival's
     /// `rival_wanted` slot — see [`Gen::village_wanted`]).
+    ///
+    /// ⭐ GATE PLACEMENT FORKS BY CALLER, and it is load-bearing. The
+    /// genie's `+65 <= 1` is a PER-CANDIDATE filter (:24487 tests it
+    /// inside the loop before distance), so its election falls past a
+    /// nearer castle to a farther carpet. The m4/m8 scans instead elect
+    /// the nearest class-3 body on range+cone ALONE and apply BOTH
+    /// gates to the ELECTION WINNER (base :22613/:23500, hw 21170-72/
+    /// 22057 — `if (v25 && *(v25+65) <= 1 && *(*(v25+160)+528))`): a
+    /// nearer balloon/castle/un-wanted carpet wins the election, fails
+    /// the gate, and the whole scan yields NOTHING — the caller drops
+    /// to its next rung (the militia's burrower hunt, the wander's
+    /// pack-up). mc1hwl0 t=3286: griffon 79's cadence tick has the
+    /// human wanted (aggro 197) at d≈5904 and a mana balloon at d≈1375;
+    /// retail elects the balloon, refuses it, and PACKS with griffon 72
+    /// (f52=72, state base+3) where the in-loop port skipped the
+    /// balloon and CHASED the human (state base+2).
     pub(crate) fn nearest_wizard_target(
         &self,
         i: usize,
@@ -1022,11 +1038,7 @@ impl Gen {
         // the pool, so the liveness rides the ctx (`pdead` covers
         // both the death fall and the dead hold, which is exactly
         // `actLife < 0`).
-        if !ctx.pdead
-            && !self.player_invisible
-            && owner != PLAYER_TARGET
-            && (!wanted_only || self.player_aggro > 0)
-        {
+        if !ctx.pdead && !self.player_invisible && owner != PLAYER_TARGET {
             let d2 = Self::dist2_sq(ex, ey, ctx.px, ctx.py);
             if d2 <= r2 && Self::angdist(ef30, Self::angle_between(ex, ey, ctx.px, ctx.py)) < cone {
                 best = Some(PLAYER_TARGET);
@@ -1053,13 +1065,13 @@ impl Gen {
         for c in 0..self.wiz_chain.visible_len() {
             let j = self.wiz_chain.list[c] as usize;
             let c = &self.ent[j];
-            if c.model65 == 0 || (bodies_only && c.model65 != 1) {
+            // The genie's `+65 <= 1` is the only IN-LOOP model gate
+            // (:24487); the m4/m8 scans (`wanted_only`) elect ungated
+            // and test the winner below.
+            if c.model65 == 0 || (bodies_only && !wanted_only && c.model65 != 1) {
                 continue;
             }
             if c.flags & 0x20 != 0 || owner == c.id24 {
-                continue;
-            }
-            if wanted_only && self.village_wanted(c.id24) <= 0 {
                 continue;
             }
             let d2 = Self::dist2_sq(ex, ey, c.x, c.y);
@@ -1069,6 +1081,25 @@ impl Gen {
             {
                 best = Some(j as u16);
                 best_d2 = d2;
+            }
+        }
+        // The m4/m8 winner gate (:22613/:23500): the nearest body must
+        // BE a wanted wizard, or the scan comes home empty-handed —
+        // there is no falling past the winner to the second-nearest.
+        if wanted_only {
+            match best {
+                Some(PLAYER_TARGET) => {
+                    if self.player_aggro <= 0 {
+                        return None;
+                    }
+                }
+                Some(j) => {
+                    let c = &self.ent[j as usize];
+                    if c.model65 > 1 || self.village_wanted(c.id24) <= 0 {
+                        return None;
+                    }
+                }
+                None => {}
             }
         }
         best
@@ -1134,9 +1165,12 @@ impl Gen {
     /// aggro list. The m8 griffon alone gates Scan A on the wanted
     /// timer (sub_1CA50 :23500): it chases a wizard only while that
     /// wizard's +528 is live and re-arms it on the pounce (:23503),
-    /// staying peaceful until a village marks the wizard. Asleep
-    /// creatures never scan (getting this backwards packs whole distant
-    /// crowds up onto the unbounded pack accel).
+    /// staying peaceful until a village marks the wizard — and that
+    /// gate rules the ELECTION WINNER, not the candidates (see
+    /// `nearest_wizard_target`): a nearer balloon/castle wins the
+    /// election, fails the gate, and the griffon packs up instead.
+    /// Asleep creatures never scan (getting this backwards packs whole
+    /// distant crowds up onto the unbounded pack accel).
     fn mob_wander(&mut self, i: usize, base: u8, ctx: &MobCtx) {
         self.creature_move(i);
         let v26 = BEHAVIOR[self.ent[i].row156 as usize].v_26;
@@ -2360,10 +2394,11 @@ impl Gen {
         if (self.ent[i].f63 as i16) % (4 * v26) != 0 {
             return;
         }
-        // The nearest wizard BODY (human or rival carpet, +65<=1) that
-        // is on that wizard's own village-wanted list (+160->+528,
-        // :22613 — the `bodies_only` + `wanted_only` gates); no such
-        // wizard falls through to the burrower hunt below.
+        // The nearest class-3 body, elected on range+cone alone; the
+        // WINNER must then be a wizard body (+65<=1) on its own
+        // village-wanted list (+160->+528, :22613 gates the winner,
+        // not the candidates — see `nearest_wizard_target`). A refused
+        // winner falls through to the burrower hunt below.
         if let Some(t) = self.nearest_wizard_target(i, ctx, true, true) {
             self.ent[i].f146 = t;
             self.ent[i].tick70 = base + 2;
