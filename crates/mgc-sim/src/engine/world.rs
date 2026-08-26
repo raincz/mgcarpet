@@ -9097,6 +9097,33 @@ impl World {
                     self.mc1_shield_token_tick(i);
                     return;
                 }
+                // ⭐ REBOUND (14) RUNS THE SHARED COUNTDOWN. It is not
+                // a launcher and not a speed token, so the two arms
+                // `manifestation_tick` would skip are exactly the two
+                // retail's `sub_573F0_57920` (:65773) does not have:
+                // that handler is the bare skeleton — the `sub_55DD0`
+                // gate, the owner's +17 0x80 rebound bit, the
+                // `sub_55E80` regen pin, and the shared `--(+48)`.
+                // Omitting 14 here left the (12,14) token's counter
+                // FROZEN and its mid-burst regen pin unrun.
+                //
+                // mc1l32-quick is the first corpus witness, and it is
+                // an emphatic one: pair mode shows a constant +1 on
+                // f26 for 4,181 pairs (two bursts, slots 28 and 370),
+                // but the FREE-RUN face is far bigger and pair mode
+                // CANNOT SEE IT — with the pin missing the port
+                // regenerates ~50/tick where retail's mana is parked
+                // 1000 below cap, and that takes TWO ticks to surface,
+                // so a one-tick pair reads clean. It shattered the
+                // take into 1,296 reset segments; wiring the spell
+                // drops that to 224 with all eight certified MC1 takes
+                // still bit-exact END.
+                //
+                // ⚠ Spells 5 (Beyond Sight), 12 (Invisible) and 15
+                // (Lightning Bolt) are still absent from this list on
+                // the same "hold/channel set rests inert" reasoning.
+                // They have NO corpus witness yet — do not add them
+                // without one.
                 if self.player.owned[spell] == i as u16
                     && matches!(
                         spell,
@@ -9109,6 +9136,7 @@ impl World {
                             | 10
                             | 11
                             | 13
+                            | 14
                             | 16
                             | 17
                             | 18

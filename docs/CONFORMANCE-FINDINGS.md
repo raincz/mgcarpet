@@ -19782,3 +19782,86 @@ and speed.
 hand-shortened `file` names that no longer match the slug their note
 generates, so `cut_fixture_files.py` would re-cut them as duplicates
 under the slug name. The runner is unaffected (it reads `file`).
+
+## SESSION 2026-08-26c — mc1l32-quick TRIAGED: REBOUND'S TOKEN NEVER
+## TICKED (1,296 reset segments → 224)
+
+The survey of the newly-swept second l32 playthrough, and the one law
+that turned out to be almost all of it.
+
+### THE SHAPE OF THE TAKE
+
+Pair mode: **41,600 pairs, 37,292 conforming (89.6%)**, 0 TORN, 0 rng
+mismatches, 4,308 with field diffs. Free run (`--segmented`): 1,297
+segments, 1,296 excess resets, 11 respawns.
+
+Grouping every divergence gives four families and a tail:
+
+| rows | family | what |
+|---|---|---|
+| 4,185 / 4,183 pairs | `(12,14) f26` | **Rebound's token counter, below** |
+| 1,146 of 1,283 free-run segment breaks | `player.mana` | the same law's free-run face |
+| 209 pairs | `player.mana` | cast debits + regen quanta |
+| 76 pairs (t=17487..17562) | `wizard0.hand_left/right` | the corpse-hand window, below |
+| ~1,290 resets t≈35983..36034 | slots 412-440 x/y/heading | a creature cohort; the take then runs **bit-exact 36034 → 41600** |
+
+### THE LAW — REBOUND (14) WAS MISSING FROM THE TOKEN-TICK ALLOWLIST
+
+The strict-retail class-12 phase-0 arm ran `manifestation_tick` for a
+hand-listed spell set that omitted 14, on the standing "the hold/channel
+set rests inert" reasoning. So the (12,14) token's `+48` never
+decremented and its `sub_55E80` mid-burst regen pin never ran.
+
+Retail's `sub_573F0_57920` (:65773) is the bare skeleton — the
+`sub_55DD0` gate, the owner's `+17 0x80` rebound bit, the `sub_55E80`
+pin, the shared `--(+48)`. Rebound is **neither a launcher nor a speed
+token**, so the only two arms `manifestation_tick` adds are exactly the
+two retail does not have. The listing was the whole fix.
+
+⭐⭐⭐ **THE PAIR INSTRUMENT COULD NOT SEE THE BIG HALF.** Pair mode
+reports a tidy constant `+1` on `f26` for 4,181 pairs. But the damage is
+the missing REGEN PIN: retail's mana is parked 1,000 below cap for the
+whole burst while the port regenerates ~50/tick — and that takes **two
+ticks** to surface, so a one-tick pair from a fresh import reads CLEAN.
+It is visible only in the segmented free run, where it re-broke every
+2-tick segment: **1,146 of the take's 1,283 segment divergences are one
+frozen mana pair (retail 74580 / port 74680), not 1,146 laws.**
+
+*A lane that only diverges on the SECOND tick after import is invisible
+to `verify-deltas`. When a free run shatters far worse than the pair
+report suggests, suspect a multi-tick lane before suspecting noise.*
+
+**Receipts:** mc1l32-quick segments **1,297 → 225**, excess resets
+**1,296 → 224**; all eight certified MC1 takes still bit-exact END, both
+MC2 certified takes END, and every guard line byte-identical.
+Fixture `rebound-s-owned-token-runs-the-shared-countdown.mgcr` (t=18013,
+source mc1l32-quick), A/B-proven the only regression when reverted.
+
+⚠ Spells **5 (Beyond Sight), 12 (Invisible), 15 (Lightning Bolt)** are
+still absent from that list on the same reasoning and have **no corpus
+witness**. Do not add them without one.
+
+### OPEN — THE CORPSE-HAND WINDOW IS ONE PHASE TOO WIDE (76 pairs)
+
+Both the importer (`conformance.rs`, `let dead = carpet.f70 == 3`) and
+the port's obs projection (`let corpse = state == LifeState::Dead`)
+blank the hands for the whole dead window, justified by: the death
+landing rewrites `+532` to MODEL numbers (:55523), so retail's own
+`hand_spell` walk reads None.
+
+**That because-clause is true only AFTER THE LANDING.** mc1l32-quick
+t=17487..17562 is the FALL — retail's carpet is already `f70 == 3` but
+the list still holds SLOTS, and retail resolves `Some(3)`/`Some(0)`
+throughout. 76 ticks, exactly the fall duration. The gate wants to be
+the grave landing, not `f70 == 3`. Not landed — it needs the landing
+edge named on both sides.
+
+### OPEN — THE TAKE'S FIRST HEAD, t=9928
+
+`(9,0)` slot 2: `x/y/z` off by 1-2 units, `f126` 462 vs 464, and
+**`f128` 384 (retail) vs 464 (port)** — the port's cruise-speed target
+carries the launch boost where retail keeps the ctor's base 384
+(`spawn_fireball`, sub_39A10 :45861). `dest_x/dest_y/site_z` are
+nonzero in retail and zeroed in the port (the stale-slot family — free
+clears +64 only). The pair at 9927 is CLEAN, so this is INHERITED: the
+one-tick logic is right and the break rides earlier ungraded state.

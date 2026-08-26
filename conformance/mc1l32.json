@@ -153,6 +153,12 @@
    "note": "THE PORTAL HUM IS A FIRST-TICK LATCH: sub_26A60 opens on flags bit 1 (:29186-89) - latch + positional sound 21, the same shape as the MC2 pad's - and a timed portal's expiry carries sound 20 (:29196-97). The port's portal_tick had neither; the fresh vortex's flags read 6, not 4, from its first tick on. Retail's warp scan walks EVERY wizard (var_u16_10) - the rival-warp arm stays owed, the register the MC2 pad already carries."
   },
   {
+   "t": 18013,
+   "source": "mc1l32-quick",
+   "note": "Rebound's owned token runs the shared countdown; the strict-retail class-12 phase-0 arm omitted spell 14, so the (12,14) token's +48 never decremented and its mid-burst regen pin never ran. Retail sub_573F0_57920 (:65773) is the same skeleton the shared manifestation_tick already carries for the non-launcher set: no fire-at-full (14 is not a launcher and not a speed token), the sub_55E80 regen pin, the shared decrement, and the owner's +17 0x80 rebound bit. mc1l32-quick pair 18013: retail f26 100 port 101, constant +1 for 4,181 pairs across two bursts (slots 28 and 370). The FREE-RUN face is bigger and pair mode cannot see it: with the pin missing the port regenerates ~50/tick where retail's mana is parked, which shatters the take into 1,296 reset segments - wiring the spell drops that to 224.",
+   "file": "rebound-s-owned-token-runs-the-shared-countdown.mgcr"
+  },
+  {
    "t": 21715,
    "file": "the-owned-spell-register-is-derived-sub-45c10-55.mgcr",
    "source": "mc1l32",
