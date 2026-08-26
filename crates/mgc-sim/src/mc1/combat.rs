@@ -2296,16 +2296,51 @@ impl Gen {
     /// sizes the hitbox: SPRITE_STATS row 76 is 420x350 vs 42's
     /// 88x100, so the swap is look AND collision.
     pub(crate) fn spawn_firewall_bolt(&mut self, x: u16, y: u16, z: i16) -> Option<usize> {
-        let sprite = if self.is_hidden_worlds() { 76 } else { 42 };
+        let hw = self.is_hidden_worlds();
+        let sprite = if hw { 76 } else { 42 };
         // Behavior ROW 5 (sub_3A270 :46349 `+156 = &unk_98F38[5]`) —
         // its v_2 = 5 is the homing tail's whole turn authority
         // (mc1l5 t=23389: retail eases 664 → 669 where row 0's 56
         // swung the port to 720).
-        self.spawn_projectile(16, 17, x, y, z, 384, 21, 5, sprite)
+        //
+        // ⭐ HW'S BOLT IS A DIFFERENT ROW: `sub_3A5F0` (hw:42461) is
+        // the same ctor with `+156 = &unk_98F78` — 0x98F78 against
+        // the array base 0x98F38 is 0x40, i.e. **row 2** — and
+        // sprite 76 instead of 42 (the sprite was already forked
+        // here; the row was not). Row 5's 5-unit yaw cap held HW's
+        // bolt back on the one tick its homing needed a real swing:
+        // mc1hwl0 t=2750→2751, retail turns `+30` 167 → 178 straight
+        // onto `+34` where the port stopped at 172, and the whole
+        // `(10,53)` detonation inherited the bad heading.
+        // ⭐ THE IMPORTER MEASURES THIS — `row156` is decoded from the
+        // recorded `+156` pointer (`(ptr − behavior_base) / 32`), so
+        // a wrong native row is invisible to PAIR mode and only the
+        // free run can see it.
+        let row = if hw { 2 } else { 5 };
+        self.spawn_projectile(16, 17, x, y, z, 384, 21, row, sprite)
     }
 
-    /// The m16 firewall flight (state 17): generic ease + move, no
-    /// fire trail. The state-17 handler sub_52770_52AB0 copies the
+    /// The m16 firewall flight (state 17): generic ease + move, plus
+    /// — ON HW ONLY — the FIRE TRAIL that gives the spell its name.
+    ///
+    /// ⭐⭐ HW's state-17 handler is `sub_54600` (hw:59929), which is
+    /// `sub_52770_52AB0` **wrapped**: run the generic flight, and if
+    /// the bolt survived it (`if (+64)` — a detonating bolt frees its
+    /// own record) drop a `(10,0)` FIRE at the bolt's post-move
+    /// position, stamped `+16 |= 0x80`, `+18 |= 1` and `+24 = the
+    /// bolt's owner`. Base MC1 has no such wrapper anywhere in its
+    /// listing — its state 17 is the bare `sub_52770` — so the wall
+    /// that actually lays a wall of fire is the HW one. The port's
+    /// old "no fire trail" reading was right for base MC1 and wrong
+    /// for the game this corpus records: mc1hwl0 t=2746, the human's
+    /// bolt is born at slot 822 and retail's very next allocation is
+    /// the `(10,0)` at 788, on the bolt's own first flight tick, at
+    /// the bolt's exact x/y/z with `id24` = the caster.
+    /// ⚠ `sub_54600` is UNREFERENCED in the HW listing — the class-9
+    /// state table is data, not source. The corpus is what binds it
+    /// to state 17.
+    ///
+    /// The state-17 handler sub_52770_52AB0 copies the
     /// bolt's +44 into the +68/+69 explosion (:62770, hw:58859) —
     /// BOTH games. remc1's truncated class-9 state table hid the
     /// base-MC1 copy for a while (the question sat banked); the
@@ -2358,7 +2393,23 @@ impl Gen {
         if self.ent[i].f146 != 0 {
             self.home(i, ctx);
         }
-        self.proj_move_and_hit(i, ctx, true, true, DeflectLaw::Generic)
+        let hit = self.proj_move_and_hit(i, ctx, true, true, DeflectLaw::Generic);
+        // hw:59934-45 — the trail, gated on the bolt still being a
+        // live record after the flight (retail reads `+64`, the class
+        // byte its own free clears).
+        if self.is_hidden_worlds() && self.ent[i].class64 != 0 {
+            let (own, x, y, z) = {
+                let e = &self.ent[i];
+                (e.id24, e.x, e.y, e.z)
+            };
+            if let Some(f) = self.spawn_effect(0, x, y, z) {
+                let e = &mut self.ent[f];
+                e.flags |= 0x80; // +16 |= 0x80
+                e.flags |= 0x1_0000; // +18 |= 1
+                e.id24 = own;
+            }
+        }
+        hit
     }
 
     /// sub_53980/sub_53B50 (:63453/:63525): the castle ball's flight
@@ -4599,7 +4650,15 @@ impl Gen {
                 if hw {
                     e.max_life = 6;
                     e.f44 = 3000;
-                    self.link(s, x, y, z);
+                    // hw:43776-77 — the position lands DIRECT here
+                    // too (`+72 = *a1`, `+76 = a1[4]`, no
+                    // `sub_41CF0`), exactly like the base-MC1 twin
+                    // below: the HW cloud is OFF THE TILE CHAIN and
+                    // its recorded `flags` is 0, not the linker's 4
+                    // (mc1hwl0 t=2750, slot 494).
+                    e.x = x;
+                    e.y = y;
+                    e.z = z;
                 } else {
                     e.max_life = 128;
                     // :47654 — the ctor's speed word, and :47664-66:
@@ -5138,6 +5197,14 @@ impl Gen {
             let e = &self.ent[i];
             (e.x, e.y, e.z, e.id24, e.f30)
         };
+        // ⭐ THE ITERATOR'S OWN DRAW (hw:29753): retail steps the LCG
+        // ONCE between `sub_11410` and the first `sub_114B0`, before
+        // any cell is read — the base-MC1 arm above has always
+        // carried it and the HW twin was missing it, so every HW wall
+        // painted its ring off a stream one step behind and every
+        // downstream consumer of the cloud's `+4` desynced
+        // (mc1hwl0 t=2751, cloud 494's first paint).
+        self.ent_rand(i);
         for (dx, dy) in self.ring_cells_pub(var26 as i32, var26 as i32) {
             let d1 = self.ent_rand(i);
             let d2 = self.ent_rand(i);

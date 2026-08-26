@@ -5487,16 +5487,27 @@ impl Gen {
         // rebuild ([`TickChain`]; mc1l0 castle-3 teardown, the
         // t=1830 ejected ball turns at 1832 not 1831), and a chain
         // severed by mid-tick slot reuse ends early for the stamp
-        // exactly as for the acquire scans. The class/model recheck
-        // guards the port's eager mid-tick free (a freed-not-reused
-        // member keeps its link in retail but must not be stamped
-        // fresh mail here).
+        // exactly as for the acquire scans.
+        //
+        // ⭐⭐ THE ONLY PER-NODE TEST IS `+65 == 39` (:31252). There
+        // is no class test (chain membership supplies it) and — the
+        // part that cost a horizon — **NO 0x400 TEST**. A SOFT-KILLED
+        // BALL IS STILL A MAGNET'S CUSTOMER: retail's reap is the next
+        // tick's top-of-frame sweep, so a ball collected earlier in
+        // THIS pass keeps its class, model and link and every magnet
+        // below it still overwrites its ch4 pair. The port's invented
+        // `0x400` guard made the LAST magnet to stamp a dying ball
+        // depend on where the kill landed in the pool walk, and the
+        // ball's ch4 arm turns `+30` to whichever magnet stamped last
+        // — mc1hwl0 t=2005: ball 823 is flagged between magnets 260
+        // and 786, so retail's `+30` is 957 (the bearing to magnet
+        // 787, which stamps last) where the port kept 1888 (magnet
+        // 256, the last one that stamped before the flag). Same
+        // family as the collector test twenty lines into `ball_tick`:
+        // ⚠ SOFT KILL IS NOT A FREE.
         for k in 0..self.ball_chain.visible_len() {
             let j = self.ball_chain.list[k] as usize;
-            if self.ent[j].class64 == 10
-                && self.ent[j].model65 == 39
-                && self.ent[j].flags & 0x400 == 0
-            {
+            if self.ent[j].class64 == 10 && self.ent[j].model65 == 39 {
                 let (dx, dy) = (wd(self.ent[j].x, x), wd(self.ent[j].y, y));
                 if dx * dx + dy * dy < 12_845_056 {
                     self.ent[j].mail[4] = (100, i as u16);

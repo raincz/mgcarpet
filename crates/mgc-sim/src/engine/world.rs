@@ -7015,7 +7015,7 @@ impl World {
     /// +132 (the castle requirement) as entity fields — both spell
     /// gates read the static table instead — so those four ctor
     /// writes have no destination here, exactly as in `grant_spell`.
-    fn spawn_spell_jar(
+    pub(crate) fn spawn_spell_jar(
         &mut self,
         spell: usize,
         state: u8,
@@ -8903,13 +8903,26 @@ impl World {
         e.f26 = self.wiz_charge[0] as i16;
         self.wiz_charge[0] = 0;
         // :66148-50 — the dest triple: the CARPET's raw axis (+72/+76,
-        // not the muzzle) projected 0x4000 along the live aim
-        // (sub_41EC0). Pair imports carry it and masked the missing
-        // stamp; the free run's (0,0,0) bent the homing tail
-        // (mc1l5 t=23389, the take's last dev — the residual offset
-        // was exactly muzzle − carpet).
+        // not the muzzle) projected along the live aim (sub_41EC0).
+        // Pair imports carry it and masked the missing stamp; the
+        // free run's (0,0,0) bent the homing tail (mc1l5 t=23389, the
+        // take's last dev — the residual offset was exactly
+        // muzzle − carpet).
+        //
+        // ⭐ THE REACH IS PER-BINARY: base MC1 projects `0x4000`
+        // (:66156) and HW `10240` (hw:62376) — the only numeric
+        // difference between the two emitters, alongside the launch
+        // sound (9 vs 15). mc1hwl0 t=2747 measures the HW value
+        // directly: retail's `+150/+154` land 10,320 units from the
+        // carpet, where 0x4000 put the port 5,000 further out and
+        // bent the bolt's tail.
+        let reach = if self.g.is_hidden_worlds() {
+            10240
+        } else {
+            0x4000
+        };
         let mut d = (p.x, p.y, p.z);
-        Gen::polar_step(&mut d, p.heading, p.pitch, 0x4000);
+        Gen::polar_step(&mut d, p.heading, p.pitch, reach);
         let e = &mut self.g.ent[pr];
         e.dest_x = d.0;
         e.dest_y = d.1;
@@ -17531,6 +17544,82 @@ mod tests {
             acquires(GameId::Mc1),
             "base MC1 homes too (mc1l5 t=23383 — the remc1 no-case-16 reading is the listing's gap)"
         );
+    }
+
+    /// ⭐⭐ THE HW WALL OF FIRE FORKS TWICE MORE THAN THE SPRITE, AND
+    /// NEITHER FORK IS FIXTURE-VISIBLE.
+    ///
+    /// - **The behavior row.** Base MC1's `(9,16)` ctor is `sub_3A270`
+    ///   (:46349, `+156 = &unk_98F38[5]`); HW's is `sub_3A5F0`
+    ///   (hw:42461, `+156 = &unk_98F78` = the array base + 0x40, i.e.
+    ///   ROW 2). Row 5's 5-unit yaw cap held HW's bolt back on the one
+    ///   tick its homing needed a real swing (mc1hwl0 t=2750→2751:
+    ///   retail turns `+30` 167 → 178 where the port stopped at 172).
+    /// - **The aim projection.** The emitter writes `+150/+154` = the
+    ///   carpet's raw axis stepped along the live aim, `0x4000` in base
+    ///   MC1 (:66156) and `10240` in HW (hw:62376).
+    ///
+    /// Both are INHERITED-ONLY: `row156` is decoded from the recorded
+    /// `+156` pointer and `+150/+154` are restored wholesale by every
+    /// pair import, so no fixture can ever assert them — only a free
+    /// run or this test can.
+    #[test]
+    fn the_hw_wall_of_fire_forks_its_behavior_row_and_its_aim_reach() {
+        fn flat(game: GameId) -> World {
+            let planes = Planes {
+                height: vec![100; 0x10000],
+                tile_type: vec![5; 0x10000],
+                shading: vec![32; 0x10000],
+                angle: vec![5; 0x10000],
+                ceiling: Vec::new(),
+            };
+            World::new_for_game(planes, &[], 1, assets(), game)
+        }
+        let row = |game: GameId| -> u8 {
+            let mut w = flat(game);
+            let b =
+                w.g.spawn_firewall_bolt(100u16 << 8, 100u16 << 8, 4000)
+                    .expect("bolt slot");
+            w.g.ent[b].row156
+        };
+        assert_eq!(row(GameId::Mc1), 5, "base MC1's m16 ctor takes row 5");
+        assert_eq!(row(GameId::Mc1Hw), 2, "HW's m16 ctor takes row 2");
+
+        // The aim projection, measured as the 3-D distance from the
+        // carpet's own axis to the stamped `+150/+154` triple.
+        let reach = |game: GameId| -> i32 {
+            let mut w = flat(game);
+            let p = PlayerPose {
+                x: 100u16 << 8,
+                y: 100u16 << 8,
+                z: 4000,
+                heading: 0,
+                pitch: 0,
+                speed: 0,
+            };
+            let ctx = MobCtx {
+                px: p.x,
+                py: p.y,
+                pz: p.z,
+                pyaw: 0,
+                pmana: 0,
+                pmana_max: 0,
+                pdead: false,
+                strict: false,
+                patches: crate::patches::WorldPatches::RETAIL,
+                mc2_turn: 0,
+            };
+            w.emit_spell(20, 0, p, false, &ctx);
+            let b = (1..w.g.ent.len())
+                .find(|&j| w.g.ent[j].class64 == 9 && w.g.ent[j].model65 == 16)
+                .expect("the bolt");
+            let e = &w.g.ent[b];
+            let dh = Gen::dist2_sq(p.x, p.y, e.dest_x, e.dest_y);
+            let dz = e.site_z as i32 - p.z as i32;
+            Gen::isqrt((dh + dz * dz) as u32) as i32
+        };
+        assert_eq!(reach(GameId::Mc1), 0x4000, "base MC1 projects 0x4000");
+        assert_eq!(reach(GameId::Mc1Hw), 10240, "HW projects 10240");
     }
 
     #[test]

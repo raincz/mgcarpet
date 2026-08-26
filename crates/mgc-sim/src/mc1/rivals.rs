@@ -458,34 +458,53 @@ impl World {
     /// human's, 0 on ground jars; retail keeps the owner in +42 and
     /// +144 dead — the importer and every native mint normalize into
     /// f144).
+    /// ⭐⭐ IT IS THE GROUND-JAR CTOR, RUN AT THE WIZARD'S OWN
+    /// POSITION — every retail mint site hands the class-12 thunk
+    /// `&wizard.position`: the learn expiry
+    /// (`off_987DE[s].adress(a1 + 72)`, :19417), the level-start book
+    /// and the respawn re-grant (`sub_373F0(&wiz.pos, 12, model)`,
+    /// :54900). The token is then stamped OWNED — `+16 |= 1` and
+    /// `+42 = the wizard slot` (:19428-29 / :54905-06) — and pushed
+    /// onto the acquisition list by the caller.
+    ///
+    /// The old port mint wrote four fields onto a bare `new_event`
+    /// and never LINKED it, so a rival's conjured token stood at the
+    /// origin with `NewEvent`'s 300 life and an empty cost cache.
+    /// mc1hwl0 t=2350 is the whole of it: rival 1's Armageddon
+    /// countdown expires and retail conjures `(12,20)` at slot 256
+    /// carrying `flags 5`, `+50 = 26`, `+136 = 5000`, `+140 = 192`,
+    /// life `0/0` and the wizard's own x/y/z, against the port's
+    /// zeros and `max_life 300`. [`World::spawn_spell_jar`] is that
+    /// ctor verbatim and was already right for the world's jars —
+    /// ⭐ *when two paths model one retail constructor, DIFF THEM*
+    /// ([[mc1-jar-poll-walk-slot]] again).
+    ///
+    /// ⚠ `+70` follows the world's encoding, not a fixed one: a
+    /// conformance import carries retail's `3·spell + phase` (phase 0
+    /// = an owned token) and `class12_tick` dispatches on it, while a
+    /// native world uses [`MANIFEST_BASE`]` + spell`. The `+16` bit 0
+    /// is what tells the strict arm a `3·spell` record is a TOKEN and
+    /// not a jar, so it is not decoration.
     fn mint_manifestation(&mut self, spell: usize, owner: u16) -> Option<usize> {
-        let m = self.g.new_event()?;
-        let f44 = self.spells()[spell].damage.min(u16::MAX as u32) as u16;
+        let (wx, wy, wz) = {
+            let e = self.g.ent.get(owner as usize)?;
+            (e.x, e.y, e.z)
+        };
+        let state = if self.strict_retail {
+            (spell * 3) as u8
+        } else {
+            crate::engine::world::MANIFEST_BASE + spell as u8
+        };
+        let m = self.spawn_spell_jar(spell, state, wx, wy, wz)?;
         {
             let e = &mut self.g.ent[m];
-            e.class64 = 12;
-            e.model65 = spell as u8;
-            e.tick70 = crate::engine::world::MANIFEST_BASE + spell as u8;
-            e.flags &= !8;
+            e.flags |= 1; // :19428 / :54906 — the OWNED-token bit
             e.f26 = 0;
-            e.f44 = f44;
+            // Retail's +42 = the owning wizard's slot; the port homes
+            // that lane at f144 for class 12 (the importer's own
+            // normalization — conformance.rs `f144: tr(r.f42)`).
             e.f144 = owner;
-            // The spell-16 cost-cache ctor seed (sub_3BF70 :47996,
-            // same as the human grant): 1000/9. Rival tokens keep it
-            // until a castle EVENT stamps them — the mc1l5 take
-            // shows Vodor's token at 1000/9 under his standing
-            // authored castle.
-            if spell == 16 {
-                e.f136 = SPELLS[16].possess_mana as i32;
-                e.f140 = SPELLS[16].possess_mana as i32 / 101;
-            }
         }
-        self.g.set_sprite(m, 77);
-        let (h4, v4) = {
-            let e = &self.g.ent[m];
-            (e.f80 * 4, e.f84 * 4)
-        };
-        self.g.extents(m, h4, v4);
         Some(m)
     }
 
@@ -1269,7 +1288,13 @@ impl World {
         // dying mid-burst cancels the rest of it in one double drop —
         // mc1l2 token 301 goes 2 → 0 on the tick rival 300's act_life
         // crosses to −280.
-        if self.g.ent[i].act_life < 0 {
+        // ⭐ AND THE GATE IS THE WHOLE `sub_55DD0`, NOT ITS LIFE LEG:
+        // the owner's life, the token's live CASTLE REQUIREMENT and —
+        // on a FULL tick only — the purse. The commit no longer
+        // pre-screens the castle ladder ([`World::rival_cast`]), so
+        // this is where a castle-gated burst dies: 26 → 1 → 0 in one
+        // token tick (mc1hwl0 t=2426-27, token 256).
+        if !self.rival_token_gate(ri, spell, f26 == count) {
             self.g.ent[m].f26 = 1;
             if self.g.ent[m].f26 > 0 {
                 self.g.ent[m].f26 -= 1;
@@ -1928,6 +1953,27 @@ impl World {
     }
 
     /// Target signature (sub_15420 :19039): team + model + class<<7.
+    ///
+    /// ⭐⭐ THE TEAM WORD IS RETAIL'S OWNER **SLOT**, AND THE PORT DOES
+    /// NOT STORE SLOTS THERE. Every imported `+24` runs through the
+    /// importer's `tr()`, which rewrites the human carpet's slot to
+    /// the [`PLAYER_TARGET`] sentinel (the human is not a pool record
+    /// in native play). The stored `+148` imports RAW — retail's own
+    /// arithmetic off slot 472 — so a port-side recompute over a
+    /// HUMAN-OWNED target read 0xFFFF where retail read 472 and the
+    /// staleness test refused a target that was perfectly alive. The
+    /// handler then returned with NO WRITES, which is invisible to
+    /// pair mode as anything but a one-tick-stale lane
+    /// (mc1hwl0 t=1902: rival 0 raids the human's castle 785,
+    /// stored sig 858 = 472+2+(3<<7) against a recompute of 385
+    /// = 0xFFFF+2+384 wrapped, and `+34` froze at the imported value
+    /// for the rest of the take).
+    ///
+    /// Resolving the sentinel back to the imported carpet slot puts
+    /// the recompute in retail's numbering. A NATIVE world has no
+    /// pooled carpet (`mc1_carpet_slot` 0); there the sentinel stays
+    /// and the arithmetic is merely self-consistent, which is all it
+    /// ever has to be — nothing imported can disagree with it.
     fn target_sig(&self, target: u16) -> u16 {
         if target == 0 {
             return 0;
@@ -1936,8 +1982,12 @@ impl World {
             return PLAYER_TARGET;
         }
         let e = &self.g.ent[target as usize];
-        e.id24
-            .wrapping_add(e.model65 as u16)
+        let team = if e.id24 == PLAYER_TARGET && self.mc1_carpet_slot != 0 {
+            self.mc1_carpet_slot
+        } else {
+            e.id24
+        };
+        team.wrapping_add(e.model65 as u16)
             .wrapping_add((e.class64 as u16) << 7)
     }
 
@@ -2077,6 +2127,29 @@ impl World {
 
     /// Enemy-castle pick (sub_143A0 :18496-536): hated-and-undefended
     /// or plain poorer, nearest in range.
+    ///
+    /// ⭐⭐ IT WALKS THE TICK-TOP CLASS-3 CHAIN (`var_u32_36462[0]`
+    /// :18507), NOT THE POOL — the same roster the wizard and balloon
+    /// picks already use, and **membership IS the liveness filter**
+    /// (`actLife >= 0 && !(flags & 0x10)`, sampled once at the tick
+    /// top). The per-node tests are only `+24 != mine` and `+65 == 2`;
+    /// there is no class test (the chain is class-3) and no `0x400`
+    /// test (the chain build's life gate has already run).
+    ///
+    /// mc1hwl0 t=1920 is the exemplar and it is a DEAD CASTLE that
+    /// still stands: the human's keep 785 takes its fatal hit at
+    /// t=1920 (`act_life` 20000 → −2000, `+70` 4 → 6) but is not
+    /// reap-flagged until t=1921, so a pool scan filtered on `0x400`
+    /// still saw it, `poorer` still held (140 stored against the
+    /// rival's own 4490), and the port re-elected a corpse it could
+    /// never raid. Retail's chain had dropped it at the tick top, so
+    /// its cascade fell straight through to the ball claim: `+415`
+    /// 7 → 6, `+146` 785 → the mana ball 356.
+    ///
+    /// ⭐ And the range gate is the ELECTION WINNER's alone
+    /// (:18531-34, strict `>=` → reject) — the same shape as the
+    /// wizard pick. Filtering by range inside the election lets a
+    /// far-but-nearest castle be replaced by a farther-ranked one.
     fn rival_pick_castle_target(&mut self, ri: usize, i: usize) -> bool {
         let me = self.rivals[ri].ent;
         let my_castle = self.rival_castle(me);
@@ -2086,11 +2159,11 @@ impl World {
             return false;
         }
         let (px, py) = (self.g.ent[i].x, self.g.ent[i].y);
-        let range = BEHAVIOR[self.g.ent[i].row156 as usize].v_28 as i32;
         let mut best: Option<(u16, i32)> = None;
-        for j in 1..self.g.ent.len() {
+        for c in 0..self.g.wiz_chain.visible_len() {
+            let j = self.g.wiz_chain.list[c] as usize;
             let e = &self.g.ent[j];
-            if e.class64 != 3 || e.model65 != 2 || e.flags & 0x400 != 0 || e.id24 == me {
+            if e.model65 != 2 || e.id24 == me {
                 continue;
             }
             let Some(owner) = self.owner_slot(e.id24) else {
@@ -2109,10 +2182,13 @@ impl World {
                 continue;
             }
             let d = Gen::dist2_sq(px, py, e.x, e.y);
-            if d <= range.saturating_mul(range) && best.is_none_or(|(_, bd)| d < bd) {
+            if best.is_none_or(|(_, bd)| d < bd) {
                 best = Some((j as u16, d));
             }
         }
+        // The winner alone faces the range gate (:18531-34).
+        let range = BEHAVIOR[self.g.ent[i].row156 as usize].v_28 as i32;
+        let best = best.filter(|&(_, d)| d < range.saturating_mul(range));
         if let Some((t, _)) = best {
             self.set_rival_state(ri, AiState::RaidCastle, t);
             true
@@ -3143,24 +3219,29 @@ impl World {
         if matches!(s, 0 | 3 | 7 | 8 | 11 | 13 | 15 | 17 | 20) {
             self.g.ent[i].f32 = pitch;
         }
-        // Castle-stored unlock ladder (sub_55DD0 :64917-19), enforced HERE
-        // at emission — retail arms the projectile in sub_155F0, then
-        // fizzles it on its first tick (:65049) when the caster owns no
-        // castle storing >= castle_req. We collapse that: the cooldown is
-        // already consumed above, so bail before arming the manifestation,
-        // debiting, or emitting — a castle-gated spell the rival hasn't
-        // unlocked does no damage and grants no buff, but no longer freezes
-        // the picker on an eternal WAIT. Silent for rivals (retail's buzz 29
-        // would storm at Lightning's 1-tick recast); the human keeps its UI
-        // buzz. Returns true so the caller's post-cast bookkeeping (war-flag
-        // clear) matches retail's sub_155F0 "success".
-        if def.castle_req > 0
-            && !self
-                .rival_castle(self.rivals[ri].ent)
-                .is_some_and(|c| self.g.ent[c].f140.max(0) as u32 >= def.castle_req)
-        {
-            return true;
-        }
+        // ⭐⭐⭐ THE CASTLE-STORED LADDER IS NOT A COMMIT GATE — IT IS
+        // THE TOKEN'S OWN (`sub_55DD0` :64917-19, reached from the
+        // token handler `sub_56090` :65030-88, and separately from the
+        // projectile's first tick :65049). `sub_155F0` runs
+        // cooldown → `+32` → `+48 = +50` with NOTHING between
+        // (:19124-27, :19172-76), so a rival whose castle stores
+        // nothing still ARMS, and the burst dies one tick later when
+        // the token's gate refuses and drops it to 1 for the shared
+        // decrement. The port used to bail here instead, which ate
+        // the arm exactly as an earlier version of the same bail ate
+        // the `+32` stamp above — ⭐ *a collapse inherits every write
+        // retail does before the point it collapsed to, and that
+        // ledger has to be re-read every time the collapse moves*.
+        // mc1hwl0 t=2425: rival 1's Wall of Fire token 256 reads
+        // `+48` 0 → **26** → 0 across t=2425/2426/2427, a one-tick
+        // spike the collapsed port flattened to a permanent 0 (98
+        // rows over 62 pairs). Its castle 522 stores 4,490 against
+        // HW spell 20's 60,000 requirement — it never fires, and
+        // retail still counts.
+        // The refusal stays SILENT for the AI (retail's buzz 29 is
+        // the local player's channel and would storm at Lightning's
+        // 1-tick recast).
+        //
         // The commit only ARMS the token (+48 = +50, through the
         // VALIDATED binding) — the bolt, the sub_55E80 debit and the
         // mid-burst regen freeze all run at the TOKEN's own pool slot

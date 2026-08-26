@@ -13,6 +13,54 @@
       "file": "the-rival-commit-stamps-its-aim-pitch-above-the.mgcr",
       "source": "mc1hwl0-noskip",
       "note": "THE RIVAL COMMIT STAMPS ITS AIM PITCH ABOVE THE castle bail: retail's sub_155F0 runs cooldown -> +32 -> token +48 with NO castle test in either arm (:19124-27 precision, :19172-76 wide cone) — the stored-mana unlock ladder is the PROJECTILE's own first tick (sub_55DD0 :65049), 40k lines away. The port collapses that fizzle into an emission-time bail, and the bail sat ABOVE the pitch stamp, so a rival whose castle stores nothing stopped aiming altogether. mc1hwl0-noskip t=359: rival 1 (slot 473, castle 522 with f140=0) commits Lightning and its +32 must read 8, not the imported 7."
+    },
+    {
+      "t": 1902,
+      "file": "the-target-signature-s-team-word-is-a-pool-slot.mgcr",
+      "source": "mc1hwl0",
+      "note": "THE TARGET SIGNATURE'S TEAM WORD IS A POOL SLOT, SO THE PORT'S HUMAN SENTINEL MUST BE RESOLVED BACK: sub_15420 (:19039) is team + model + class<<7, and 'team' is retail's +24 = the OWNER'S ENTITY SLOT. The importer rewrites every human-owned +24 to the port's PLAYER_TARGET (0xFFFF) sentinel while the stored +148 imports RAW, so a port-side recompute over a human-owned target read 0xFFFF where retail read 472 — the staleness test (sub_15440) refused a target that was perfectly alive and the combat handler returned with NO WRITES, which reads exactly like a one-tick-stale lane and is not one. mc1hwl0 t=1902: rival 1 raids the human's castle 785 (stored sig 858 = 472+2+(3<<7) against a recompute of 385), and its +34 must track the castle at 190, not hold the imported 157."
+    },
+    {
+      "t": 1920,
+      "file": "the-enemy-castle-pick-walks-the-tick-top-class-3.mgcr",
+      "source": "mc1hwl0",
+      "note": "THE ENEMY-CASTLE PICK WALKS THE TICK-TOP CLASS-3 CHAIN, NOT THE POOL: sub_143A0 (:18507) iterates var_u32_36462[0] and its only per-node tests are '+24 != mine' and '+65 == 2' — membership IS the liveness filter (actLife >= 0 && !(flags & 0x10), sampled once at the tick top). A DEAD CASTLE STILL STANDS: the human's keep 785 takes its fatal hit at t=1920 (act_life 20000 -> -2000, +70 4 -> 6) and is not reap-flagged until t=1921, so a pool scan filtered on 0x400 still saw it and the port re-elected a corpse it could never raid. Retail's chain had already dropped it, so its cascade fell through to the ball claim: +415 7 -> 6, +146 785 -> the mana ball 356."
+    },
+    {
+      "t": 2005,
+      "file": "the-mana-magnet-stamps-soft-killed-balls-too-its.mgcr",
+      "source": "mc1hwl0",
+      "note": "THE MANA MAGNET STAMPS SOFT-KILLED BALLS TOO — ITS ONLY PER-NODE TEST IS +65 == 39: sub_29920 (:31252) walks the tick-start ball chain with no class test (membership supplies it) and NO 0x400 test. Retail's reap is the NEXT tick's top-of-frame sweep, so a ball collected earlier in this pass keeps its class, model and link and every magnet below it still overwrites its ch4 pair; the ball's ch4 arm then turns +30 to whichever magnet stamped LAST. mc1hwl0 t=2005: ball 823 is flagged between magnets 260 and 786, so its heading must read 957 (the bearing to magnet 787, the last stamper) and not 1888 (magnet 256, the last one before the flag)."
+    },
+    {
+      "t": 2350,
+      "file": "the-rival-manifestation-mint-is-the-ground-jar-c.mgcr",
+      "source": "mc1hwl0",
+      "note": "THE RIVAL MANIFESTATION MINT IS THE GROUND-JAR CTOR RUN AT THE WIZARD'S OWN POSITION: every retail mint site hands the class-12 thunk &wizard.position — the learn expiry (off_987DE[s].adress(a1 + 72), :19417) and the level-start / respawn re-grants (sub_373F0(&wiz.pos, 12, model), :54900) — and then stamps the token OWNED, +16 |= 1 and +42 = the wizard slot (:19428-29 / :54905-06). The old port mint wrote four fields onto a bare NewEvent and never LINKED it. mc1hwl0 t=2350: rival 1's Armageddon countdown expires and the (12,20) at slot 256 must carry flags 5, +50 = 26, +136 = 5000, +140 = 192, life 0/0 and the wizard's own x/y/z."
+    },
+    {
+      "t": 2425,
+      "file": "the-castle-stored-ladder-is-the-token-s-gate-not.mgcr",
+      "source": "mc1hwl0",
+      "note": "THE CASTLE-STORED LADDER IS THE TOKEN'S GATE, NOT THE COMMIT'S: sub_155F0 runs cooldown -> +32 -> +48 = +50 with nothing between (:19124-27, :19172-76) and has no castle test anywhere, so a rival whose castle stores nothing still ARMS its burst; sub_55DD0 (:64917-19) refuses at the TOKEN's own tick one pass later and drops +48 to 1 for the shared decrement. The port's collapsed emission-time bail ate the arm exactly as an earlier version of it ate the +32 stamp. mc1hwl0 t=2425: rival 1's Wall of Fire token 256 must read +48 = 26 (26 -> 0 across t=2426/2427), with castle 522 storing 4,490 against HW spell 20's 60,000 requirement."
+    },
+    {
+      "t": 2746,
+      "file": "the-hw-wall-of-fire-bolt-lays-a-10-0-fire-every.mgcr",
+      "source": "mc1hwl0",
+      "note": "THE HW WALL-OF-FIRE BOLT LAYS A (10,0) FIRE EVERY FLIGHT TICK: HW's class-9 state-17 handler is sub_54600 (hw:59929), which WRAPS sub_52770_52AB0 — run the generic flight, then, if the bolt survived it (if (+64), the class byte its own free clears), spawn a (10,0) at the bolt's post-move position stamped +16 |= 0x80, +18 |= 1 and +24 = the bolt's owner. Base MC1 has no such wrapper: its state 17 is the bare sub_52770, which is why the port read 'no fire trail'. mc1hwl0 t=2746: the human's bolt is born at slot 822 and retail's very next allocation is the (10,0) at 788, on the bolt's own first flight tick."
+    },
+    {
+      "t": 2750,
+      "file": "the-hw-napalm-cloud-is-born-off-the-tile-chain-s.mgcr",
+      "source": "mc1hwl0",
+      "note": "THE HW NAPALM CLOUD IS BORN OFF THE TILE CHAIN: sub_3BC60 (hw:43776-77) writes the (10,53) detonation's position DIRECT (+72 = *a1, +76 = a1[4]) with no sub_41CF0 anywhere, exactly like the base-MC1 twin sub_3B8E0 — so the recorded cloud reads flags 0, not the linker's bit 2. mc1hwl0 t=2750: the m16 bolt detonates into slot 494 and its flags must be 0, not 4."
+    },
+    {
+      "t": 2751,
+      "file": "the-ring-iterator-burns-its-own-lcg-step-before.mgcr",
+      "source": "mc1hwl0",
+      "note": "THE RING ITERATOR BURNS ITS OWN LCG STEP BEFORE THE FIRST CELL: hw:29753 steps the cloud's +4 ONCE between sub_11410 and the first sub_114B0, before any cell is read, and only then two per cell. The base-MC1 arm has always carried that pre-draw; the HW twin was missing it, so every HW wall painted its ring off a stream one step behind and every downstream consumer of the cloud's +4 desynced. mc1hwl0 t=2751: cloud 494's first paint — its own +4 and the x/y of the flames at 354/363/822."
     }
   ]
 }

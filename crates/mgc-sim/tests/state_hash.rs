@@ -879,12 +879,34 @@ fn level_005_golden_state_hashes() {
         // run 16 excess resets -> 2, horizon 29,923 -> 45,231, final
         // segment bit-exact to END; l0/l1/l2/l3 re-verified END
         // bit-exact under all three laws.
-        0xac013c377e17a279, // post-init
-        0x1425a09285152c87, // A
-        0x17b7bac172ad5992, // B
-        0xd91a848f4264dd7e, // C
-        0x9511b8b62e2b1e05, // D: 64 ticks of two-hand fireball combat
-        0x8e5f8f10143c5c65, // E: 100 aftermath ticks
+        // ⭐ ALL SIX re-pinned for THE mc1hwl0 CAMPAIGN SESSION's rival
+        // laws. (1) THE MANIFESTATION MINT IS THE GROUND-JAR CTOR AT
+        // THE WIZARD'S POSITION: every retail mint hands the class-12
+        // thunk `&wiz.position` (:19417, :54900), so a rival's token
+        // now carries its whole ctor row (`+50` count, `+136`/`+140`
+        // price cache, life 0/0 over NewEvent's 300), a TILE LINK and
+        // the owned bit `+16 |= 1` — all hashed state from init on,
+        // since level 005's rivals mint their authored book at spawn.
+        // (2) THE CASTLE LADDER IS THE TOKEN'S GATE, NOT THE COMMIT'S:
+        // `sub_155F0` arms `+48 = +50` with no castle test and
+        // `sub_55DD0` (:64917) refuses one tick later, so a
+        // castle-gated burst spikes 26 → 0 instead of never arming.
+        // (3) The enemy-castle pick walks the tick-top class-3 chain
+        // and (4) the magnet stamp has no `0x400` test.
+        // LAYOUT-ONLY, PROVEN: **OBSERVABLE holds byte-for-byte at ALL
+        // SIX** — level 005's rivals own no castle-gated spell they
+        // can afford in these windows and no dying ball is magnet-
+        // stamped, so the moved lanes are the token rows, their tile
+        // links and the chain-order pick alone. Corpus: all ten
+        // certified takes still read END bit-exact in `replay
+        // --segmented`, and mc1hwl0 goes 1920 → 3289 with
+        // `--segmented` devs 4,921 → 3,825.
+        0xc02cc5c248ff38f5, // post-init
+        0xd0106aff56c316fb, // A
+        0x3e7c352ebcd0d7fe, // B
+        0xbed151642b91ccb6, // C
+        0x42d30d7d34d7bc5d, // D: 64 ticks of two-hand fireball combat
+        0xdd4b058f608d4799, // E: 100 aftermath ticks
     ];
     assert_eq!(
         got, GOLDEN,
