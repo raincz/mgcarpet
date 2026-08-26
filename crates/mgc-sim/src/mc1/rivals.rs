@@ -1747,8 +1747,10 @@ impl World {
         // writes the target itself (:18489-90 — `+146` = the
         // established castle from wizext+50, `+148` = its signature);
         // this transition is NOT targetless.
-        if castle.is_some() && self.g.ent[i].act_life < (self.g.ent[i].max_life / 2) as i32 {
-            self.set_rival_state(ri, AiState::Home, castle.unwrap() as u16);
+        if let Some(c) = castle
+            && self.g.ent[i].act_life < (self.g.ent[i].max_life / 2) as i32
+        {
+            self.set_rival_state(ri, AiState::Home, c as u16);
             return;
         }
         if !think {
@@ -1816,8 +1818,10 @@ impl World {
         // 9. Idle (sub_14DC0 :18749). ⭐ The HOME leg stamps the
         // castle (:18760-61); only the CRUISE leg (:18756) writes
         // nothing but the brain byte.
-        if castle.is_some() && self.g.ent[i].act_life < self.g.ent[i].max_life as i32 {
-            self.set_rival_state(ri, AiState::Home, castle.unwrap() as u16);
+        if let Some(c) = castle
+            && self.g.ent[i].act_life < self.g.ent[i].max_life as i32
+        {
+            self.set_rival_state(ri, AiState::Home, c as u16);
         } else {
             self.rivals[ri].state = AiState::Cruise;
         }

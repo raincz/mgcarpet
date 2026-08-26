@@ -942,7 +942,7 @@ impl Simulation {
                 over,
                 falling,
                 dead,
-                mc2: walk_mc2.then(|| world::Mc2Drive {
+                mc2: walk_mc2.then_some(world::Mc2Drive {
                     ext: &mut self.carpet_mc2,
                     accel_was_active: &mut self.accel_was_active,
                 }),

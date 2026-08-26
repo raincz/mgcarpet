@@ -864,7 +864,7 @@ impl World {
     /// at slot 114 binds spell 2 into a left hand whose book says 2
     /// and whose obs still said 0. Route every hand write here.
     pub(crate) fn mc2_set_hand(&mut self, right: bool, spell: i8) {
-        let mirror = (spell >= 0).then(|| crate::mc1::spells::SpellId(spell as u8));
+        let mirror = (spell >= 0).then_some(crate::mc1::spells::SpellId(spell as u8));
         if right {
             self.mc2_book.right = spell;
             self.player.right = mirror;

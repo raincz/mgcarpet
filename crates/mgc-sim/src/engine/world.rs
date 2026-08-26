@@ -26285,7 +26285,7 @@ mod tests {
         // Three spheres, ASCENDING by slot, with the NEAREST filed
         // LAST — so a pool scan and a chain walk disagree only once
         // the chain is cut.
-        let mut sphere = |w: &mut World, tx, ty| {
+        let sphere = |w: &mut World, tx, ty| {
             let (sx, sy) = mc2_pos(tx, ty);
             let s = w.g.spawn_mana_ball(sx, sy, gz).expect("sphere");
             w.g.ent[s].f144 = PLAYER_TARGET;

@@ -1684,7 +1684,6 @@ impl Gen {
                 e.f32 = pitch;
             }
         }
-        let miss_stamp = Some(MC1_MISS_STAMP);
         // ⭐ RETAIL'S DESPAWN SITS INSIDE THE CHILD-ALLOCATION GUARD.
         // Every class-9 detonation arm has the shape
         // `if ((fx = sub_373F0_377B0(...))) { …score…; sub_41E80(a1); }`
@@ -1745,16 +1744,13 @@ impl Gen {
                 match struck {
                     Some(MailTarget::Pool(j)) => e.f146 = j as u16,
                     Some(MailTarget::Player) => e.f146 = PLAYER_TARGET,
-                    // HIDDEN.EXE links its pool at its own address, so
-                    // the constant is PER BINARY and the HW one has no
-                    // corpus witness yet. Leave HW at NewEvent's 0
-                    // rather than stamp a confidently wrong value; cut
-                    // it in when an hw take shows the miss rows.
-                    None => {
-                        if let Some(s) = miss_stamp {
-                            e.f146 = s;
-                        }
-                    }
+                    // The per-binary caution this arm used to carry is
+                    // SETTLED: HIDDEN.EXE links its pool at the same
+                    // base and records the same word (mc1hwl0 t=335
+                    // slot 589, t=31088 slot 944 — see
+                    // [`MC1_MISS_STAMP`]), so the stamp is emitted for
+                    // both binaries and the old `Option` hedge is gone.
+                    None => e.f146 = MC1_MISS_STAMP,
                 }
             }
             if copy_f44 {
@@ -2261,7 +2257,6 @@ impl Gen {
         // constant is PER BINARY; HIDDEN.EXE links its pool
         // elsewhere and has no corpus witness, so HW keeps
         // NewEvent's 0.
-        let miss_stamp = Some(MC1_MISS_STAMP);
         if let Some(s) = self.spawn_effect(38, x, y, z) {
             let e = &mut self.ent[s];
             e.id24 = own;
@@ -2273,7 +2268,7 @@ impl Gen {
             e.f146 = match hit {
                 Some(MailTarget::Pool(j)) => j as u16,
                 Some(MailTarget::Player) => PLAYER_TARGET,
-                None => miss_stamp.unwrap_or(0),
+                None => MC1_MISS_STAMP,
             };
         }
         self.ent[i].flags |= 0x400;
@@ -3229,7 +3224,6 @@ impl Gen {
         // no deflection (:63435-47). +146 is the unguarded pointer
         // difference, so a scan that found nothing records the
         // link-time constant [`MC1_MISS_STAMP`] rather than 0.
-        let miss_stamp = Some(MC1_MISS_STAMP);
         if let Some(fx) = self.spawn_effect(f69, disp.0, disp.1, disp.2) {
             let quartered = match hit {
                 Some(MailTarget::Pool(j)) => {
@@ -3246,7 +3240,7 @@ impl Gen {
             e.f146 = match hit {
                 Some(MailTarget::Pool(j)) => j as u16,
                 Some(MailTarget::Player) => PLAYER_TARGET,
-                None => miss_stamp.unwrap_or(0),
+                None => MC1_MISS_STAMP,
             };
             e.f44 = if quartered { f44 >> 2 } else { f44 };
         }
@@ -3478,7 +3472,6 @@ impl Gen {
                 // 64608 on all THIRTEEN craters; the lane is the
                 // graded obs `chase`, so leaving it at 0 was a floor
                 // under the certified run.
-                let miss_stamp = Some(MC1_MISS_STAMP);
                 // ⭐ AND THE CHILD INHERITS THE BOLT'S `+44`. It is the
                 // last line of the same five-line explode block the
                 // `+146` stamp above comes from (`v20[22] = *(a1+44)`,
@@ -3505,7 +3498,7 @@ impl Gen {
                     e.f146 = match hit {
                         Some(MailTarget::Pool(j)) => j as u16,
                         Some(MailTarget::Player) => PLAYER_TARGET,
-                        None => miss_stamp.unwrap_or(0),
+                        None => MC1_MISS_STAMP,
                     };
                 }
             }

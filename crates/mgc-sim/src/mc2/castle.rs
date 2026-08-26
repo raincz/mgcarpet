@@ -606,12 +606,12 @@ impl Gen {
 
     /// `sub_11CB0` (EF:4557) — the castle-CAST site test the (9,10)
     /// ball runs at launch and as its per-tick tripwire: REFUSED when
-    /// (a) any castle (class-3 model-2) sits within its x/y extents
-    /// + 2560 of the point, (b) any building (the dword_38527 chain =
-    /// the live (10,45) roster) within the same margin, or (c) any
-    /// cell of retail's 8×8 window anchored at (tile − 8, tile − 8)
-    /// (the left/up-biased quirk, kept verbatim) is built (angle bit7)
-    /// or, on caves, sealed (bit3 — `sub_11C80`).
+    /// (a) any castle (class-3 model-2) sits within its x/y
+    /// extents + 2560 of the point, (b) any building (the dword_38527
+    /// chain = the live (10,45) roster) within the same margin, or
+    /// (c) any cell of retail's 8×8 window anchored at (tile − 8,
+    /// tile − 8) (the left/up-biased quirk, kept verbatim) is built
+    /// (angle bit7) or, on caves, sealed (bit3 — `sub_11C80`).
     pub(crate) fn mc2_castle_cast_site_ok(&self, x: u16, y: u16) -> bool {
         let wd = |p: u16, q: u16| (p.wrapping_sub(q) as i16 as i32).abs();
         for j in 1..self.ent.len() {

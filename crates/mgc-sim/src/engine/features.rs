@@ -8966,7 +8966,7 @@ mod tests {
             e.f26 = 14; // tile range
             e.act_life = 100;
         }
-        let mut sphere = |g: &mut Gen| {
+        let sphere = |g: &mut Gen| {
             let b = g.new_event().unwrap();
             let e = &mut g.ent[b];
             e.class64 = 10;
@@ -9040,7 +9040,7 @@ mod tests {
         let mut g = mc2_gen();
         // Both spheres straight ahead of the probe (yaw 0 = −y), the
         // nearer one first.
-        let mut sphere = |g: &mut Gen, d: u16| {
+        let sphere = |g: &mut Gen, d: u16| {
             let b = g.new_event().unwrap();
             let e = &mut g.ent[b];
             e.class64 = 10;

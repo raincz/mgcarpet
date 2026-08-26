@@ -4631,8 +4631,9 @@ mod tests {
 
     /// A freed MC1 slot is not an EMPTY slot: retail's free path
     /// clears +64 and pushes the stack — every OTHER byte stays, and
-    /// the blind tracker (`sub_52550`, ledger §THE PROJECTILE LEDGER
-    /// + BLIND TRACKER) steers at whatever the record still holds.
+    /// the blind tracker (`sub_52550`, ledger §THE PROJECTILE
+    /// LEDGER + BLIND TRACKER) steers at whatever the record still
+    /// holds.
     /// mc1l0 t=3464-70: bolt 557 tracked reaped slot 534's stale
     /// position (pitch pinned level by the corpse's raw-2048 bearing);
     /// the old `Ent::default()` import re-aimed it at the ORIGIN and
