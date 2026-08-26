@@ -5608,13 +5608,35 @@ impl App {
         let speed = self.cfg.sim.options.game_speed.multiplier(self.is_mc2());
         self.accumulator += dt * speed;
         if self.paused {
-            // Frozen sim clock: drain the accumulator so
-            // resuming is clean instead of bursting through
-            // missed ticks. (The abandon-confirm dialog does
-            // NOT freeze — retail keeps the world simulating
-            // under it, EventsFunctions.cpp:31796; the dialog
-            // only owns the input. P still pauses if wanted.)
+            // ⭐ A PAUSED TURN STILL DRAWS. Retail's pause test is the
+            // SECOND statement of `sub_41780_41AC0` (:52197) — the
+            // global LCG step is the first — so a paused frame burns
+            // one draw and skips the body. Dropping the accumulated
+            // time (what this did before) skipped the draw too, which
+            // put the port one draw per paused frame behind retail
+            // and made every subsequent random outcome differ.
+            // Measured on mc1l6's 1,602-frame pause: `draws=1` on
+            // every boundary, zero pool changes. See
+            // [`World::tick_paused`].
+            //
+            // Still capped, and still drained to zero: resuming must
+            // not burst through missed ticks. (The abandon-confirm
+            // dialog does NOT freeze — retail keeps the world
+            // simulating under it, EventsFunctions.cpp:31796; the
+            // dialog only owns the input. P still pauses if wanted.)
+            let cap = ((2.0 * speed).ceil() as u32).max(4);
+            let mut turns = (self.accumulator / TICK_DT) as u32;
             self.accumulator = 0.0;
+            if turns > cap {
+                turns = cap;
+            }
+            if turns > 0 {
+                if let Some(w) = sess!(self).sim.world.as_mut() {
+                    for _ in 0..turns {
+                        w.tick_paused();
+                    }
+                }
+            }
         }
 
         // The toast line decays on WALL time at the authentic

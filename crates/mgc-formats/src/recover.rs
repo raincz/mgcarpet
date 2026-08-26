@@ -717,6 +717,68 @@ pub fn recover_pair_mc2(
 /// grading is worth most. Un-blinding it moves mc1l42's first
 /// divergence from t=6624 (a mass-spawn slot desync, six ticks
 /// downstream and nearly unreadable) to t=6618 (one entity, one flag).
+/// Is this boundary a PAUSED turn rather than a torn capture?
+///
+/// ⭐⭐⭐ **A PAUSED TURN IS ITS OWN CATEGORY — IT DRAWS AND DOES
+/// NOTHING ELSE.** Retail's turn function steps the global LCG as its
+/// FIRST statement and tests the pause flag as its second (MC1
+/// `sub_41780_41AC0` :52197; MC2's frame function draws at EF:39947
+/// and gates below), so a paused frame advances the RNG exactly one
+/// step and leaves the pool untouched. That is indistinguishable from
+/// a tear to [`capture_clean_mc1`], whose LCG clause PASSES while its
+/// `+63` clause fires on every live entity at once — which is exactly
+/// how mc1l6's 66.8-second opening pause was booked as 1,602 torn
+/// boundaries and free-run through.
+///
+/// The test is deliberately STRICTER than the tear heuristic's: every
+/// comparable entity must be frozen (`+63` delta exactly 0, not the
+/// tear clause's `0 | 2`), none re-minted, and the LCG must have moved
+/// one step. A real tear freezes SOME slots; a pause freezes ALL of
+/// them.
+///
+/// Measured both games: mc1l6 t=1..1602 (P at t=0/1 and t=1602/1603)
+/// and mc2l0-test's three cycles (P at 27/98, 143/186, 229/272), every
+/// boundary reading one LCG step with zero pool changes.
+pub fn paused_turn_mc1(pst: &RetailMc1, retail: &ObsMc1) -> bool {
+    if pst.rand.wrapping_mul(9377).wrapping_add(9439) != retail.rng {
+        return false;
+    }
+    let mut frozen = 0u32;
+    for re in &retail.entities {
+        let prev = &pst.ents[re.slot as usize];
+        if prev.class64 == 0 || prev.class64 != re.class || prev.model65 != re.model {
+            // A slot that changed class/model did something: not a pause.
+            return false;
+        }
+        if re.rand != prev.rand || re.tick_byte != prev.f63 {
+            return false;
+        }
+        frozen += 1;
+    }
+    frozen > 0
+}
+
+/// The MC2 twin of [`paused_turn_mc1`]: one LCG step, every live
+/// entity's phase byte (`+0x3E`) frozen. Same law, same evidence
+/// (`mc2l0-test`), different phase field — see [`capture_clean_mc2`].
+pub fn paused_turn_mc2(pst: &RetailMc2, st: &RetailMc2) -> bool {
+    if pst.rand.wrapping_mul(9377).wrapping_add(9439) != st.rand {
+        return false;
+    }
+    let mut frozen = 0u32;
+    for slot in 1..pst.ents.len().min(st.ents.len()) {
+        let (a, b) = (&pst.ents[slot], &st.ents[slot]);
+        if a.class3f == 0 {
+            continue;
+        }
+        if a.class3f != b.class3f || a.model40 != b.model40 || a.phase3e != b.phase3e {
+            return false;
+        }
+        frozen += 1;
+    }
+    frozen > 0
+}
+
 pub fn capture_clean_mc1(pst: &RetailMc1, retail: &ObsMc1) -> bool {
     let mut tear_suspects = 0u32;
     for re in &retail.entities {

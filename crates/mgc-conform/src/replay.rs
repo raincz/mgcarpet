@@ -619,6 +619,15 @@ struct RStats {
     respawns: u64,
     equips: u64,
     rebind_dropped: u64,
+    /// Boundaries the RECORDING spent PAUSED — its own category, not a
+    /// tear and not a graded turn. Retail's paused frame draws the
+    /// global LCG and returns, so the port reproduces it with
+    /// `World::tick_paused` and there is nothing to grade: the pool is
+    /// frozen on both sides by construction. Counting these as torn
+    /// (what the tear heuristic did) hid a 66.8-second pause at the
+    /// head of mc1l6 behind a 1,602-tick "horizon" that graded
+    /// nothing. See `recover::paused_turn_mc1`.
+    paused: u64,
     /// Recorded retail cheats replayed into the world, by name, and
     /// the ones this build has no handler for — an UNAPPLIED cheat is
     /// a guaranteed divergence from that tick on, so it is reported
@@ -803,6 +812,14 @@ impl RStats {
                 seg.ungraded,
                 seg.clean
             );
+            if i == 0 && self.paused > 0 {
+                let _ = writeln!(
+                    out,
+                    "     PAUSED: {} boundaries reproduced as `tick_paused` (one LCG \
+                     draw, frozen pool) — retail's P, not a torn capture",
+                    self.paused
+                );
+            }
             match seg.horizon {
                 Some(h) => {
                     let _ = writeln!(
@@ -918,9 +935,18 @@ impl RStats {
             let local = self.class_tags.values().filter(|&&v| v).count();
             format!(" local={local} inherited={}", self.class_tags.len() - local)
         };
+        // `paused` is reported BESIDE `graded`, never folded into it:
+        // a paused boundary is reproduced (`tick_paused`) but grades
+        // nothing, so counting it either way would lie. Only a take
+        // whose player pressed P carries a non-zero value.
+        let paused = if self.paused == 0 {
+            String::new()
+        } else {
+            format!(" paused={}", self.paused)
+        };
         format!(
             "BRIEF {take} mode={mode} terrain={terrain} end={end} segments={} gaps={gaps} \
-             devs={devs} graded={graded} clean={clean} horizon={} first={} sig={sig}{tags}\n",
+             devs={devs} graded={graded}{paused} clean={clean} horizon={} first={} sig={sig}{tags}\n",
             self.segs.len(),
             first.map_or_else(|| "END".to_string(), |t| t.saturating_sub(1).to_string()),
             first.map_or_else(|| "-".to_string(), |t| t.to_string()),
@@ -1247,7 +1273,47 @@ fn run_mc1(
                 world.arm_walk_probe(n);
             }
             book_cheat(&world, rec.cheat, &mut stats);
-            step_mc1(&mut world, ch, inp, cmd);
+            // ⭐⭐⭐ A PAUSED TURN IS ITS OWN STEP, NOT A SKIPPED ONE
+            // AND NOT A FULL ONE. Retail draws the global LCG and
+            // returns (`sub_41780_41AC0` :52197 — draw first, pause
+            // test second), so the faithful reproduction is
+            // `tick_paused`: no mover, no walk, one draw. Running the
+            // FULL step here was doubly wrong — it advanced a world
+            // retail had frozen AND consumed a different number of
+            // draws — and it is why mc1l6's opening pause read as a
+            // 1,602-tick "horizon" that graded nothing and left the
+            // port 66 phase steps ahead by t=1603.
+            //
+            // The chain (`ch`) is deliberately untouched: retail's
+            // paused frame runs no mover, so the pose must not move
+            // either.
+            if recover::paused_turn_mc1(&pst, &obs) {
+                // ⭐⭐ THE PAUSE SCREEN IS INTERACTIVE. A paused turn
+                // runs no sim, but the BIG MAP / spellbook is still
+                // live under it and a click there re-equips: mc1l6
+                // t=1579 is a bare left-mouse press — `keys_down` is
+                // EMPTY, the Enter that opened the map was 31 ticks
+                // earlier at t=1546-48 — and retail's `hand_left`
+                // goes 0 -> 2 (Accelerate) on exactly that tick, then
+                // survives the unpause at 1603. Dropping input on a
+                // paused boundary lost it, and the whole 39,754-tick
+                // take then differed by one lane forever.
+                //
+                // The equip needs no mouse model: recovery replays
+                // the recorded hand change itself
+                // (`recover.rs`: `equip(pw.hand_left, cw.hand_left)`),
+                // so applying it here is exactly the app's own
+                // `flush_equip_if_paused`. Everything else the pause
+                // screen can do is still unmodelled — this is the arm
+                // the corpus witnesses.
+                world.tick_paused();
+                if rec.equip_left.is_some() || rec.equip_right.is_some() {
+                    world.equip_hands(rec.equip_left.map(SpellId), rec.equip_right.map(SpellId));
+                }
+                stats.paused += 1;
+            } else {
+                step_mc1(&mut world, ch, inp, cmd);
+            }
             if let Some(spec) = port_dump
                 && tick.t >= spec.t
             {
@@ -2000,7 +2066,17 @@ fn run_mc2(
             }
             book_cheat(&world, rec.cheat, &mut stats);
             ktrace.arm(&world);
-            step_mc2(&mut world, ch, inp, cmd);
+            // The MC1 law's twin — see the `paused_turn_mc1` branch in
+            // the MC1 loop. MC2's frame function draws at its top
+            // (EF:39947) and gates the body below, measured on
+            // `mc2l0-test`'s three deliberate pause cycles: one LCG
+            // step, zero pool changes.
+            if recover::paused_turn_mc2(&pst, &st) {
+                world.tick_paused();
+                stats.paused += 1;
+            } else {
+                step_mc2(&mut world, ch, inp, cmd);
+            }
             if let Some(spec) = port_dump
                 && tick.t >= spec.t
             {

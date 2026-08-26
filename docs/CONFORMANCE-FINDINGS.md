@@ -904,6 +904,36 @@ post-fix).
 
 ## Resolved
 
+- **THE RIVAL COMMIT STAMPS ITS AIM PITCH ABOVE THE CASTLE BAIL
+  (2026-08-26, mc1hwl0-noskip t=359).** Retail's `sub_155F0` has TWO
+  commit arms and both run, in order, **cooldown → `+32` → token
+  `+48 = +50`**, with nothing between: sub_main.cpp :19124-27 for the
+  precision pair (spells 0/15) and :19172-76 for the wide cone
+  (3/7/8/11/13/17/20) — the union is exactly the port's own stamp
+  gate. **Neither arm tests a castle.** The stored-mana unlock ladder
+  is the PROJECTILE's own first tick, `sub_55DD0` :65049. The port
+  collapses that arm-then-fizzle into an emission-time bail (a
+  legitimate shortcut — it keeps the picker off an eternal WAIT), but
+  the bail sat ABOVE the pitch stamp, so a rival whose castle stores
+  nothing stopped aiming altogether. mc1hwl0-noskip t=359: rival 1
+  (slot 473) with castle slot 522 at `f140 = 0` was spamming Lightning
+  on its 1-tick recast, and its `+32` sat frozen at the imported value
+  for the take. Fix = hoist the stamp under the cooldown arm.
+  **mc1hwl0 horizon 345 → 1920 (+1,575); mc1hwl0-noskip 359 → 970
+  (+611)**; over the first 2,000 pairs `pitch` goes 93 rows / 91 pairs
+  → 26 / 24 and the first divergent pair moves t=359 → t=912 onto
+  `target_yaw`. Fixture
+  `mc1hwl0/the-rival-commit-stamps-its-aim-pitch-above-the.mgcr`.
+  *A collapse inherits every write retail performs before the point it
+  collapsed to — enumerate the writes between the two sites.*
+  ⚠ **The rival's cast decision has almost no graded witness**: only
+  `rival.charge`, `rival.play_index` and `rival.castle` are compared,
+  so `burst` and the whole `cooldown[]` array can drift in silence.
+  `+32` was the only lane that could see this, and it presented as a
+  one-tick-stale value — which reads like a phase bug and is not one.
+  *A port lane equal to the imported value exactly means the port did
+  not write it; in pair mode that is indistinguishable from a lag.*
+
 - **THE AIM-Z BRACKET / CASTLE-FLAG HOMING (2026-08-09, player
   report).** Homing, acquisition and impact placement measure a
   target at z + signed +78 EXCEPT model 2, measured RAW — MC1
@@ -4752,6 +4782,153 @@ re-recorded takes only.**
 
 ## Capture caveats (not port bugs)
 
+- **mc1l6 OPENS PAUSED — SCANCODE 25 (P) IS HELD AT FRAME 0 AND AGAIN
+  AT t=1602, AND ITS PUBLISHED HORIZON MEASURED THE PAUSE
+  (2026-08-26).** `replay recordings/mc1l6.mgcr --brief` reports
+  `graded=38152 clean=0 horizon=1602 first=1603
+  sig=pose:pose.tick_ctr,pose.rand`, which reads like 1,602 good ticks
+  and is the opposite. Three instruments agree on the fact:
+  `MGC_TEAR_TRACE=1:24` splits `capture_clean_mc1`'s two clauses and
+  gets **`lcg_one_step=true`, `suspects=356`** — all 356 entities at
+  `f63` delta 0 on every boundary t=1..1602; `explain` reports
+  **`records with any change: 0`** for the same span (not one field in
+  the pool moves, not just the phase byte); and the port's free run
+  through them closes the arithmetic with nothing left over —
+  **1602 mod 256 = 66, and retail's human `f63` 99 + 66 = the port's
+  165**, exactly.
+  **THE CAUSE IS A KEYPRESS, NOT A CAPTURE DEFECT.** The raw input
+  channel holds `keys_down:[25]` at **t=0, t=1, t=1602 and t=1603 —
+  and at no other tick in the whole 39,754-tick take** (4 occurrences;
+  everything else is arrows 72/75/77/80, 54 RShift, 28 Enter, 38 L,
+  57 Space). Two clean press edges bracketing the frozen span exactly.
+  Scancode 25 = 0x19 = **P**; the set-1 mapping is corroborated
+  in-repo by `recover.rs` (57 = Space = respawn), `worldmap.rs`
+  (28 = Enter = OK) and by 38+54 = Shift+L appearing 198 times (the
+  demolish combo). `tick_hz` is 24, so the pause ran **66.8 seconds**.
+  ⭐ **THE FINGERPRINT IS PROVEN BY THE DECOMPILE, NOT INFERRED.**
+  `sub_41780_41AC0` (sub_main.cpp:52197) opens with the LCG step ABOVE
+  its pause early-out:
+
+      str_AE400_AE3F0->rand_4 = 9377 * rand_4 + 9439;   // ALWAYS
+      if ( (str_AE400_AE3F0->var_0.var_u8_2 & 1) != 0 )
+        goto LABEL_52;                                   // PAUSED
+
+  so a paused turn advances the RNG exactly one step and touches
+  nothing else — precisely `capture_clean_mc1`'s two clauses
+  (`lcg_one_step` TRUE, every `f63` delta 0). **A paused span is
+  therefore indistinguishable from a torn capture to the current
+  harness, and the replay free-runs straight through it.**
+  ⭐⭐ **THE PAUSE FLAG IS ONE BIT — `dword_AE400_AE3F0() + 2`, bit 0**
+  (`var_0.var_u8_2 & 1`); the same bit gates `sub_590D0_595E0` and
+  `sub_415C0_41900` in `DrawAndEventsInGame_34530_348F0`
+  (:41666/:41670). The recorder can emit an authoritative `paused`
+  lane from it with no inference.
+  ⚠⚠ **AND PAUSING MID-PLAY IS ROUTINE, so "don't pause while
+  recording" is not a workable rule.** `mc1hwl0-noskip` has a second
+  pause at t=30896..30908 in the middle of play: P held 30896-98
+  (on), frozen 30899-30905, P held 30906-08 (off) — a 3-frame tap at
+  each edge, the natural press length at 24 Hz. mc1l6's opening press
+  is only TWO frames, i.e. truncated: that take begins mid-press, so
+  the pause was engaged BEFORE the recorder's window opened
+  (`window_gated: true`; every take's t=0 sits at wallclock 530-691,
+  never 0). No one hand-timed a press into frame 0.
+  ⚠ Blast radius for a pause-aware reclassification is nil for
+  certification: only takes with capture-skipped boundaries can move
+  (mc1l6 1602, mc1hwl0 58, mc1hwl0-noskip 10, mc2l24 12) and all ten
+  certified takes have ZERO.
+  ⚠ **The MC2 corpus takes are NOT affected**: mc2l1/l4/l24/l30 were
+  checked — every record changes on every tick from t=1, `keys_down`
+  empty. Their t≈1 deaths are a real onramp law, not a pause.
+
+- **⭐⭐⭐ A PAUSED TURN STILL DRAWS, IN BOTH GAMES — SO A LEVEL THAT
+  WAS PAUSED RUNS A DIFFERENT RANDOM STREAM FROM ONE THAT WAS NOT
+  (2026-08-26).** This is the consequence that makes the pause a
+  SIMULATION concern and not a capture curiosity. MC1 is the decompile
+  quote above. **MC2 was open** — its frame function has no pause
+  early-out anywhere in it, so which side of `D41A0_0.rand_0x8`
+  (EF:39947) the gate sits was unknowable from the listing — until
+  `recordings/mc2l0-test.mgcr` was recorded for exactly this question:
+  three deliberate pause/unpause cycles (P at t=27/98, 143/186,
+  229/272; 158 of 353 boundaries capture-skipped). Inside all three
+  spans `explain` reads **chain distance 1 with `records with any
+  change: 0`** (t=40/60/90/97, 160, 250), against 389-452 records
+  changing on every running tick. **Both games draw once per paused
+  frame and touch nothing else.**
+  ⚠ `explain`'s `draws=N` is a LOW-16 CHAIN DISTANCE, not a draw count
+  (session 38), so the running ticks' `draws=10` says nothing about a
+  live turn's draw count. Only the paused reading is load-bearing, and
+  a chain distance of 1 IS one LCG step.
+  ⭐ **P (scancode 25) IS THE PAUSE KEY IN BOTH GAMES.**
+  **PORT FIX:** `World::tick_paused()` runs retail's turn to its pause
+  early-out and no further, and the app's P-pause now drains its
+  accumulator into that call (capped, as the live loop is) instead of
+  zeroing the clock. Before this the port skipped the draw as well as
+  the turn, putting it one draw per paused frame behind retail —
+  invisible in every conformance run, because the harness never
+  pauses, and only reachable by a human pressing P.
+  **HARNESS LANE LANDED.** `paused` is now its OWN category beside
+  `draws`/`graded`/`torn`, on the player's reasoning: a paused turn
+  draws but *primarily does nothing else*, so folding it into either
+  bucket lies. `recover::paused_turn_mc1` / `_mc2` detect it — one LCG
+  step plus EVERY comparable entity frozen (`+63` / `+0x3E` delta
+  exactly 0, stricter than the tear clause's `0 | 2`, because a real
+  tear freezes SOME slots and a pause freezes ALL of them) — and
+  `replay` now reproduces such a boundary with `World::tick_paused()`
+  instead of a full turn, leaving the flight chain untouched (retail's
+  paused frame runs no mover). `--brief` reports `paused=N`, omitted
+  when zero.
+  ⭐⭐ **THE PAUSE SCREEN IS INTERACTIVE — A PAUSED TURN RUNS NO SIM
+  BUT THE BIG MAP / SPELLBOOK IS LIVE UNDER IT.** With the pause lane
+  alone, mc1l6's first divergence moved from
+  `pose:pose.tick_ctr,pose.rand` — a whole-world phase-and-RNG desync
+  — to a single lane, `wizard0.hand_left: retail Some(2) port
+  Some(0)`, which then dated itself exactly: retail's `hand_left`
+  goes 0 -> 2 (Accelerate) at **t=1579**, and at t=1579 the input
+  channel holds a bare **LEFT MOUSE PRESS** with `keys_down` EMPTY —
+  the Enter (28) that opened the map was 31 ticks earlier at
+  t=1546-48, and the mouse tracked across the open screen from
+  (240,152) to (542,188) in between. Dropping input on a paused
+  boundary lost that equip, and the whole 39,754-tick take then
+  differed by one lane forever.
+  The arm needs no mouse model: recovery replays the recorded hand
+  change itself (`recover.rs`, `equip(pw.hand_left, cw.hand_left)`),
+  so the paused branch calls `World::equip_hands` — exactly what the
+  app's own `flush_equip_if_paused` already does. Everything else the
+  pause screen can do stays unmodelled; this is the arm the corpus
+  witnesses.
+  ⭐ **RESULT — mc1l6 NO LONGER NEEDS `--start` AT ALL.** Unanchored
+  it now reads `graded=38152 paused=1602 clean=1987 horizon=1617
+  first=1618 sig=pose:pose.act_speed,pose.tgt_speed`, identical to
+  the hand-anchored `--start 1602` run, and the same signature the
+  270-tick `mc1l6-test` reaches at t=96. Horizon 1602 (measuring
+  nothing) -> 1617 (real); clean 0 -> 1987.
+  On mc2l0-test the same wiring books `paused=155` and drops `heading`
+  from the divergence signature.
+  ⚠ Detector does NOT misfire: every certified take reports no
+  `paused` field at all and is unchanged at END; `mc1hwl0-noskip`
+  books `paused=10` (its mid-play pause) with its horizon unmoved.
+  ⚠ **STILL OPEN — WALL-CLOCK PRESENTATION UNDER PAUSE.** The player
+  observes that in retail (a) blinking objects such as map markers
+  keep blinking while paused, and (b) pausing during the objective
+  narration RESTARTS that narration from the beginning on unpause.
+  Both follow from the frame loop continuing to run. The port freezes
+  its toast/subtitle decay under P (`if !self.paused` around the
+  `toast_accumulator`) while its own comment states the retail model
+  correctly — *"retail decrements the message life once per rendered
+  frame, not per game turn"* — so that gate contradicts its own
+  because-clause and is a lead. NOT measurable from the current
+  captures: `mc2l0-test` shows zero `notify` transitions in t=2..118,
+  so the narration is a voice lane the recorder does not carry.
+  Measure this take with **`--start 1602`** → `horizon=1617 first=1618
+  clean=1987 sig=pose:pose.act_speed,pose.tgt_speed`. Its pair mode
+  was healthy throughout (97 of 98 fixture-grade pairs conform) — the
+  take was never bad, it was never graded.
+  ⚠ **Generally: `horizon` and `clean` are not comparable across takes
+  when a take has capture-skipped leads — read `graded` first.
+  `end − graded` is the count of boundaries the harness declined, and a
+  large one means the horizon is measuring the port's ability to
+  free-run in the dark.** mc1l6 is the ONLY MC1 take with such a lead
+  (every other is 0; mc1hwl0-noskip is 10).
 - Pre-gate recordings: mid-pass tearing (75% of mc1l0 pairs) — see
   RECORDING.md. The runner's `capture_clean` re-classifier is
   authoritative for old files.

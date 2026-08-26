@@ -7,6 +7,12 @@
       "file": "the-hw-effect-ctor-stamps-the-same-link-time-mis.mgcr",
       "source": "mc1hwl0",
       "note": "THE HW EFFECT CTOR STAMPS THE SAME LINK-TIME MISS CONSTANT: a victim scan that found nothing records 64608 in +146 (the unguarded pointer difference), and the corpus measured 64608 on all thirteen craters — HIDDEN.EXE links its pool at the same offset, so the port's HW gate that kept NewEvent's 0 floored the graded chase lane. mc1hwl0 t=335: the (10,23) crater's chase reads 64608."
+    },
+    {
+      "t": 359,
+      "file": "the-rival-commit-stamps-its-aim-pitch-above-the.mgcr",
+      "source": "mc1hwl0-noskip",
+      "note": "THE RIVAL COMMIT STAMPS ITS AIM PITCH ABOVE THE castle bail: retail's sub_155F0 runs cooldown -> +32 -> token +48 with NO castle test in either arm (:19124-27 precision, :19172-76 wide cone) — the stored-mana unlock ladder is the PROJECTILE's own first tick (sub_55DD0 :65049), 40k lines away. The port collapses that fizzle into an emission-time bail, and the bail sat ABOVE the pitch stamp, so a rival whose castle stores nothing stopped aiming altogether. mc1hwl0-noskip t=359: rival 1 (slot 473, castle 522 with f140=0) commits Lightning and its +32 must read 8, not the imported 7."
     }
   ]
 }

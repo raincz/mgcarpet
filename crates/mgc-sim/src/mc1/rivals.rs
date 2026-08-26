@@ -3122,6 +3122,27 @@ impl World {
         // escape (sub_15E90 :19497) relies on it to advance past this
         // spell next tick.
         self.rivals[ri].cooldown[s] = AI_RECAST[s];
+        // Absolute aim pitch to the target (:19125-27 / :19168-71):
+        // the commit stamps the WIZARD's own +32 — the token-side
+        // spawner reads the pose (and the corpus grades the column).
+        //
+        // ⭐ THIS SITS ABOVE THE CASTLE BAIL BECAUSE RETAIL HAS NO
+        // CASTLE TEST IN `sub_155F0` AT ALL. Both commit arms run
+        // cooldown → +32 → token `+48 = +50` with nothing between
+        // (:19124-27 and :19172-76); the unlock ladder is the
+        // PROJECTILE's own first tick (:65049), 40k lines away. The
+        // collapse below is a legitimate shortcut for the emission,
+        // but it inherited a stamp that retail performs BEFORE the
+        // fizzle can matter — so a rival whose castle stores nothing
+        // stopped aiming altogether. mc1hwl0-noskip t=359: rival 1's
+        // castle (slot 522) holds `f140` 0 against Lightning's
+        // castle_req, and its `+32` froze at the imported value for
+        // the whole take.
+        let dh = Gen::isqrt(Gen::dist2_sq(ex, ey, tx, ty) as u32) as i32;
+        let pitch = Gen::pitch_toward(ez, tz, dh);
+        if matches!(s, 0 | 3 | 7 | 8 | 11 | 13 | 15 | 17 | 20) {
+            self.g.ent[i].f32 = pitch;
+        }
         // Castle-stored unlock ladder (sub_55DD0 :64917-19), enforced HERE
         // at emission — retail arms the projectile in sub_155F0, then
         // fizzles it on its first tick (:65049) when the caster owns no
@@ -3148,14 +3169,6 @@ impl World {
         // it the same tick — retail's phase for free.
         if let Some(m) = self.rival_token(ri, s) {
             self.g.ent[m].f26 = def.count as i16;
-        }
-        // Absolute aim pitch to the target (:19125-27 / :19168-71):
-        // the commit stamps the WIZARD's own +32 — the token-side
-        // spawner reads the pose (and the corpus grades the column).
-        let dh = Gen::isqrt(Gen::dist2_sq(ex, ey, tx, ty) as u32) as i32;
-        let pitch = Gen::pitch_toward(ez, tz, dh);
-        if matches!(s, 0 | 3 | 7 | 8 | 11 | 13 | 15 | 17 | 20) {
-            self.g.ent[i].f32 = pitch;
         }
         let _ = (ex, ey, ez, yaw);
         true

@@ -3945,6 +3945,55 @@ impl World {
         self.human_pose = (player.x, player.y, player.z);
     }
 
+    /// One PAUSED game turn — retail's `sub_41780_41AC0` (:52197) run
+    /// to its pause early-out and no further.
+    ///
+    /// ⭐⭐⭐ **A PAUSED TURN IS NOT A SKIPPED TURN: IT STILL DRAWS.**
+    /// The turn function's very first statement is the global LCG
+    /// step, and the pause test is the SECOND:
+    ///
+    /// ```text
+    /// str_AE400_AE3F0->rand_4 = 9377 * rand_4 + 9439;   // ALWAYS
+    /// if ( (str_AE400_AE3F0->var_0.var_u8_2 & 1) != 0 )
+    ///   goto LABEL_52;                                   // PAUSED
+    /// ```
+    ///
+    /// So every paused frame burns exactly one draw and touches
+    /// nothing else — which means **a level that was paused runs a
+    /// DIFFERENT random stream from one that was not**, for the rest
+    /// of the level. Freezing the sim clock instead (the app's old
+    /// behaviour) silently put the port one draw per paused frame
+    /// behind retail.
+    ///
+    /// MEASURED, not just read: mc1l6 t=1..1602 is a 66.8-second
+    /// pause (P held at t=0/1 and again at t=1602/1603), and across
+    /// all 1,602 boundaries `explain` reports `draws=1` while not one
+    /// field in the 356-record pool moves. That is also why
+    /// `capture_clean_mc1` cannot tell a pause from a torn capture:
+    /// its `lcg_one_step` clause passes and only its `f63` clause
+    /// fires.
+    ///
+    /// ⚠ MC1 ONLY. MC2's frame function draws at its top too
+    /// (EF:39947) but has NO pause early-out anywhere in it, so where
+    /// MC2 gates a pause — and whether that gate is above or below the
+    /// draw — was open until a paused MC2 capture measured it, and
+    /// `mc2l0-test` (three deliberate pause/unpause cycles, recorded
+    /// for exactly this question) closes it: inside all three spans —
+    /// t=40/60/90/97, t=160, t=250 — `explain` reads **chain distance
+    /// 1 with `records with any change: 0`**, against 389-452 records
+    /// changing on every running tick. So MC2's `D41A0_0.rand_0x8`
+    /// step at the frame-function top (EF:39947) runs and its pause
+    /// gate skips the body, exactly as MC1 does. BOTH GAMES DRAW.
+    ///
+    /// ⚠ `explain`'s `draws=N` is a LOW-16 CHAIN DISTANCE, not a draw
+    /// count (session 38) — which is why the *running* ticks reading
+    /// `draws=10` proves nothing about how many draws a live turn
+    /// makes. It is only the paused reading that matters here, and a
+    /// chain distance of 1 IS one LCG step.
+    pub fn tick_paused(&mut self) {
+        lcg32(&mut self.g.rand);
+    }
+
     /// One game turn (`sub_41780_41AC0`, :52197) under a PINNED pose:
     /// the caller moved (or pinned) the human flight outside and every
     /// pass reads that single pose — the pair-mode/conformance shape.
@@ -14979,6 +15028,82 @@ mod tests {
 
     fn away() -> PlayerPose {
         PlayerPose::from_tiles(10.0, 105.0 / 8.0, 10.0, 0.0, 0.0, 0.0)
+    }
+
+    /// A PAUSED MC1 turn draws the global LCG once and changes
+    /// nothing else — retail's pause test is the SECOND statement of
+    /// `sub_41780_41AC0` (:52197), the draw is the first.
+    ///
+    /// The consequence is the reason this is pinned: **a level that
+    /// was paused runs a different random stream from one that was
+    /// not**, so a pause that freezes the sim clock (the app's old
+    /// behaviour) silently desyncs the port from retail by one draw
+    /// per paused frame. Measured on mc1l6's 1,602-frame pause —
+    /// `draws=1` on every boundary, zero pool changes.
+    #[test]
+    fn a_paused_mc1_turn_draws_once_and_touches_nothing_else() {
+        let mut w = flat_world();
+        let before_rand = w.g.rand;
+        let mut expected = before_rand;
+        crate::engine::features::lcg32(&mut expected);
+
+        // Everything except the LCG must survive the paused turn.
+        let before_hash = w.state_hash();
+        w.tick_paused();
+
+        assert_eq!(
+            w.g.rand, expected,
+            "a paused turn must advance the global LCG exactly one step"
+        );
+        assert_ne!(
+            w.g.rand, before_rand,
+            "the draw is the point — a paused turn is not a skipped turn"
+        );
+
+        // Re-park the LCG and the whole state must be bit-identical:
+        // the draw is the ONLY thing a paused turn does.
+        w.g.rand = before_rand;
+        assert_eq!(
+            w.state_hash(),
+            before_hash,
+            "a paused turn must not touch any lane but the global LCG"
+        );
+    }
+
+    /// MC2 DRAWS TOO — measured, not assumed by symmetry. Its frame
+    /// function carries no pause early-out anywhere in it (EF:39947 is
+    /// just the top-of-function step), so this arm was deliberately
+    /// left inert until a paused MC2 capture existed. `mc2l0-test` —
+    /// three deliberate pause/unpause cycles recorded for exactly this
+    /// question — reads chain distance 1 with `records with any
+    /// change: 0` inside all three spans (t=40/60/90/97, 160, 250).
+    #[test]
+    fn a_paused_mc2_turn_draws_once_like_mc1() {
+        let planes = Planes {
+            height: vec![100; 0x10000],
+            tile_type: vec![5; 0x10000],
+            shading: vec![32; 0x10000],
+            angle: vec![5; 0x10000],
+            ceiling: Vec::new(),
+        };
+        let mut w = World::new_for_game(planes, &micro_things(), 1, assets(), GameId::Mc2);
+        let before_hash = w.state_hash();
+        let before_rand = w.g.rand;
+        let mut expected = before_rand;
+        crate::engine::features::lcg32(&mut expected);
+
+        w.tick_paused();
+
+        assert_eq!(
+            w.g.rand, expected,
+            "MC2's paused frame advances the global LCG one step (mc2l0-test)"
+        );
+        w.g.rand = before_rand;
+        assert_eq!(
+            w.state_hash(),
+            before_hash,
+            "and touches no other lane — 0 records changed across all three spans"
+        );
     }
 
     /// Non-vacuity guard for the widened creature target scan
