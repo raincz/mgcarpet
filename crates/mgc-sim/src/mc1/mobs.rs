@@ -3988,10 +3988,17 @@ impl Gen {
                 return;
             }
             Inbox::Hit(src) => {
-                // The "under attack" mark the m8/12/13/14 families
-                // write instead of chasing (:25057-63) — for the
-                // village families it feeds the wanted timer.
-                if matches!(model, 8 | 12 | 13 | 14) {
+                // The "under attack" mark the villager families write
+                // instead of chasing (m12 :25057-63, m13/m14 twins)
+                // feeds the wanted timer. m8 is NOT among them: the
+                // griffon's hit prologue (:23446-58) tests the
+                // attacker for class 3 and goes straight to chase —
+                // no +528 write anywhere in it (its +528 arms are the
+                // beam emission :23560 and the death avenge :23580).
+                // With rival wanted never decaying, the invented m8
+                // arm here held wiz 1 wanted through mc1hwl0
+                // t=20677-20690 where retail reads 0.
+                if matches!(model, 12 | 13 | 14) {
                     self.flag_village_wanted(src);
                 }
                 // The villager families' hit tick ends HERE: retail's

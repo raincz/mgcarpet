@@ -5849,17 +5849,19 @@ impl World {
                 }
             }
         }
-        // The village-aggro timer runs down once per wizard tick
-        // (:55405-06) — ~200 ticks of militia hostility per offense.
-        // The human's lives in `player_aggro`; the rivals' in
-        // `rival_wanted` (slot 0 unused), on the same cadence.
-        if self.g.player_aggro > 0 {
+        // The village-aggro timer runs down once per LIVING human
+        // tick — the decay (:55405-06) sits in sub_45C90, the (3,0)
+        // HUMAN carpet handler, inside its `actLife >= 0` arm (MC2's
+        // twin: AddPlayer03_00 EF:60017, same guard), so a dead or
+        // falling wizard's timer holds. The rival carpet (3,1) ticks
+        // via sub_13170, which holds NO decay — :55405 is the whole
+        // binary's only `+528--` (HW :51472-74), so a rival once
+        // wanted stays wanted until something re-arms it. mc1hwl0
+        // t=20691..23000: wiz 1's +528 sits at 200 flat through the
+        // rival's death and respawn; the port's invented rival decay
+        // drained it and the t=21203 griffon chase gate read 0.
+        if self.player.state == LifeState::Alive && self.g.player_aggro > 0 {
             self.g.player_aggro -= 1;
-        }
-        for w in self.g.rival_wanted.iter_mut() {
-            if *w > 0 {
-                *w -= 1;
-            }
         }
         // Pool wizards' wanted timers (word_0x248_584) run down on
         // the same cadence; a drained entry leaves the map so the
@@ -15957,6 +15959,62 @@ mod tests {
         assert_eq!(
             w.g.nearest_wizard_target(s, &far, true, true),
             Some(rival as u16)
+        );
+    }
+
+    /// The +528 decay is the LIVING HUMAN's alone: :55405-06 sits in
+    /// sub_45C90 — the (3,0) human carpet handler — inside its
+    /// `actLife >= 0` arm (HW :51472-74, MC2 twin EF:60017), and the
+    /// rival carpet's tick (sub_13170) holds no decrement at all, so
+    /// a rival once wanted stays wanted until re-armed and a dead
+    /// human's timer holds. mc1hwl0 t=20691..23000: wiz 1's +528
+    /// sits at 200 flat through the rival's whole death and respawn;
+    /// the port's invented rival decay drained it by t=20899 and the
+    /// t=21203 griffon chase gate read 0.
+    #[test]
+    fn the_wanted_decay_is_the_living_humans_alone() {
+        let mut w = flat_world();
+        w.g.player_aggro = 200;
+        w.g.rival_wanted[3] = 200;
+        w.tick(away(), PlayerCommand::default());
+        assert_eq!(w.g.player_aggro, 199, "the living human decays");
+        assert_eq!(w.g.rival_wanted[3], 200, "a rival's timer never decays");
+        w.player.state = LifeState::Falling;
+        w.tick(away(), PlayerCommand::default());
+        assert_eq!(w.g.player_aggro, 199, "a dead human's timer holds");
+    }
+
+    /// The griffon's hit prologue (:23446-58) tests the attacker for
+    /// class 3 and goes straight to chase — NO +528 write (its arms
+    /// are the beam emission :23560 and the death avenge :23580).
+    /// Only the villager families mark the attacker wanted on a hit
+    /// (m12 :25057-63, m13/m14 twins). mc1hwl0 t=20677: rival 473
+    /// hits griffon 66, the pack promotes to chase, and retail's
+    /// wiz-1 wanted stays 0 through 20690 where the port's m8 arm
+    /// held it live.
+    #[test]
+    fn the_griffon_hit_chases_without_arming_wanted() {
+        let mut w = flat_world();
+        let rival = w.g.spawn_class3(1, 110 << 8, 100 << 8, 100).unwrap();
+        w.g.rival_ents[3] = rival as u16;
+        let tag = w.g.ent[rival].id24;
+
+        let g = w.g.spawn_creature(8, 100 << 8, 100 << 8, 100).unwrap();
+        w.debug_mail_hit(g, 400, tag);
+        w.tick(away(), PlayerCommand::default());
+        assert_eq!(
+            w.g.ent[g].f146, tag,
+            "the griffon retaliates on the attacker"
+        );
+        assert_eq!(w.g.village_wanted(tag), 0, "an m8 hit arms nobody");
+
+        let v = w.g.spawn_creature(12, 100 << 8, 102 << 8, 100).unwrap();
+        w.debug_mail_hit(v, 400, tag);
+        w.tick(away(), PlayerCommand::default());
+        assert_eq!(
+            w.g.village_wanted(tag),
+            200,
+            "a villager hit marks the attacker wanted"
         );
     }
 

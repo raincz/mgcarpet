@@ -20545,3 +20545,82 @@ pins, workspace suite green, fmt clean.
 - **NEXT HEAD t=21203 `(5,8)slot82:chase`** — a balloon's chase lane.
 - mc1hwl0-noskip t=970 unchanged (missing (10,42) upgrade ring — the
   ring spawn itself, the re-price half is now landed on both sides).
+
+## SESSION 2026-08-27d (53) — mc1hwl0 21202 → 21275 ON THE WANTED
+## TIMER'S TWO LAWS (the decay that was the living human's alone)
+
+Plain horizon 21202 → 21275 (+73), clean 25,773 → 25,846;
+`--segmented` holds 1207 segments / 1199 devs / 48,943 clean (the
+21203 reset traded against downstream re-anchor shifts). APP
+`--replay-check` unchanged at 21,275 clean (its t=21287 pose.x head is
+downstream of the new field head). All 10 certified takes END; every
+guard row byte-identical (noskip stays 970). All 232 fixtures across
+11 suites pass; 2 new unit pins, both reversion-probed; workspace
+suite 847 pass / 0 fail under `MGC_REQUIRE_GOLDENS=1`; mgc-sim fmt
+clean.
+
+The head was INHERITED (pair at 21202 CLEAN — the pair import restores
+`rival_wanted` from retail's per-wizard `aggro`), so the dig ran on
+the ungraded lane: `MGC_RAW_SHADOW` found wiz-1 `aggro` diverging from
+t=20677, and the whole story fell out of one TSV — port arms at 20677
+where retail holds 0, retail arms at 20691 and sits at 200 FLAT
+through the rival's death, respawn, and 1,800+ further ticks while the
+port's decay drained it to 0 by 20899. At t=21203 the (5,8) griffon at
+slot 82's wander scan (sub_1CA50) elected rival 473 — nearest wizard,
+d≈3.6k vs the human's 6.1k — and retail's winner gate read +528=200
+where the port read 0: retail chased, the port wandered on.
+
+### THE LAWS
+
+1. ⭐⭐⭐ **THE +528 WANTED DECAY IS THE LIVING HUMAN'S ALONE**: the
+   whole binary decrements +528 in exactly one place — :55405-06,
+   inside sub_45C90, the class-3 MODEL-0 (human carpet) tick handler,
+   inside its `actLife >= 0` arm (HW :51472-74 byte-identical; MC2's
+   twin AddPlayer03_00 EF:60017, same guard). The rival carpet (3,1)
+   ticks via sub_13170 — the rival-AI dispatch — which holds NO
+   decrement, so a rival once village-wanted STAYS wanted until
+   re-armed, and a dead or falling human's timer holds. The port ran
+   a blanket per-tick decay over all `rival_wanted` slots on the
+   human cadence — an invented guard (the session-43 shape). Landed:
+   rival decay deleted, human decay gated on `LifeState::Alive`
+   (world.rs). Pinned by
+   `world.rs::the_wanted_decay_is_the_living_humans_alone`.
+2. ⭐⭐ **AN m8 HIT ARMS NOBODY**: the griffon's damage prologue
+   (:23446-58) tests the attacker for class 3 and promotes straight
+   to chase (`+146 = +40`, state 0x32) — no +528 write in it; the
+   griffon's only +528 arms are its beam emission (:23557-60) and its
+   death avenge (:23578-80). Only the villager families mark the
+   attacker wanted on a hit (m12 :25057-63, m13/m14 twins). The
+   port's Inbox::Hit arm flagged for `8|12|13|14`; the m8 leg held
+   wiz-1 wanted through t=20677-20690 where retail reads 0 (rival 473
+   hit griffon 66; the pack 62/66/80 promoted to chase in both — the
+   graded lanes agreed — but only the port armed the timer). Landed:
+   the Hit flag is `12|13|14`. Pinned by
+   `world.rs::the_griffon_hit_chases_without_arming_wanted`.
+
+### METHOD
+
+- ⭐⭐ **THE SHADOW'S WIZARD LANES NAME AN INHERITED HEAD IN ONE RUN**:
+  `--env MGC_RAW_SHADOW=1 --env MGC_RAW_SHADOW_ROWS=<tsv> replay` over
+  the window gave the full retail-vs-port aggro trajectory; the
+  mismatch-only TSV plus two `dump-state … wiz` samples separated "port
+  arms spuriously" from "retail never decays" without one theory.
+- ⭐ **A TIMER HELD AT ITS ARM VALUE FOR 500+ TICKS THROUGH A DEAD
+  WINDOW IS NOT BEING RE-ARMED — IT IS NOT DECAYING.** The graded-clean
+  griffon states 20701-21202 proved no re-armer could be firing; the
+  decompile grep (`528)`) then found exactly one decrement site.
+
+### OPEN (shadow residues logged this session, ungraded, future heads)
+
+- **wiz-1 `burst`/`cooldown[]`/`regen_stall` SURVIVE retail's rival
+  respawn** (t=20761+: retail keeps burst=2, cooldown[17], stall=16;
+  the port clears them) — the session-52 respawn block's wizard-side
+  half, same "clears EXACTLY three registers" family.
+- **wiz-0 `hits` off-by-one from t=19632** (retail 221, port 222).
+- **NEXT HEAD t=21276 `missing(10,0)slot951x1`** — a mass fire-spread
+  tick (dozens of (10,0) born, a (10,1) puff, a (10,17) with the
+  64608 miss constant, REVIVED rows): the port spawns one fewer
+  (10,0) and from slot 273 on every fire in the allocation sequence
+  wears the PREVIOUS spawn's x/y — one missing/extra spawn early in
+  the spread walk shifts the whole chain.
+- mc1hwl0-noskip t=970 unchanged (the (10,42) upgrade ring spawn).
