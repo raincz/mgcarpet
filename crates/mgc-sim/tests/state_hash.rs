@@ -912,7 +912,17 @@ fn level_005_golden_state_hashes() {
         // their first tick, so only the pre-tick frame reads the
         // flat row; A-E holding is the evidence the recolor
         // converges with the old pre-stamp from tick 1 on.
-        0x6dea882cb20c2770, // post-init
+        // ⭐ Post-init re-pinned for THE CASTLE-BOX + REGISTER SESSION
+        // (mc1hwl0 t=18950): the authored castle mint now stamps
+        // sub_37150's box at its authored level — LEVEL 0 INCLUDED
+        // (:54995; the port's `lvl >= 1` guard was invented) — and
+        // binds the owner's wizext+50 register at the mint (:54980).
+        // Both are hashed state from init on. A-E hold byte-for-byte
+        // in GOLDEN and OBSERVABLE holds at ALL SIX: level 005's
+        // authored castles commit on their first tick, whose own
+        // stamp had already converged the box, so only the pre-tick
+        // frame carried the difference.
+        0x018d2010d9b38aa0, // post-init
         0xd0106aff56c316fb, // A
         0x3e7c352ebcd0d7fe, // B
         0xbed151642b91ccb6, // C

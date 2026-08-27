@@ -4090,17 +4090,29 @@ impl Gen {
         }
     }
 
-    /// sub_37150 (:43798) + the HP ladder: size a castle entity's
-    /// extents and life to its level (level 0 keeps the ctor shell).
+    /// sub_37150 (:43798): the castle-box stamp — unconditional, level
+    /// 0 included (row-0 dims are empty, so level 0 stamps the
+    /// 0xE000/640/640/0x4000 bare-flag box; retail's respawn rebuild
+    /// :54995 and the fit helpers' exit restamps both rely on it).
+    /// The old `lvl >= 1` guard here was invented — it kept every
+    /// newborn castle on its ctor art extents (200/184/184/200) until
+    /// the first level-up commit, where retail's box arrives the
+    /// moment ANY fit test or admission check touches the castle
+    /// (mc1hwl0 t=18950: slot 233's box lanes at the plant tick).
+    pub(crate) fn castle_box_stamp(&mut self, i: usize, lvl: usize) {
+        let def = self.assets.build_tab[lvl % self.assets.build_tab.len()];
+        let e = &mut self.ent[i];
+        e.f78 = 0xE000; // sub_37150's z-center marker (signed −8192)
+        e.f80 = (((def.w as u16) << 8).wrapping_add(1280)) >> 1;
+        e.f82 = (((def.h as u16) << 8).wrapping_add(1280)) >> 1;
+        e.f84 = 0x4000;
+    }
+
+    /// sub_37150 + the HP ladder: size a castle entity's extents and
+    /// life to its level (retail pairs the box stamp with sub_47C60's
+    /// ladder at the init/respawn rebuild).
     pub(crate) fn castle_extents(&mut self, i: usize, lvl: u8) {
-        if lvl >= 1 {
-            let def = self.assets.build_tab[lvl as usize % self.assets.build_tab.len()];
-            let e = &mut self.ent[i];
-            e.f78 = 0xE000; // sub_37150's z-center marker (signed −8192)
-            e.f80 = (((def.w as u16) << 8).wrapping_add(1280)) >> 1;
-            e.f82 = (((def.h as u16) << 8).wrapping_add(1280)) >> 1;
-            e.f84 = 0x4000;
-        }
+        self.castle_box_stamp(i, lvl as usize);
         let hp = Self::CASTLE_HP[(lvl as usize).min(7)];
         self.ent[i].max_life = hp;
         self.ent[i].act_life = hp as i32;
@@ -4236,11 +4248,18 @@ impl Gen {
     /// sub_12C50 (:17616): the upgrade pre-clear — every house whose
     /// AABB overlaps the NEXT level's footprint grown by 256 is
     /// killed outright (life = -1 → the collapse walker evacuates).
+    ///
+    /// ⭐ The helper stamps the castle's OWN box as a side effect —
+    /// sub_37150 at level+1 on entry (:17624, the loop then reads the
+    /// stamped +80/+82) and a restamp at the CURRENT level on exit
+    /// (:17639). For a level-0 castle the exit restamp is the
+    /// 0xE000/640/640/0x4000 bare-flag box — how a newborn castle
+    /// sheds its ctor art extents before any commit runs.
     fn castle_upgrade_preclear(&mut self, i: usize) {
         let next = (self.ent[i].f26 + 1).clamp(1, 8) as usize;
-        let def = self.assets.build_tab[next % self.assets.build_tab.len()];
-        let half_w = ((((def.w as u16) << 8).wrapping_add(1280)) >> 1) as i32 + 256;
-        let half_h = ((((def.h as u16) << 8).wrapping_add(1280)) >> 1) as i32 + 256;
+        self.castle_box_stamp(i, next);
+        let half_w = self.ent[i].f80 as i32 + 256;
+        let half_h = self.ent[i].f82 as i32 + 256;
         let (x, y) = (self.ent[i].x, self.ent[i].y);
         let wd = |p: u16, q: u16| (p.wrapping_sub(q) as i16 as i32).abs();
         for j in 1..self.ent.len() {
@@ -4254,19 +4273,32 @@ impl Gen {
                 self.ent[j].act_life = -1;
             }
         }
+        let cur = self.ent[i].f26.max(0) as usize;
+        self.castle_box_stamp(i, cur);
     }
 
     /// sub_12D10 (:17643): the upgrade space gate — FAIL when
     /// another castle overlaps the next level's extents, or any
     /// tile on the four edges of the new footprint carries the
     /// protection bit (blocked/steep ground).
-    pub(crate) fn castle_upgrade_space_ok(&self, i: usize) -> bool {
+    ///
+    /// ⭐ Like the pre-clear, BOTH exits restamp the castle's box at
+    /// the current level (:17777/:17781) after the entry stamp at
+    /// level+1 (:17668) — the side effect is part of the law: retail
+    /// runs this test from the selector's Upgrade admission
+    /// (sub_14120 :18426) BEFORE the settled gate, so a newborn
+    /// castle's box lands on the plant tick's re-decision (mc1hwl0
+    /// t=18950 slot 233: 57344/640/640/16384 against the port's
+    /// ctor art extents).
+    pub(crate) fn castle_upgrade_space_ok(&mut self, i: usize) -> bool {
         let next = (self.ent[i].f26 + 1).clamp(1, 8) as usize;
-        let def = self.assets.build_tab[next % self.assets.build_tab.len()];
-        let half_w = ((((def.w as u16) << 8).wrapping_add(1280)) >> 1) as i32;
-        let half_h = ((((def.h as u16) << 8).wrapping_add(1280)) >> 1) as i32;
+        self.castle_box_stamp(i, next);
+        let half_w = self.ent[i].f80 as i32;
+        let half_h = self.ent[i].f82 as i32;
         let (x, y) = (self.ent[i].x, self.ent[i].y);
         let wd = |p: u16, q: u16| (p.wrapping_sub(q) as i16 as i32).abs();
+        let cur = self.ent[i].f26.max(0) as usize;
+        let mut fits = true;
         for j in 1..self.ent.len() {
             let e = &self.ent[j];
             if j != i
@@ -4276,26 +4308,34 @@ impl Gen {
                 && wd(e.x, x) < e.f80 as i32 + half_w
                 && wd(e.y, y) < e.f82 as i32 + half_h
             {
-                return false;
+                fits = false;
+                break;
             }
         }
-        let cx = ((x as u32 + 128) >> 8) as u8;
-        let cy = ((y as u32 + 128) >> 8) as u8;
-        let (htx, hty) = ((half_w >> 8) as i32, (half_h >> 8) as i32);
-        let blocked = |gx: i32, gy: i32| {
-            self.t.angle[tile((cx as i32 + gx) as u8, (cy as i32 + gy) as u8)] & 0x80 != 0
-        };
-        for gx in -htx..=htx {
-            if blocked(gx, -hty) || blocked(gx, hty) {
-                return false;
+        if fits {
+            let cx = ((x as u32 + 128) >> 8) as u8;
+            let cy = ((y as u32 + 128) >> 8) as u8;
+            let (htx, hty) = ((half_w >> 8) as i32, (half_h >> 8) as i32);
+            let blocked = |gx: i32, gy: i32| {
+                self.t.angle[tile((cx as i32 + gx) as u8, (cy as i32 + gy) as u8)] & 0x80 != 0
+            };
+            'edges: {
+                for gx in -htx..=htx {
+                    if blocked(gx, -hty) || blocked(gx, hty) {
+                        fits = false;
+                        break 'edges;
+                    }
+                }
+                for gy in -hty..=hty {
+                    if blocked(-htx, gy) || blocked(htx, gy) {
+                        fits = false;
+                        break 'edges;
+                    }
+                }
             }
         }
-        for gy in -hty..=hty {
-            if blocked(-htx, gy) || blocked(htx, gy) {
-                return false;
-            }
-        }
-        true
+        self.castle_box_stamp(i, cur);
+        fits
     }
 
     /// sub_46DB0 (:57023-32): direct ball absorption — an OWNED m39
@@ -6823,6 +6863,63 @@ mod tests {
         );
         assert_eq!(g.ring_cells(0, 0).len(), r0 - 1);
         assert_eq!(g.ring_cells(0, 1).len(), r0 + r1 - 1);
+    }
+
+    /// The fit tests carry sub_37150's box stamp as a SIDE EFFECT
+    /// (sub_12C50 :17624/:17639, sub_12D10 :17668/:17777/:17781):
+    /// entry at level+1, exit restamp at the CURRENT level — level 0
+    /// included (the guard that skipped level 0 was invented; retail
+    /// stamps a newborn castle's bare-flag box the moment any
+    /// admission test touches it — mc1hwl0 t=18950 slot 233). The
+    /// (3,2) f78-f84 lanes are UNGRADED, so no pair fixture can pin
+    /// this; the pick-gates fixture's tick exercises it and this test
+    /// asserts it.
+    #[test]
+    fn the_fit_tests_stamp_the_castle_box() {
+        let assets = synthetic_assets();
+        let mut g = Gen::new(flat_land(8), assets, 1, ChassisParams::MC1, VerbSet::MC1);
+        let c = g.new_event().unwrap();
+        {
+            let e = &mut g.ent[c];
+            e.class64 = 3;
+            e.model65 = 2;
+            e.f26 = 0; // freshly planted, level 0
+            e.x = 0x4000;
+            e.y = 0x4000;
+            // The ctor's art extents stand in for sprite row 177's.
+            e.f78 = 200;
+            e.f80 = 184;
+            e.f82 = 184;
+            e.f84 = 200;
+        }
+        let expect = |g: &Gen, lvl: usize| {
+            let def = g.assets.build_tab[lvl % g.assets.build_tab.len()];
+            (
+                (((def.w as u16) << 8).wrapping_add(1280)) >> 1,
+                (((def.h as u16) << 8).wrapping_add(1280)) >> 1,
+            )
+        };
+        let _ = g.castle_upgrade_space_ok(c);
+        let (w0, h0) = expect(&g, 0);
+        assert_eq!(g.ent[c].f78, 0xE000, "the z-center marker landed");
+        assert_eq!(g.ent[c].f84, 0x4000, "the z half-extent landed");
+        assert_eq!(
+            (g.ent[c].f80, g.ent[c].f82),
+            (w0, h0),
+            "the exit restamp is at the CURRENT level (0) — the art \
+             extents are gone"
+        );
+        // The pre-clear restamps the same way.
+        g.ent[c].f78 = 200;
+        g.ent[c].f80 = 184;
+        g.castle_upgrade_preclear(c);
+        assert_eq!(g.ent[c].f78, 0xE000, "preclear exit stamp");
+        assert_eq!(g.ent[c].f80, w0, "preclear restamp at current level");
+        // And a leveled castle restamps at ITS level on exit.
+        g.ent[c].f26 = 3;
+        let _ = g.castle_upgrade_space_ok(c);
+        let (w3, _) = expect(&g, 3);
+        assert_eq!(g.ent[c].f80, w3, "exit restamp tracks f26");
     }
 
     /// The possession-claim chime (:30806-07) plays for ANY claimant —

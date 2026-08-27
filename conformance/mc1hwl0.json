@@ -85,6 +85,12 @@
    "file": "the-walker-soft-kills-a-state-with-no-table-row.mgcr",
    "source": "mc1hwl0",
    "note": "THE WALKER SOFT-KILLS A STATE WITH NO TABLE ROW, UN-TICKED: the main walk direct-indexes table[class][state] and requires the row's own state word to match (data4 == +70); a miss takes the 'STATE-ID does not match' arm -- sub_41E80's soft-kill bit, no handler, and NO +63 tick, because retail's phase increment (:52406) sits INSIDE the dispatched branch. Reachable through the death handoff's blind +52 stamp (sub_1A6C0 :21702): the dying packmate writes chase = base+2 into whatever occupies the stale slot. mc1hwl0 t=18600: griffon 162 dies still pointing at slot 109 -- re-minted as the castle guard's (9,13) arrow -- and stamps it f146=17, +70=50 (m8's chase); retail's next walk finds no class-9 row 50, reap-flags the arrow un-ticked (t=18601: flags 8198 -> 9222, f63 parked 118) and the tick-top reap frees it at 18602. The port's old no-op arm ticked f63 forever and the arrow never died."
+  },
+  {
+   "t": 18949,
+   "file": "the-pick-gates-read-the-raw-wizext-50-register-n.mgcr",
+   "source": "mc1hwl0",
+   "note": "THE PICK GATES READ THE RAW WIZEXT+50 REGISTER, NOT AN ESTABLISHMENT LATCH: the AttackWizard/RaidCastle entry gates (:18506/:18553 `!+50 && sub_14E60(0x10)`) and the bully clauses (:18570-72) test the +50 word -- bound the moment the free plant mints the castle (:19206) -- and the token half is OWNS-the-m16-token (sub_14E60), not knows-spell-16. The port's `flags & 2` established reading refused the whole wizard pick on the plant tick, so the same-tick re-decision fell through to HuntMana (13, target 161) where retail's war arm picks the human RANGELESSLY (8, target 472, sig 856). mc1hwl0 t=18950: rival 473's f146 must read 472. [The same pair also exercises the box-stamp law -- sub_12C50/sub_12D10 stamp sub_37150's quad entry@level+1/exit@level, reaching the newborn castle through this admission -- but f78-f84 on (3,2) are UNGRADED lanes, so the stamp is pinned by unit test (features.rs the_fit_tests_stamp_the_castle_box), not by this fixture.]"
   }
  ]
 }

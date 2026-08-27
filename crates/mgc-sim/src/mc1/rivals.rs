@@ -570,10 +570,18 @@ impl World {
         self.g.stamp_castle_terrain(lvl as usize, cx, cy, cz);
         self.terrain_dirty = true;
         // Extents + capacity ladder + full stored mana (cap 320000).
+        // The box stamps at the AUTHORED level, level 0 included
+        // (:54995 `sub_37150(v17x, byte_38C97[…] - 1)` — the guard
+        // that skipped level 0 here was invented).
         self.g.castle_extents(c, lvl);
         let cap = Gen::CASTLE_CAP[lvl as usize];
         self.g.ent[c].f136 = cap;
         self.g.ent[c].f140 = cap.clamp(0, 320_000);
+        // The rebuild binds the owner's wizext+50 at the mint
+        // (:54980 `var_50 = v17x - pool`) — without it every
+        // register-read gate sees a castle-capable wizard as
+        // castle-less until the first level-up commit re-binds.
+        self.g.castle_reg[r.slot as usize & 7] = c as u16;
         self.g.snd(30, c);
         let _ = r;
     }
@@ -1900,7 +1908,8 @@ impl World {
             //     (sub_15A00(a1,4)) sub_155F0(a1,4);` — with Rebound
             //     already live (its readiness gate), the rival falls
             //     through to Shield instead of standing there.
-            match self.g.ent[threat].model65 {
+            let threat_model = self.g.ent[threat].model65;
+            match threat_model {
                 0 | 3 | 16 => {
                     if self.rival_cast_ready(ri, 14) {
                         self.rival_cast(ri, i, 14);
@@ -1979,20 +1988,30 @@ impl World {
         if !think {
             return;
         }
-        // 3. Upgrade the castle (sub_14120 :18408).
-        if let Some(c) = castle {
+        // 3. Upgrade the castle (sub_14120 :18408). ⭐⭐ The castle is
+        // the wizext+50 REGISTER (:18415), not a pool scan, and the
+        // space test runs BEFORE the mana and settled gates (:18425-28
+        // short-circuit: cooldown → sub_12D10 → mana → +70==4) — so
+        // its sub_12D10 box-stamp side effect lands even when
+        // admission then fails. mc1hwl0 t=18950: the plant tick's
+        // re-decision reaches sub_12D10 on the newborn castle (+70
+        // still 5), which is where the 0xE000/640/640/0x4000 box
+        // arrives; the old port order refused at `tick70 == 4` first
+        // and the box never landed.
+        let reg = self.g.castle_reg[self.rivals[ri].slot as usize] as usize;
+        if reg != 0 {
             let m16 = self.rivals[ri].owned[16] as usize;
             if m16 != 0
                 && self.g.ent[m16].f26 == 0
                 && self.rivals[ri].cooldown[16] == 0
-                && self.g.ent[c].tick70 == 4
+                && self.g.castle_upgrade_space_ok(reg)
                 && self.rivals[ri].mana_max
-                    >= Gen::CASTLE_CAP[self.g.ent[c].f26.clamp(0, 7) as usize] as u32
-                && self.g.castle_upgrade_space_ok(c)
+                    >= Gen::CASTLE_CAP[self.g.ent[reg].f26.clamp(0, 7) as usize] as u32
+                && self.g.ent[reg].tick70 == 4
             {
                 // ⭐ sub_14120 :18432-33 — the predicate stamps the
                 // castle into `+146`/`+148` on its way to returning 1.
-                self.set_rival_state(ri, AiState::Upgrade, c as u16);
+                self.set_rival_state(ri, AiState::Upgrade, reg as u16);
                 return;
             }
         }
@@ -2350,10 +2369,19 @@ impl World {
     /// far-but-nearest castle be replaced by a farther-ranked one.
     fn rival_pick_castle_target(&mut self, ri: usize, i: usize) -> bool {
         let me = self.rivals[ri].ent;
-        let my_castle = self.rival_castle(me);
-        let my_stored = my_castle.map_or(0, |c| self.g.ent[c].f140.max(0) as u32);
-        // Skip while castle-less but castle-capable (:18507).
-        if my_castle.is_none() && self.rivals[ri].known[16] {
+        // ⭐ Both lanes read the wizext+50 REGISTER, not a pool scan:
+        // the gate (:18506 `!+50 && sub_14E60(0x10)` — castle-less
+        // AND OWNS the m16 token; a scattered-token wizard raids
+        // freely) and the wealth compare (:18517 indexes +29935 by
+        // the register). A castle is "had" the moment the plant binds
+        // +50 (:19206), establishment not required.
+        let reg = self.g.castle_reg[self.rivals[ri].slot as usize] as usize;
+        let my_stored = if reg != 0 {
+            self.g.ent[reg].f140.max(0) as u32
+        } else {
+            0
+        };
+        if reg == 0 && self.rivals[ri].owned[16] != 0 {
             return false;
         }
         let (px, py) = (self.g.ent[i].x, self.g.ent[i].y);
@@ -2400,8 +2428,15 @@ impl World {
     /// port's stand-in is the standing castle's FIRST-COMMIT latch
     /// (flags bit 1, :56057-62) — the same gate the token ladder stamp
     /// uses. An authored castle that has never leveled is UNBOUND.
-    fn castle_bound(&self, castle: Option<usize>) -> bool {
-        castle.is_some_and(|c| self.g.ent[c].flags & 2 != 0)
+    /// The pick gates' castle test (:18506/:18553/:18570): the raw
+    /// wizext+50 REGISTER word — nonzero the moment the plant binds
+    /// it (:19206), no establishment latch, no pool liveness. The old
+    /// `flags & 2` "established" reading was invented strictness: at
+    /// mc1hwl0 t=18950 it refused the whole AttackWizard pick on the
+    /// plant tick (retail war-picks the human rangelessly there) and
+    /// the cascade fell through to HuntMana.
+    fn wiz_castle_reg(&self, slot: u8) -> u16 {
+        self.g.castle_reg[slot as usize & 7]
     }
 
     /// Enemy-wizard pick (sub_145B0 :18541-91), walking the tick-top
@@ -2430,7 +2465,8 @@ impl World {
     /// returns 0 — while it could be building, it does not hunt
     /// wizards.
     fn rival_pick_wizard_target(&mut self, ri: usize, i: usize) -> bool {
-        if self.rivals[ri].known[16] && !self.castle_bound(self.rival_castle(self.rivals[ri].ent)) {
+        // :18553 — castle-less (raw +50) AND owns the m16 token.
+        if self.rivals[ri].owned[16] != 0 && self.wiz_castle_reg(self.rivals[ri].slot) == 0 {
             return false;
         }
         let me = self.rivals[ri].ent;
@@ -2482,7 +2518,9 @@ impl World {
                 self.player.invisible,
                 self.player.mana_max as i64,
                 self.player.mana as i64,
-                !self.castle_bound(self.player_castle()) && self.player.owned[16] != 0,
+                // :18570-72 — the target's raw +50 register + owned
+                // m16 token (sub_14E60), not the establishment latch.
+                self.wiz_castle_reg(0) == 0 && self.player.owned[16] != 0,
                 self.rivals[ri].hate[0] as i64,
                 self.rivals[ri].war[0],
                 &mut best,
@@ -2512,7 +2550,9 @@ impl World {
                     o.invisible,
                     o.mana_max as i64,
                     o.mana as i64,
-                    !self.castle_bound(self.rival_castle(o.ent)) && o.known[16],
+                    // :18570-72 — raw +50 register + owned token, as
+                    // for the human above.
+                    self.wiz_castle_reg(oslot) == 0 && o.owned[16] != 0,
                     self.rivals[ri].hate[oslot as usize] as i64,
                     self.rivals[ri].war[oslot as usize],
                     &mut best,
@@ -3253,7 +3293,9 @@ impl World {
     /// castle-tier spell they own but can't unlock (no big castle) reads as
     /// affordable-by-ceiling forever, so the picker parked on it and never
     /// fell through to Fireball.
-    fn rival_cast_ready(&self, ri: usize, s: usize) -> bool {
+    // `&mut` because the castle arm's space test (sub_12D10 :19315)
+    // stamps the castle box as a side effect, in retail too.
+    fn rival_cast_ready(&mut self, ri: usize, s: usize) -> bool {
         let r = &self.rivals[ri];
         let m = r.owned[s] as usize;
         if m == 0 {

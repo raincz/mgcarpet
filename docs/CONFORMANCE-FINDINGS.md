@@ -20350,3 +20350,93 @@ side effects, and re-measure.
    neighborhood; mc1l49 (player ruling: LAST).
 4. The mc2 onramp family (mc2l1/l4/l24 + mc2l6-rival-spells-galore,
    four takes at t≈1).
+
+## SESSION 2026-08-27b (51) — mc1hwl0 18949 → 20038 ON THE REGISTER GATE
+   + THE CASTLE-BOX STAMP (the plant-tick fork falls)
+
+One head, two laws — the banked t=18950 `(3,1)slot473:chase` dig
+resolved into a DIFFERENT root than the banked suspect predicted, and
+the suspect's law landed anyway because the same tick exercises it.
+`--segmented` horizon 18949 → 20038 (+1,089), devs 1,210 → 1,209,
+clean 48,932 → 48,933; plain horizon 17050 → 20038, clean 22,864 →
+24,609. APP `--replay-check` clean 19,616 → 20,027 (diverges at the
+same t=20039 head). All 10 certified takes still END (conform
+--segmented; app bit-exact re-confirmed on mc1l0/mc1l5/mc1l32/mc2l3);
+every uncertified guard row byte-identical to baseline. 15 fixtures in
+`conformance/mc1hwl0.json` (1 new, reversion-probed), suite green,
+`level_005_golden_state_hashes` re-pinned post-init-only (OBSERVABLE
+held at all six — the authored castle's init box + register bind
+converge by the first commit tick).
+
+### THE LAWS
+
+1. ⭐⭐⭐ **THE PICK GATES READ THE RAW WIZEXT+50 REGISTER, AND THE
+   TOKEN HALF IS OWNERSHIP** (t=18950, the fork itself): the
+   AttackWizard/RaidCastle entry gates (:18506/:18553) are
+   `!+50 && sub_14E60(a1, 0x10)` — refuse only when the register is
+   ZERO **and** the wizard OWNS an m16 token — and the bully clauses
+   (:18570-72) read the TARGET's +50/token the same way. The +50 word
+   is bound the moment the free plant mints the castle (:19206, the
+   port's `castle_reg` bind at spawn), so on the plant tick's
+   same-tick re-decision retail's wizard-pick gate PASSES and the war
+   arm (+462, first-in-chain, RANGELESS :18563-68) elects the human
+   (8, target 472, sig 856). The port's `castle_bound` demanded the
+   establishment latch (`flags & 2`) — invented strictness that
+   refused the whole pick on the newborn castle (flags still 12) and
+   fell through to HuntMana (13, target 161). Also: `known[16]` in
+   the gates was wrong — retail tests the OWNED TOKEN (a
+   token-scattered wizard raids freely). Fixture
+   `the-pick-gates-read-the-raw-wizext-50-register-n` (t=18949 pair —
+   ⚠ fixture t is the IMPORT tick: pin head−1, the plant/election
+   happens INSIDE the pair tick; the first cut at t=18950 passed its
+   own reversion probe, i.e. was VACUOUS).
+2. ⭐⭐ **THE FIT TESTS STAMP THE CASTLE BOX — sub_12C50/sub_12D10
+   carry sub_37150's quad as a side effect** (entry at level+1
+   :17624/:17668, BOTH exits restamp at the CURRENT level
+   :17639/:17777/:17781), and the selector's Upgrade admission
+   (sub_14120 :18425-28) runs sub_12D10 BEFORE the mana and settled
+   gates — so the newborn castle's 0xE000/640/640/0x4000 bare-flag
+   box lands on the plant tick even though admission then fails on
+   `+70 != 4`. The port's space test was side-effect-free and its
+   admission tested `tick70 == 4` first. Landed: `castle_box_stamp`
+   (sub_37150 exact, NO level guard — retail has none; :54995 stamps
+   the authored level-0 box at init/respawn too), stamps in
+   preclear/space_ok, admission reordered to retail's short-circuit,
+   the admission's castle read switched to the register (:18415), and
+   the starting-castle spawner binds `castle_reg` (:54980).
+   ⚠ **THE (3,2) f78-f84 BOX LANES ARE UNGRADED** — the banked note
+   called them "graded rows" and they are NOT: the pre-fix head
+   signature named only `chase`, the pair view shows the ≠ while the
+   fixture grader ignores it, and a stampless reversion probe passed
+   the pair fixture. The stamp law is pinned by unit test instead
+   (`features.rs::the_fit_tests_stamp_the_castle_box`) + the
+   ledger; `dump-state --port` is the only instrument that sees the
+   box.
+
+### METHOD
+
+- ⭐⭐⭐ THE BANKED SUSPECT WAS THE RIGHT TICK AND THE WRONG LANE: the
+  box does NOT feed sub_145B0 at all — walking the retail pick
+  clause-by-clause against the port under a per-step trace (all
+  shadow-exported inputs EQUAL at 18950, war0=1, human alive) is what
+  cornered the fork into the one untraced early-exit, the entry gate.
+  Trust the shadow's "inputs equal" verdict enough to conclude the
+  divergence is INSIDE the picker.
+- ⭐ A pair fixture pins the tick it IMPORTS: `t` = head−1. A fixture
+  that passes while its law is reverted is vacuous — run the
+  reversion probe BEFORE trusting a new fixture, not after.
+- ⚠ `cut_fixture_files.py` keys windows by TICK — two same-tick laws
+  collapse to one file (and it names files by note-slug, not the
+  manifest `file` field; align the manifest after cutting).
+
+### NEXT
+
+1. **t=20039 `pose:pose.x,y,z,act_speed`** — the human TELEPORTS
+   (retail: x 57785→26562, y 57447→48143, z 4671→3458, f140 −5000,
+   mail0.amt 400→0, f132 100→1000, grace 0→1, life_rate 5→40,
+   cmd_speed 80→0) and the port's pose does not follow. Same tick,
+   rival 1 re-decides off its vanished target (f146 472→210,
+   ai_state 8→6, f148 1529). Teleport-warp family — see session 49's
+   "lower-slot teleport warp" law and the portal-warp-z memory.
+2. mc1hwl0-noskip t=970 (rival castle upgrade chain, unchanged).
+3. mc1l37 t=2487 · mc1l49 LAST · mc2 onramp four-take family.
