@@ -1421,6 +1421,63 @@ impl World {
         }
     }
 
+    /// THE INVISIBLE TOKEN'S OWN MACHINE — retail's `sub_571B0_576E0`
+    /// (hw :61899; class-12 state 36), the `sub_573F0` skeleton with
+    /// the owner's +16 0x20 cloak bit: the FULL tick sets the bit and
+    /// zeroes the owner's spawn grace (`wizext+331 = 0`); a mid-burst
+    /// tick whose bit was externally BROKEN dies (`+48 = 1`); the
+    /// `sub_55DD0` gate refusal dies the same way; `sub_55E80`
+    /// debit/pin on admitted ticks; the shared decrement CLEARS the
+    /// bit the moment it lands 0 — fizzle and expiry alike.
+    ///
+    /// mc1hwl0 t=20697: rival 1's flee re-decision commits Invisible
+    /// (cooldown[12] arms, `+48 = +50` = 251) and the token's own
+    /// pass at slot 481 — above carpet 473, SAME tick — gate-refuses
+    /// on the castle-store ladder, so retail's burst dies 0 → 251 →
+    /// 1 → 0 INSIDE the tick and no boundary ever shows it (the
+    /// Wall-of-Fire spike shape, session 47). The inert port token
+    /// kept 251, and the refresh mirror cloaked a wizard retail
+    /// never hid — the t=20698 `(3,1)slot473:flags` head.
+    pub(crate) fn rival_invis_token_tick(&mut self, m: usize, ri: usize) {
+        let i = self.rivals[ri].ent as usize;
+        if i == 0 || self.g.ent[m].f26 <= 0 {
+            return;
+        }
+        let def = &self.spells()[12];
+        let full = self.g.ent[m].f26 == def.count as i16;
+        let cost = def.possess_mana;
+        if self.rival_token_gate(ri, 12, full) {
+            if full {
+                self.rivals[ri].grace = 0; // :61913 `+331 = 0`
+                self.g.ent[i].flags |= 0x20;
+            } else if self.g.ent[i].flags & 0x20 == 0 {
+                // The cloak was broken outside the machine — the
+                // burst dies (:61917-19).
+                self.g.ent[m].f26 = 1;
+            }
+            // sub_55E80 from the token (:64942-56).
+            let r = &mut self.rivals[ri];
+            if full {
+                let c = cost.min(i32::MAX as u32) as i32;
+                r.mana_delta = if r.mana_delta >= 0 {
+                    -c
+                } else {
+                    r.mana_delta - c
+                };
+            } else if r.mana_delta > 0 {
+                r.mana_delta = 0;
+            }
+        } else {
+            self.g.ent[m].f26 = 1;
+        }
+        if self.g.ent[m].f26 > 0 {
+            self.g.ent[m].f26 -= 1;
+            if self.g.ent[m].f26 == 0 {
+                self.g.ent[i].flags &= !0x20; // :61926-28
+            }
+        }
+    }
+
     /// THE SHIELD TOKEN'S OWN MACHINE — retail's `sub_566C0` (:65266,
     /// class-12 state 12), the rival twin of
     /// [`World::mc1_shield_token_tick`]: the same `sub_573F0` skeleton
@@ -1772,16 +1829,17 @@ impl World {
     /// bursts are armed by [`World::rival_cast`] and decremented
     /// here).
     fn rival_refresh_buffs(&mut self, ri: usize) {
-        let mut get = |spell: usize| -> bool {
-            let Some(m) = self.rival_token(ri, spell) else {
-                return false;
-            };
-            if self.g.ent[m].f26 > 0 {
-                self.g.ent[m].f26 -= 1;
-            }
-            self.g.ent[m].f26 > 0
-        };
-        let invisible = get(12);
+        // Invisible (12) is NOT clocked here: retail's sub_571B0 is
+        // the token's OWN class-12 body (state 36), run at the
+        // token's pool slot ([`Self::rival_invis_token_tick`]) — it
+        // owns the counter, the owner's 0x20 cloak bit, the grace
+        // zero and the 55E80 debit/pin. The refresh-driven clock kept
+        // a burst alive that retail's same-tick gate refusal killed
+        // INSIDE the commit tick (mc1hwl0 t=20697), and its mirror
+        // below cloaked the wizard off that phantom counter.
+        let invisible = self
+            .rival_token(ri, 12)
+            .is_some_and(|m| self.g.ent[m].f26 > 0);
         // Shield (4) and Rebound (14) are NOT clocked here: their
         // tokens run retail's own machines at the token's pool slot
         // ([`Self::rival_shield_token_tick`] /
@@ -1818,17 +1876,9 @@ impl World {
             r.invisible = invisible;
             r.rebound = rebound;
         }
-        // Mirror the cloak onto the entity's 0x20 bit — the shared
-        // draw/targeting suppressor (:65689-90); only while alive
-        // (death owns the bit in states 2/3).
-        let i = self.rivals[ri].ent as usize;
-        if self.g.ent[i].tick70 == 1 {
-            if invisible {
-                self.g.ent[i].flags |= 0x20;
-            } else {
-                self.g.ent[i].flags &= !0x20;
-            }
-        }
+        // (No cloak mirror here: the 0x20 bit is the invis token
+        // machine's own — set on the FULL tick, cleared the moment
+        // the counter lands 0, :61913/:61926-28.)
     }
 
     /// Incoming-projectile defense (sub_16800 :19769 + sub_16870/90):
@@ -3761,16 +3811,26 @@ impl World {
                 self.g.snd(46, i);
             }
         }
+        let floor = {
+            let row = &BEHAVIOR[self.g.ent[i].row156 as usize];
+            (self.g.ground_z(pos.0, pos.1) as i16).saturating_add(row.v_12)
+        };
+        // sub_455D0's own terrain keep-out lifts the moved body onto
+        // the floor DURING the move — the fall's gravity + clamp
+        // below only re-settle it — so a corpse drifting over RISING
+        // ground already reads the lifted z when the trail spawns
+        // (:51546 reads the mover's position scratch). mc1hwl0
+        // t=20728: the landing tick's (10,1) puff 744 and the fire
+        // it seeds are born at 4956 where the pre-lift z was 4955.
+        if pos.2 < floor {
+            pos.2 = floor;
+        }
         let puff = pos;
         pos.2 = pos.2.saturating_add(vz);
         {
             let e = &mut self.g.ent[i];
             e.f46 = (vz - 2).clamp(-256, 0);
         }
-        let floor = {
-            let row = &BEHAVIOR[self.g.ent[i].row156 as usize];
-            (self.g.ground_z(pos.0, pos.1) as i16).saturating_add(row.v_12)
-        };
         if pos.2 < floor {
             pos.2 = floor;
         }
@@ -3870,7 +3930,10 @@ impl World {
                 if self.strict_retail {
                     e.tick70 = e.tick70.wrapping_add(1);
                     e.act_life = life as i32;
-                    e.f26 = 0;
+                    // :55529-49 writes NO +48: a live burst's leftover
+                    // counter rides the jar verbatim (mc1hwl0 t=20728,
+                    // the dying rival's accel token scatters with
+                    // +48 = 220 still aboard).
                 } else {
                     e.tick70 = crate::engine::world::DROPPED_JAR; // pickup-able, decaying
                     e.f26 = life; // the decay countdown
@@ -3962,17 +4025,26 @@ impl World {
         let Some(c) = self.rival_castle(self.rivals[ri].ent) else {
             return;
         };
-        let (cx, cy) = (self.g.ent[c].x, self.g.ent[c].y);
-        let z = (self.g.ground_z(cx, cy) as i16).saturating_add(256);
+        // :54858-61 — the respawn copies the castle's WHOLE position,
+        // z included (the human's mc1l42 t=17398 law, same sub_44D30):
+        // the tile-up `ground + 256` was invented, and every re-minted
+        // token betrayed it (mc1hwl0 t=20761, the whole book born at
+        // 6432 against the castle's 6176). The fall's own +46/+126
+        // registers are NOT cleared either — retail's respawn clears
+        // exactly v_12, v_16 and the knock triple (:54868-83); the
+        // boundary reads the corpse's vz −56 and speed 160 verbatim.
+        let (cx, cy, cz) = (self.g.ent[c].x, self.g.ent[c].y, self.g.ent[c].z);
         {
             let e = &mut self.g.ent[i];
             e.flags = (e.flags & !0x20) | 8;
             e.tick70 = 1;
-            e.f46 = 0;
-            e.f126 = 0;
         }
-        self.g.move_relink(i, cx, cy, z);
+        self.g.move_relink(i, cx, cy, cz);
         self.g.refill_life(i);
+        // The mana CAPACITY resets to the base pool with the purse
+        // (+136 = 1000 at the boundary; the castle keeps banking into
+        // its own store, not the wizard's).
+        self.g.ent[i].f136 = 1000;
         let ent = self.rivals[ri].ent;
         // The re-grant is LIST-driven (:54884-923), not book-driven:
         // each acquisition entry the death rewrote to a model number
@@ -3996,17 +4068,44 @@ impl World {
                 self.rivals[ri].acq[k] = 0;
             }
         }
+        // :55034 — the respawn's own `sub_47DD0` call on the bound
+        // castle: the FRESH Create-Castle token leaves the respawn
+        // wearing the ladder price at the STANDING castle's level,
+        // not the ctor row (the human's respawn carries the same law;
+        // mc1hwl0 t=20761: (12,16) slot 97 = 20000/198 under castle
+        // 233's level 2, against the minted 1000/9).
+        {
+            let e = &self.g.ent[c];
+            if e.f26 > 0 && e.flags & 2 != 0 {
+                let cap = Gen::CASTLE_CAP[(e.f26 as usize).min(7)];
+                let m = self.rivals[ri].owned[16] as usize;
+                if m != 0 {
+                    self.g.ent[m].f136 = cap;
+                    self.g.ent[m].f140 = cap / 101;
+                }
+            }
+        }
         {
             let r = &mut self.rivals[ri];
             r.mana = 1000;
-            r.mana_delta = 0;
+            r.mana_max = 1000;
+            // +132 is NOT cleared by the respawn: the pre-death debit
+            // still pending in the delta seat applies to the fresh
+            // 1000 purse on the first live tick (mc1hwl0 t=20762,
+            // f140 1000 → 0 under the carried −1000).
             r.grace = 100;
             r.regen_stall = 0;
             r.state = AiState::Fresh;
             r.target = 0;
             r.burst = 0;
             r.poverty = false;
+            // :54868-83 — the respawn clears EXACTLY three flight
+            // registers: v_12 (target speed), v_16 (strafe/jink) and
+            // the knock triple; +126 keeps servoing from the fall's
+            // 160 (mc1hwl0 t=20762 reads 160 → 144).
+            r.vdes = 0;
             r.jink = 0;
+            r.knock_mag = 0;
             r.hate = [HATE_NEUTRAL; 8];
             r.war = [false; 8];
             r.cooldown = [0; SPELL_COUNT];
@@ -5131,6 +5230,78 @@ mod tests {
             w.g.ent[c].f58 & 0xFF,
             16,
             "strict_retail: the player arg is the gate pose"
+        );
+    }
+
+    /// The respawn block (sub_44D30 :54842-923 + :55031-41), rival
+    /// side — mc1hwl0 t=20761/20762: the reborn wizard copies the
+    /// castle's WHOLE axis (:54858-61, no ground+256 tile-up), keeps
+    /// the fall's +46/+126 registers (only v_12/v_16/knock clear,
+    /// :54868-83), resets the capacity mirror to the base 1000 while
+    /// the +132 delta seat CARRIES the pre-death debit, and the
+    /// re-minted (12,16) wears the STANDING castle's ladder price
+    /// (:55034's sub_47DD0 call). Pinned by unit because the human's
+    /// mana lane carries a pre-existing import-side residue in the
+    /// t=20760 pair window (the census undercount, ledger SESSION 52),
+    /// which poisons any pair fixture cut there.
+    #[test]
+    fn the_rival_respawn_copies_the_castle_axis_and_keeps_the_fall_registers() {
+        let mut w = rebound_world();
+        let ri = 0;
+        let i = w.rivals[ri].ent as usize;
+        let c = w.rival_castle(w.rivals[ri].ent).expect("starting castle");
+        {
+            let e = &mut w.g.ent[c];
+            e.z = e.z.wrapping_add(300); // a datum OFF the ground plane
+            e.flags |= 2; // the first-commit bind latch
+        }
+        let cz = w.g.ent[c].z;
+        // The corpse enters the respawn with the fall's registers
+        // live and a debit still pending in the delta seat.
+        {
+            let e = &mut w.g.ent[i];
+            e.f46 = -56;
+            e.f126 = 160;
+            e.f136 = 14768;
+        }
+        {
+            let r = &mut w.rivals[ri];
+            r.mana_delta = -1000;
+            r.vdes = 77;
+            r.jink = 7;
+            r.knock_mag = 5;
+            // The death rewrote the acq list to banked MODELS.
+            r.acq = [-1; SPELL_COUNT];
+            r.acq[0] = 16;
+        }
+        w.rival_respawn(ri, i);
+        let e = &w.g.ent[i];
+        assert_eq!(
+            (e.z, e.f46, e.f126),
+            (cz, -56, 160),
+            "castle axis copied; the fall's +46/+126 ride through"
+        );
+        assert_eq!(e.f136, 1000, "capacity resets to the base pool");
+        let r = &w.rivals[ri];
+        assert_eq!(
+            (r.mana, r.mana_delta),
+            (1000, -1000),
+            "fresh purse; the +132 delta seat is CARRIED"
+        );
+        assert_eq!(
+            (r.vdes, r.jink, r.knock_mag),
+            (0, 0, 0),
+            "exactly the three flight registers clear"
+        );
+        let m = r.owned[16] as usize;
+        assert!(m != 0, "the book re-minted the castle spell");
+        assert_eq!(w.g.ent[m].z, cz, "the token minted at the wizard's seat");
+        let lvl = w.g.ent[c].f26 as usize;
+        assert!(lvl > 0, "the starting castle stands leveled");
+        assert_eq!(
+            (w.g.ent[m].f136, w.g.ent[m].f140),
+            (Gen::CASTLE_CAP[lvl], Gen::CASTLE_CAP[lvl] / 101),
+            "the fresh (12,16) wears the standing castle's ladder price"
         );
     }
 }

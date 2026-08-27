@@ -20440,3 +20440,108 @@ converge by the first commit tick).
    "lower-slot teleport warp" law and the portal-warp-z memory.
 2. mc1hwl0-noskip t=970 (rival castle upgrade chain, unchanged).
 3. mc1l37 t=2487 · mc1l49 LAST · mc2 onramp four-take family.
+
+## SESSION 2026-08-27c (52) — mc1hwl0 20038 → 21202 ON EIGHT LAWS (the
+## teleport tick, the rival invis fizzle, and the whole respawn block)
+
+`--segmented` horizon 20038 → 21202 (+1,164), devs 1209 → 1199, clean
+48,933 → 48,943; plain horizon 20038 → 21202, clean 24,609 → 25,773.
+APP `--replay-check` clean 20,027 → 21,275 (diverges t=21287 pose.x).
+All 10 certified takes END (conform --segmented; app bit-exact
+re-confirmed on mc1l0/mc1l5/mc1l32/mc2l3); every uncertified guard row
+byte-identical to baseline (incl. mc1hwl0-noskip 970). 17 fixtures in
+`conformance/mc1hwl0.json` (2 new, both reversion-probed), 2 new unit
+pins, workspace suite green, fmt clean.
+
+### THE LAWS
+
+1. ⭐⭐ **THE TELEPORT RESOLVE'S `v_12 = 0` REACHES THE SAME-TICK
+   MOVER** (t=20039): the (12,10) token fires at its OWN walk slot
+   (:65554, slot 30 < carpet 472), and the resolve zeroes the caster's
+   flight TARGET speed right there (:65583/:65601) — so the carpet's
+   same-tick servo pulls 80 → 64 and the move covers the SERVOED
+   speed: boundary = dest + one 64-step, act_speed 64, cmd_speed 0.
+   The port consumed `pending_speed_zero` only post-tick (driver), so
+   its mover flew the step at 80. Landed: consume at the carpet's
+   dispatch beside the warp consume (`step_player_flight`). Pinned by
+   unit (`world.rs::the_teleport_resolve_speed_zero_reaches_the_same_tick_mover`)
+   — the pair grader warp-gates the pose channel, so no fixture can
+   see this half.
+2. ⭐⭐⭐ **A LOWER-SLOT TELEPORT WARP IS A RECORD WRITE — SAME-TICK
+   WALKERS PROBE THE DESTINATION** (t=20039, second law of the same
+   tick): retail's castle arm is CopyEntityPosition into the wizard
+   RECORD at the token's own dispatch (:65589-98); every walker after
+   it reads the warped pose. The port pinned the walkers' human pose
+   in the tick-top ctx: the (9,0) trackers at slots 178/287/360
+   re-aimed at the stale position (target_yaw 1014 vs 1615) and kept
+   the chase lock retail's range guard dropped. Landed: mid-walk ctx
+   refresh from `pending_teleport` (MC1 walk loop). Fixture
+   `the-teleport-resolve-is-a-record-write-same-tick` (t=20038 pair,
+   reversion-probed).
+3. ⭐⭐ **THE RIVAL INVISIBLE TOKEN RUNS ITS OWN MACHINE AT ITS POOL
+   SLOT — AND A GATE REFUSAL FIZZLES INSIDE THE COMMIT TICK**
+   (t=20697): `sub_571B0_576E0` (hw :61899) is the sub_573F0 skeleton
+   with the owner's +16 0x20 cloak bit (FULL: bit on + wizext+331
+   grace zero + 55E80 debit; broken-bit mid-burst or 55DD0 refusal:
+   +48 = 1; the shared decrement clears the bit at 0). Rival 473's
+   flee re-decision commits Invisible; the token pass at slot 481
+   (above 473, same tick) gate-refuses on the castle-store ladder and
+   the burst dies 0 → 251 → 1 → 0 INSIDE the tick (the Wall-of-Fire
+   spike, session 47). The port's inert token kept 251 and the
+   refresh mirror cloaked a wizard retail never hid. Landed:
+   `rival_invis_token_tick` wired in both class-12 dispatch arms; the
+   refresh's invis clock/mirror removed. Fixture
+   `the-invisible-token-runs-its-own-machine-at-its` (t=20697 pair,
+   reversion-probed). Spell 12's rival arm leaves session 45c's
+   "5/12/15 no witness" list.
+4. ⭐ **THE DEATH SCATTER WRITES NO +48** (t=20728): :55519-49 unparks,
+   ++state, repositions and re-lives the jar — a live burst's leftover
+   counter rides it verbatim (the dying rival's accel token scatters
+   with +48 = 220 aboard). The port's `f26 = 0` at the scatter was
+   invented.
+5. ⭐⭐ **THE FALL'S MOVER LIFTS THE CORPSE ONTO THE TERRAIN FLOOR
+   DURING THE MOVE** (t=20728): sub_455D0's own keep-out runs before
+   the fall's gravity+clamp, so a corpse drifting over RISING ground
+   already reads the lifted z when the (10,1) trail spawns (:51546
+   reads the mover's scratch) and when the seeded fires copy it —
+   trail 744 and fire 28 born at 4956 where the pre-lift z was 4955.
+   Landed in `rival_death_fall` (floor clamp before the puff).
+6. ⭐⭐ **THE RIVAL RESPAWN COPIES THE CASTLE'S WHOLE AXIS AND CLEARS
+   EXACTLY THREE FLIGHT REGISTERS** (t=20761): sub_44D30 :54858-61 —
+   no ground+256 tile-up (the human's mc1l42 law, same function); the
+   whole re-minted book betrayed the invented offset (born z 6432 vs
+   the castle's 6176). Only v_12/v_16/knock clear (:54868-83): the
+   fall's +46 (−56) and +126 (160) ride the boundary verbatim, and
+   +126 servos 160 → 144 on the first live tick. The capacity mirror
+   (+136) resets to the base 1000 (r.mana_max recomputed by the
+   census next tick).
+7. ⭐⭐ **THE +132 DELTA SEAT SURVIVES THE RESPAWN** (t=20762): the
+   pre-death debit still pending applies to the fresh 1000 purse on
+   the first live tick (f140 1000 → 0 under the carried −1000). The
+   port's `mana_delta = 0` at respawn was invented.
+8. ⭐⭐ **THE RESPAWN'S OWN sub_47DD0 RE-PRICES THE FRESH (12,16)**
+   (t=20761): the re-minted castle token leaves the respawn wearing
+   the STANDING castle's ladder price — slot 97 = 20000/198 under
+   castle 233's level 2, not the ctor 1000/9 (:55034; the human's
+   twin landed session 49; this is the mc1hwl0-noskip t=970 re-price
+   family, rival side). Laws 6-8 pinned by unit
+   (`rivals.rs::the_rival_respawn_copies_the_castle_axis_and_keeps_the_fall_registers`)
+   — see OPEN below for why no pair fixture.
+
+### OPEN
+
+- **THE POST-DEATH PAIR WINDOW CARRIES AN IMPORT-SIDE HUMAN-MANA
+  RESIDUE** (t≈20740-20770 pairs, −50/−100 on `player.mana` on the
+  SECOND tick after import): the port re-derives `player.mana_max`
+  from its own census (`recompute_mana`) and lands a ceiling AT the
+  clamp (~178,266 vs retail's +136 ≥ 178,966), so the imported purse
+  clamps where retail's still grows. Free run is CLEAN through 21202
+  on the same lanes — the residue is the pair import's, not the
+  sim's. It poisoned the t=20760 respawn fixture (cut, probed, then
+  RETIRED — the unit pin above carries laws 6-8). Next lead: which
+  claimed entity's +140 the import-side census misses in this window
+  (the human sat banking at his castle since t=20039; suspect the
+  at-castle banked store vs the census's castle credit).
+- **NEXT HEAD t=21203 `(5,8)slot82:chase`** — a balloon's chase lane.
+- mc1hwl0-noskip t=970 unchanged (missing (10,42) upgrade ring — the
+  ring spawn itself, the re-price half is now landed on both sides).

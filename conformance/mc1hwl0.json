@@ -91,6 +91,18 @@
    "file": "the-pick-gates-read-the-raw-wizext-50-register-n.mgcr",
    "source": "mc1hwl0",
    "note": "THE PICK GATES READ THE RAW WIZEXT+50 REGISTER, NOT AN ESTABLISHMENT LATCH: the AttackWizard/RaidCastle entry gates (:18506/:18553 `!+50 && sub_14E60(0x10)`) and the bully clauses (:18570-72) test the +50 word -- bound the moment the free plant mints the castle (:19206) -- and the token half is OWNS-the-m16-token (sub_14E60), not knows-spell-16. The port's `flags & 2` established reading refused the whole wizard pick on the plant tick, so the same-tick re-decision fell through to HuntMana (13, target 161) where retail's war arm picks the human RANGELESSLY (8, target 472, sig 856). mc1hwl0 t=18950: rival 473's f146 must read 472. [The same pair also exercises the box-stamp law -- sub_12C50/sub_12D10 stamp sub_37150's quad entry@level+1/exit@level, reaching the newborn castle through this admission -- but f78-f84 on (3,2) are UNGRADED lanes, so the stamp is pinned by unit test (features.rs the_fit_tests_stamp_the_castle_box), not by this fixture.]"
+  },
+  {
+   "t": 20038,
+   "file": "the-teleport-resolve-is-a-record-write-same-tick.mgcr",
+   "source": "mc1hwl0",
+   "note": "THE TELEPORT RESOLVE IS A RECORD WRITE -- SAME-TICK WALKERS PROBE THE DESTINATION: the (12,10) token fires at its OWN walk slot (:65554 resolve at +48 == +50), and the castle arm's CopyEntityPosition (:65589-98) rewrites the wizard RECORD right there, so every walker dispatching after the token reads the warped pose. mc1hwl0 t=20039: the resolve at slot 30 warps the human 57785/57447 -> 26562/48143 and retail's (9,0) trackers at slots 178/287/360 re-aim on the vanished target the SAME tick -- slot 178 target_yaw 1615 (not the stale-ctx 1014), slot 287's range guard drops chase -> 0. The port pinned the walkers' human pose at tick top. [The same resolve also zeroes the caster's flight TARGET speed (:65583) visible to the same-tick carpet mover -- boundary act_speed 64, cmd_speed 0, dest + one 64-step -- but the pair grader warp-gates the pose channel, so that half is pinned by unit test (world.rs the_teleport_resolve_speed_zero_reaches_the_same_tick_mover), not by this fixture.]"
+  },
+  {
+   "t": 20697,
+   "file": "the-invisible-token-runs-its-own-machine-at-its.mgcr",
+   "source": "mc1hwl0",
+   "note": "THE INVISIBLE TOKEN RUNS ITS OWN MACHINE AT ITS POOL SLOT -- AND A GATE REFUSAL FIZZLES THE BURST INSIDE THE COMMIT TICK: retail's sub_571B0_576E0 (hw :61899, class-12 state 36) is the sub_573F0 skeleton with the owner's +16 0x20 cloak bit (FULL tick: bit on + wizext+331 grace zeroed + 55E80 full-cost debit; broken-bit or 55DD0 refusal: +48 = 1; the shared decrement clears the bit at 0). mc1hwl0 t=20698 pair: rival 473's flee re-decision commits Invisible (cooldown[12] arms, +48 = +50 = 251) and the token's own pass at slot 481 -- above carpet 473, SAME tick -- gate-refuses on the castle-store ladder, so the burst dies 0 -> 251 -> 1 -> 0 intra-tick and slot 481's f26 must read 0 at the boundary (the Wall-of-Fire spike shape). The port's inert rival (12,12) token kept the armed 251 and the refresh mirror cloaked a wizard retail never hid."
   }
  ]
 }

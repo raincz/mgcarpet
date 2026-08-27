@@ -3833,9 +3833,15 @@ impl World {
         // axis at the portal's own tick (:29214), and the carpet then
         // flies on from the destination (mc1l1 t=9899: boundary =
         // dest + one move step, z riding the dest-side ground floor).
-        // Spell teleports stamp at THIS slot's wizard pass, below —
-        // the driver's post-tick consume gets those (boundary = dest
-        // exactly, retail's :65554 shape).
+        // The spell-10 resolve is the same shape since the launcher
+        // set moved token-side: the (12,10) tick fires at the token's
+        // own slot, so the warp AND the `Type_160 v_12 = 0` beside it
+        // (:65583/:65601) are wizard-record writes the carpet's mover
+        // reads the same tick — the servo pulls toward the fresh 0
+        // and the step covers the SERVOED speed. mc1hwl0 t=20039:
+        // retail lands dest + one 64-step (f126 80→64, cmd_speed 0)
+        // where the post-tick-only consume flew the step at 80 and
+        // kept act_speed 80 on the boundary.
         if let Some((tx, ty, alt)) = self.pending_teleport.take() {
             d.s.x = (tx.rem_euclid(256.0) * 256.0) as u16;
             d.s.y = (ty.rem_euclid(256.0) * 256.0) as u16;
@@ -3843,6 +3849,10 @@ impl World {
                 d.s.z = (a * 256.0) as i16;
             }
         }
+        if self.take_speed_zero() {
+            d.s.tgt_speed = 0;
+        }
+
         // DEAD (sub_463B0 :55575-91) — the state-3 dispatch, and it
         // runs NO MOVE AT ALL: retail's carpet leaves `sub_455D0`
         // behind the moment it lands, which is what actually pins the
@@ -4718,6 +4728,27 @@ impl World {
             if self.walk_probe_arm.is_some_and(|n| n as usize == i) {
                 self.walk_probe_arm = None;
                 self.walk_probe = Some(self.g.ent.clone());
+            }
+            // A teleport warp armed by a lower slot is a wizard-RECORD
+            // write (retail's :65589-98 CopyEntityPosition at the
+            // token's own dispatch): every walker after it probes the
+            // DESTINATION, not the tick-top pose. mc1hwl0 t=20039: the
+            // (12,10) resolve at slot 30 warps the human 32k away and
+            // retail's (9,0) trackers at slots 178/287/360 re-aim on
+            // the vanished target the SAME tick (target_yaw 1615 vs
+            // the stale-ctx 1014; slot 287's range guard drops chase
+            // → 0). The carpet's own dispatch below keeps its
+            // read-only peek for the at-castle probe and the mover's
+            // consume clears the pending, so slots above the carpet
+            // fall back to the settled post-move pose as before.
+            if !matches!(self.game, GameId::Mc2)
+                && let Some((tx, ty, alt)) = self.pending_teleport
+            {
+                ctx.px = (tx.rem_euclid(256.0) * 256.0) as u16;
+                ctx.py = (ty.rem_euclid(256.0) * 256.0) as u16;
+                if let Some(a) = alt {
+                    ctx.pz = (a * 256.0) as i16;
+                }
             }
             // The human carpet is out-of-pool (its imported slot is
             // zeroed): the cave ambient tail fires exactly when the
@@ -9366,6 +9397,10 @@ impl World {
                         // Heal's own body (sub_56270 — 5%/tick to
                         // the OWNER, full-cost delta debit).
                         self.rival_heal_token_tick(i, ri);
+                    } else if spell == 12 {
+                        // Invisible's own body (sub_571B0 — the 0x20
+                        // cloak bit, at the token's slot).
+                        self.rival_invis_token_tick(i, ri);
                     } else {
                         self.rival_manifestation_tick(i, ri, spell);
                     }
@@ -9521,6 +9556,12 @@ impl World {
                         // token's slot, full-cost delta debit; the
                         // refresh-driven arm healed a pass late).
                         self.rival_heal_token_tick(i, ri);
+                    } else if spell == 12 {
+                        // Invisible's own body (sub_571B0, mc1hwl0
+                        // t=20697 — the 0x20 cloak bit and the
+                        // intra-tick gate-refusal fizzle live at
+                        // the token's slot).
+                        self.rival_invis_token_tick(i, ri);
                     } else {
                         self.rival_manifestation_tick(i, ri, spell);
                     }
@@ -29929,6 +29970,73 @@ mod tests {
         assert_eq!(ralt, Some(4224.0 / 256.0), "the saved z restored");
         assert!(w.player.teleport_return.is_none(), "toggle cleared");
         assert!(w.take_speed_zero(), "v_12 zero on the return arm");
+    }
+
+    /// The resolve's `Type_160 v_12 = 0` (:65583/:65601) is a
+    /// wizard-record write at the TOKEN's own walk slot, below the
+    /// carpet — the same-tick mover chases the fresh 0, so the
+    /// boundary carries dest + ONE SERVOED step, not dest exactly.
+    /// mc1hwl0 t=20039: retail f126 80→64, cmd_speed 0, pose one
+    /// 64-step past the castle; the driver-side post-tick consume
+    /// flew the step at 80 and kept act_speed 80 on the boundary.
+    /// (The pair grader warp-gates the pose channel, so this half of
+    /// the resolve is pinned here rather than by the t=20038
+    /// fixture.)
+    #[test]
+    fn the_teleport_resolve_speed_zero_reaches_the_same_tick_mover() {
+        let mut w = flat_world();
+        let m = w.g.new_event().expect("token stand-in");
+        let c = w.g.new_event().expect("castle slot");
+        {
+            let e = &mut w.g.ent[c];
+            e.class64 = 3;
+            e.model65 = 2;
+            e.id24 = PLAYER_TARGET;
+            e.x = 80 << 8;
+            e.y = 90 << 8;
+            e.z = 3456;
+        }
+        let pose = PlayerPose {
+            x: 50 << 8,
+            y: 60 << 8,
+            z: 4224,
+            heading: 0,
+            pitch: 0,
+            speed: 80,
+        };
+        // The token's own-slot fire (the launcher set's class-12
+        // tick) stages the warp and the v_12 zero together.
+        w.cast_teleport(m, pose);
+        let mut st = crate::flight::Mc1State {
+            x: 50 << 8,
+            y: 60 << 8,
+            z: 4224,
+            act_speed: 80,
+            tgt_speed: 80,
+            ..Default::default()
+        };
+        let mut d = FlightDrive {
+            s: &mut st,
+            inp: crate::flight::Mc1Input::default(),
+            over: None,
+            falling: false,
+            dead: false,
+            mc2: None,
+        };
+        w.step_player_flight(&mut d);
+        assert_eq!(
+            st.tgt_speed, 0,
+            "v_12 consumed at the dispatch, not post-tick"
+        );
+        assert_eq!(st.act_speed, 64, "the same-tick servo chases the fresh 0");
+        assert!(
+            (st.x, st.y) != (80 << 8, 90 << 8),
+            "boundary = dest + one servoed step, not dest exactly"
+        );
+        assert!(
+            w.take_teleport().is_none() && !w.take_speed_zero(),
+            "both pendings consumed in-walk"
+        );
     }
 
     /// The sound dispatchers' SILENT-EMITTER gate (remc1 sub_55370
