@@ -20123,3 +20123,138 @@ unit-pinned instead of fixture-pinned because of this. Import-side
 dead-window support (materialize the dead carpet record; derive the
 death bank from the +532 MODEL entries rather than the corpse's
 garbage +676) is its own future dig.
+
+## SESSION 2026-08-27 (49) — mc1hwl0 7992 → 17050 ON FOUR LAWS (the
+## acq-list wall falls; segmented devs 2,187 → 1,265; APP pose channel
+## 10,715 → 19,213)
+
+The t=7993 wall session 48 banked WAS the acq-list archaeology, and the
+prepared dig paid in one move. Four laws, all free-run-only (every pair
+probe at every head read clean — the whole session was carried on
+`dump-state`, `MGC_ACQ_TRACE`, the wiz-shadow and two new instrument
+lanes). All ten certified takes still END on both instruments; every
+guard row byte-identical to session 48 except mc1hwl0 itself; suite
+44/44 under MGC_REQUIRE_GOLDENS=1, NO golden re-pins; fmt + clippy
+clean.
+
+1. **t=7993 — THE ACQUISITION LIST IS RETAIL'S i32 THREE-FORM UNION,
+   CARRIED VERBATIM** (`mc1_acq: [i32; 24]`). Alive = pool slots with
+   `<= 0` empty (:64826); the death scatter blindly rewrites ALL 24
+   entries in place — live → the record's MODEL byte (signed char),
+   empty → **−1** (:55517-24); the respawn re-mints per entry IN PLACE
+   and a starved mint ZEROES the entry (:54917 — the permanent silent
+   loss, reproduced under strict; the retry deviation is native-only
+   now). Five port bugs fell together:
+   (a) the u16 import clamped −1 → 0 = fireball's model;
+   (b) the importer armed `death_owned` from a LIVE wizard's +676 —
+       every anchor invented a death bank, and the alive-retry then
+       "restored" never-lost spells (the t=4438 duplicate slot-form 17,
+       via `find(e == s)` with s=0 matching the first free entry);
+   (c) the scatter's invented ownership guard left non-qualifying
+       entries in SLOT form and skipped their three private-stream
+       draws;
+   (d) the respawn regrant's find-based restore collided three ways on
+       this take alone (s=0 → first-free; banked models 20 and 23 →
+       the freshly-written SLOTS 20 and 23) and `grant_spell`'s push
+       appended a duplicate per mint — ONE respawn left 17 entries
+       where retail leaves 9 (retail ground truth, dump-state t=7628:
+       `[0,3,16,2,20,23,4,7,10,−1×15]`; t=7630:
+       `[19,20,21,23,24,25,26,29,30,0×15]` — the port's old post-
+       respawn list was `[19,24,21,25,20,23,26,17,29,30,19,21,24,25,
+       26,29,30,…]`);
+   (e) the stale 17 aliased the (9,1) claim bolt reusing slot 17 at
+       t≈7991 into phantom `owned[1]` through the blind +676 rebuild —
+       heal jar 106's already-known stamp at t=7993, the wall.
+   Same owned SET on the same pool slots throughout — only the LIST
+   diverged, and the list is ungraded: nothing could see it until the
+   alias. Pinned by
+   `the_death_scatter_banks_models_in_place_and_stamps_minus_one_empties`
+   and `the_strict_respawn_regrant_is_in_place_one_shot_with_silent_loss`.
+   ⚠ Session 48's "structural fixes measured worse" is EXPLAINED: they
+   fixed (c)-(d) shapes while keeping the u16/0-sentinel and the
+   phantom bank, so the list CONTENT stayed wrong and the old bugs'
+   artifacts were load-bearing. The full union model needed landing
+   as ONE law.
+
+2. **t=10097 — A LOWER-SLOT TELEPORT WARP IS VISIBLE TO THE SAME
+   TICK'S AT-CASTLE PROBE** (`(3,0)slot472:life`). Retail's "pre-move"
+   regen probe (:55346-50) reads the wizard RECORD, which a lower walk
+   slot's warp (`sub_41C70` at the token's/portal's slot) has already
+   rewritten; the port's tick-top ctx was immune, so every teleport
+   tick flipped the life/mana regen rates one tick late IN BOTH
+   DIRECTIONS (t=5807/7796 leaving, t=10096 arriving — retail's
+   boundary holds life_rate 40/grace 1, the port 5/0, then +40 vs +5
+   regen on the graded life lane). Both carpet anchors now peek
+   `pending_teleport` before `regen_boost`.
+
+3. **t=10464 — THE RESPAWN COMMAND APPLIES POST-WALK**
+   (`(3,1)slot473:chase`). The Space respawn is a turn COMMAND (case
+   0xF :48620-33 → sub_44D30) and retail's command processor runs
+   AFTER UpdateEntities: dump-state t=7629 shows the respawn fully
+   applied at the boundary with hate[0] = the FRESH amnesty 40927 and
+   stall=16 undecayed — rival 473's decay ran BEFORE the stamp. The
+   port respawned inside the carpet's walk-slot dispatch, so the
+   rival's same-tick decay left hate one LOW forever — and the
+   AttackWizard election at t=10464 fired one tick late against the
+   wealth-scaled bar. The pooled-carpet dispatch now strips
+   `cmd.respawn` and the tick applies it post-walk (the landing stays
+   in-walk — it is the state-2 walk handler; the native anchor was
+   already post-walk). TWO RIDERS:
+   (a) the respawn's own `sub_47DD0` call (:55034) — the fresh
+       Create-Castle token leaves the respawn wearing the ladder price
+       CAP[level]/101 (80000/792 under castle 498's level 4), not the
+       ctor row (1000/9); without it the post-walk mint missed the
+       castle tick's own re-stamp for one boundary;
+   (b) **wizext+526 (TEMPO) IS RECORDED STATE AND NOW IMPORTS**
+       (`RetailWizardMc1::tempo` → `Rival::tempo`): the live scalar
+       behind think period `64 − (+526>>2)` (:18025), the turn-servo
+       divisor (:18837) and the burst lockout (:19129-36); retail
+       re-stamps it from the per-wizard level table at init and every
+       respawn (:54964-68). mc1hwl0's rival 1 records 255 (think
+       period 1); the port's static config twin said otherwise.
+
+4. **t=16772 — THE INCOMING-PROJECTILE DEFENSE RANGE IS 2D**
+   (`(3,1)slot473:x,y,target_yaw`). Both the dodge scan's 5120 gate
+   (sub_16800 :19780) and the reactive-cast's 1024 gate (sub_16890)
+   measure through `sub_42410` (:52748-54) = Δx² + Δy² — NO z term.
+   The port's invented dz² leg dropped threat 516 (dz 2617) out of
+   range one tick early: 27.7M-in-3D vs the 26.2M gate, 20.9M in
+   retail's 2D — retail re-stamped the strafe at t=16771, the port let
+   it decay 80 → 76, and the 4-unit lateral gap was the head. Pinned
+   by leg (d) of `the_defense_scan_is_tick_top_and_keeps_soft_kills`.
+
+### METHOD NOTES
+
+- ⭐⭐⭐ **THE HUMAN'S WIZ-SHADOW WAS BLIND ON EXACTLY THE LANES THAT
+  MATTERED** (5th and 6th instrument-asymmetry occurrences): wiz 0
+  exported no `acq`/`owned` (laws 1's alias was hand-dump-only) and no
+  `grace`/`regen_stall`/`life_rate` (law 2's flip surfaced only after
+  adding them). Both sides now export the same lanes. When a fresh
+  head resists, CHECK THE SHADOW'S LANE LIST before theorising.
+- ⭐⭐ **`MGC_RAW_SHADOW_ROWS` OVER A FREE RUN IS THE HEAD-HUNTING
+  INSTRUMENT for free-run-only laws**: one pass yields every ungraded
+  wizard lane's divergence timeline (the t=7629 amnesty −1, the
+  pinned-16 stall, the strafe decay phase all read straight off the
+  TSV).
+- ⭐⭐ **`(9,x)` POSITION ROWS CAN BE ROSTER-EXPLAINED AND STILL CARRY
+  THE CAUSE** (law 4: the pair read "0 unexplained" while the bolt's
+  position diverged — the roster's visual-family rules explained it
+  away). An explained row is not an equal row.
+- ⭐ dump-state's wiz print now shows the FULL acq array (zeros and
+  −1s in place) + `tempo`; `MGC_JINK_TRACE` traces the dodge scan.
+- ⚠ wizext +522/+524 are ALSO respawn-stamped level-table scalars the
+  port does not model or import; no witness yet.
+- ⚠ The pre-existing wiz-0 alert/danger/aggro counter drifts (from
+  t=366) and rival-1 `regen_stall` pinned-16-vs-0 and `knock_dir/mag`
+  never-carried lanes are STANDING ungraded leads — none blocked a
+  graded lane yet.
+
+### NEXT
+
+1. **mc1hwl0 t=17051 `(3,1)slot473:life`** — rival 1's life lane, the
+   fresh head; the stall/knock standing leads above are the suspects.
+2. mc1hwl0-noskip t=970 (rival castle upgrade chain, unchanged).
+3. mc1l37 t=2487 `(3,1)slot527:target_yaw` — the same rival-law
+   neighborhood; mc1l49 (player ruling: LAST).
+4. The mc2 onramp family (mc2l1/l4/l24 + mc2l6-rival-spells-galore,
+   four takes at t≈1).

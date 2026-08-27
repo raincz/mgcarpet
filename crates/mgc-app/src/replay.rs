@@ -172,7 +172,11 @@ impl ReplayFile {
                             speed: a[5] as i16,
                         }
                     },
-                    mc1_acq: pin_u16s(p, "mc1_acq"),
+                    // i32 verbatim — the dead-window −1 sentinels are
+                    // real state (old u16-era pins re-parse fine: JSON
+                    // numbers are typeless and were all non-negative).
+                    mc1_acq: pin_i64s::<{ mgc_sim::mc1::spells::SPELL_COUNT }>(p, "mc1_acq")
+                        .map(|v| v as i32),
                     mc2_turn: pin_u64(p, "mc2_turn") as u32,
                     mc2_carpet_stall: pin_bool(p, "mc2_carpet_stall"),
                     mc1_v14: pin_bool(p, "mc1_v14"),

@@ -752,15 +752,22 @@ pub struct World {
     /// carpet mover (tokens sit below the carpet in every recorded
     /// pool). A pose echo like `human_pose_prev` — HASH-EXCLUDED.
     mc1_cast_pose: PlayerPose,
-    /// The human's ACQUISITION LIST (`Type_160+532`, 24 pool slots in
-    /// pickup order) — conformance import only, 0 = empty. The death
-    /// scatter walks THIS, not the spell table (:55519-24), and the
-    /// three RNG draws it spends per jar make the order observable in
-    /// every scattered jar's x/y/ttl. The port models ownership as a
-    /// spell-indexed map with no order, so native play falls back to
-    /// ascending spell id; the import replays retail's list.
-    /// HASH-EXCLUDED, like the wizard-pass anchor above.
-    mc1_acq: [u16; SPELL_COUNT],
+    /// The human's ACQUISITION LIST (`Type_160+532`) — retail's
+    /// 24-entry i32 array, a PHASE-TAGGED UNION carried verbatim:
+    /// while the wizard lives an entry is a pool slot (`<= 0` =
+    /// empty — the pickup scan's own test, :64826); the death
+    /// landing blindly rewrites every entry to the pointed-at
+    /// record's MODEL byte and every empty to −1 (:55517-24); the
+    /// respawn re-mints per entry in place, −1 → 0 and a starved
+    /// mint → 0 (:54893-917, the silent spell loss). 0 is therefore
+    /// AMBIGUOUS BY DESIGN — alive it is "empty", dead it is
+    /// FIREBALL — and only the phase disambiguates; any find/push
+    /// over the union must respect that (session 48's stale-17 bug
+    /// was exactly a find that didn't). The scatter's three RNG
+    /// draws per live entry make the ORDER observable in every
+    /// scattered jar's x/y/ttl. HASH-EXCLUDED, like the wizard-pass
+    /// anchor above.
+    mc1_acq: [i32; SPELL_COUNT],
     /// The doomsday HUD meter `x_BYTE_D9F50[0x87a]` (0..1200),
     /// driven by the pyramid's bit-5 ramp — banked for the 4.9 HUD
     /// track (hash-transparent while 0, like the latch).
@@ -1747,7 +1754,7 @@ pub struct ImportPin {
     pub human_yaw_prev: u16,
     pub hand_bits: u32,
     pub mc1_cast_pose: PlayerPose,
-    pub mc1_acq: [u16; crate::mc1::spells::SPELL_COUNT],
+    pub mc1_acq: [i32; crate::mc1::spells::SPELL_COUNT],
     pub mc2_turn: u32,
     pub mc2_carpet_stall: bool,
     /// `mc1_v14` is retail's Type_160 v_14 — "a speed press moved the
@@ -4771,6 +4778,26 @@ impl World {
                 if self.player.state == LifeState::Alive {
                     self.mc1_owned_rebuild();
                 }
+                // A teleport warp armed by a LOWER walk slot this
+                // tick has already rewritten retail's wizard RECORD
+                // (`sub_41C70` at the token's/portal's own slot), so
+                // the at-castle probe (:55346-50, "pre-move") reads
+                // the DESTINATION — the regen flip lands on the
+                // warp's own tick. mc1hwl0 t=10096: the spell-16
+                // token at slot 21 warps the carpet home and retail's
+                // boundary already holds life_rate 40/grace 1 where
+                // the stale tick-top ctx read kept 5/0 — the t=10097
+                // `(3,0)slot472:life` head (+40 vs +5 regen), and the
+                // same one-tick lag on every prior flip (t=5807,
+                // 7796). The mover's own consume below still takes
+                // the pending; this is a read-only peek.
+                if let Some((tx, ty, alt)) = self.pending_teleport {
+                    ctx.px = (tx.rem_euclid(256.0) * 256.0) as u16;
+                    ctx.py = (ty.rem_euclid(256.0) * 256.0) as u16;
+                    if let Some(a) = alt {
+                        ctx.pz = (a * 256.0) as i16;
+                    }
+                }
                 let (at_castle, at_dolmen) = self.regen_boost(&ctx);
                 self.player_mail_block(player, at_castle);
                 if let Some(d) = drive.as_deref_mut() {
@@ -4790,7 +4817,25 @@ impl World {
                 // only starts on the next pass (mc1l42 t=17305, where
                 // the port grew a (10,1) trail retail has no room for).
                 if !alive {
-                    self.mc1_mortality_pass(player, cmd);
+                    // The landing (states 2/3) is this slot's own
+                    // walk handler; the RESPAWN is a turn COMMAND
+                    // (case 0xF :48620-33) and retail's command
+                    // processor runs AFTER the entity walk — so it is
+                    // stripped here and applied post-walk below. The
+                    // witness is the respawn boundary itself (mc1hwl0
+                    // t=7629): retail's hate[0] reads the fresh
+                    // amnesty 40927 and stall reads 16 undecayed,
+                    // where the in-walk stamp was decayed by rival
+                    // 473's pass the same tick — a permanent −1 on
+                    // the AttackWizard election clock (the t=10464
+                    // chase head).
+                    self.mc1_mortality_pass(
+                        player,
+                        PlayerCommand {
+                            respawn: false,
+                            ..cmd
+                        },
+                    );
                 }
                 // Whatever the rest of this dispatch spent on the
                 // carpet's own LCG goes back to the chain.
@@ -5544,6 +5589,16 @@ impl World {
             if self.player.state == LifeState::Alive {
                 self.mc1_owned_rebuild();
             }
+            // Same teleport-warp peek as the in-walk anchor: a warp
+            // armed before this dispatch is already in the RECORD
+            // retail's probe reads.
+            if let Some((tx, ty, alt)) = self.pending_teleport {
+                ctx.px = (tx.rem_euclid(256.0) * 256.0) as u16;
+                ctx.py = (ty.rem_euclid(256.0) * 256.0) as u16;
+                if let Some(a) = alt {
+                    ctx.pz = (a * 256.0) as i16;
+                }
+            }
             let (at_castle, at_dolmen) = self.regen_boost(&ctx);
             self.player_mail_block(player, at_castle);
             if let Some(d) = drive {
@@ -5555,6 +5610,19 @@ impl World {
             }
             self.mc1_wizard_pass(alive, edge, cmd, player, &ctx, (at_castle, at_dolmen));
             self.player_regen_block(at_castle, at_dolmen);
+        }
+        // Retail's turn-command processor runs AFTER UpdateEntities:
+        // the Space respawn (case 0xF :48620-33 → sub_44D30) applies
+        // post-walk, invisible to every walk slot of its own frame.
+        // The pooled-carpet dispatch above stripped the command; it
+        // lands here. (The native anchor just above is already
+        // post-walk and keeps its in-pass arm.)
+        if !matches!(self.game, GameId::Mc2)
+            && self.mc1_carpet_slot != 0
+            && matches!(self.player.state, LifeState::Dead)
+            && cmd.respawn
+        {
+            self.player_respawn();
         }
         wt_check!("post-walk carpet (native anchor)");
         if any_creature || any_transient {
@@ -5738,8 +5806,14 @@ impl World {
                 // entries behind; keep retrying until every
                 // remembered spell has its manifestation back
                 // (deviation — retail's loop is one-shot and eats
-                // the spell; see death_regrant).
-                if self.player.death_owned.iter().any(|&b| b) {
+                // the spell; see death_regrant). NATIVE ONLY: under
+                // strict retail the loss is retail's own shipped bug
+                // and the one-shot arm has already zeroed the bank —
+                // the deviation register's rule is that deliberate
+                // gameplay patches are off under `strict_retail`,
+                // and this one firing there is what invented the
+                // t=4438 phantom regrant on mc1hwl0.
+                if !self.strict_retail && self.player.death_owned.iter().any(|&b| b) {
                     self.death_regrant(None);
                 }
             }
@@ -6280,36 +6354,53 @@ impl World {
         let strict = self.strict_retail;
         let cs = self.mc1_carpet_slot as usize;
         let cs = (cs != 0 && cs < self.g.ent.len()).then_some(cs);
-        let order: Vec<usize> = if self.mc1_acq.iter().any(|&m| m != 0) {
-            self.mc1_acq.iter().map(|&m| m as usize).collect()
-        } else {
-            (0..SPELL_COUNT)
-                .map(|s| self.player.owned[s] as usize)
-                .collect()
-        };
-        for (idx, m) in order.into_iter().enumerate() {
-            if m == 0 || m >= self.g.ent.len() || self.g.ent[m].class64 != 12 {
+        // Native robustness only: a world whose list was never
+        // populated (a pre-list save) seeds it from the owned map in
+        // ascending spell id before the walk, so nothing is silently
+        // kept through a death.
+        if self.mc1_acq.iter().all(|&e| e <= 0) {
+            let mut k = 0;
+            for s in 0..SPELL_COUNT {
+                if self.player.owned[s] != 0 {
+                    self.mc1_acq[k] = self.player.owned[s] as i32;
+                    k += 1;
+                }
+            }
+        }
+        // :55517-24 — THE WALK IS BLIND AND TOTAL: all 24 entries, in
+        // place. An empty entry (<= 0, the pickup scan's own test)
+        // becomes the dead-form sentinel −1; a live entry becomes the
+        // MODEL byte of whatever record it points at (a signed-char
+        // read), with no class or ownership test — retail affords the
+        // blindness because an alive-form list only ever holds live
+        // owned tokens. Session 48's guarded version skipped entries
+        // that failed its invented ownership test, which both left
+        // them in SLOT form (the stale-17 alias) and dropped their
+        // three private-stream draws, desyncing every jar after them.
+        for idx in 0..SPELL_COUNT {
+            let entry = self.mc1_acq[idx];
+            if entry <= 0 || entry as usize >= self.g.ent.len() {
+                // (the bounds arm is memory safety only)
+                self.mc1_acq[idx] = -1;
                 continue;
             }
-            // :55523 — the bank entry is the ENTITY's own model, the
-            // same value the list slot is overwritten with.
-            let s = self.g.ent[m].model65 as usize;
-            if s >= SPELL_COUNT || self.player.owned[s] as usize != m {
-                continue;
-            }
-            self.player.death_owned[s] = true;
+            let m = entry as usize;
             // :55523 — the LIST ENTRY becomes the entity's MODEL. The
             // list holds pool slots while the wizard lives and models
             // from the landing until the respawn re-mints them, which
-            // is the state `death_regrant` reads them back in.
-            if let Some(e) = self.mc1_acq.get_mut(idx) {
-                *e = self.g.ent[m].model65 as u16;
+            // is the state `death_regrant` reads them back in. A dead-
+            // form 0 is FIREBALL, never "empty".
+            let s0 = self.g.ent[m].model65 as i8 as i32;
+            self.mc1_acq[idx] = s0;
+            let s = s0 as usize;
+            if s < SPELL_COUNT {
+                self.player.death_owned[s] = true;
+                // The var_916 bank (:55531-35): blue-granted spells
+                // come back unrestricted on respawn even if the
+                // scattered jar expires meanwhile.
+                self.player.death_owned_blue[s] = self.g.ent[m].flags & BLUE_SPELL != 0;
+                self.player.owned[s] = 0;
             }
-            // The var_916 bank (:55531-35): blue-granted spells come
-            // back unrestricted on respawn even if the scattered jar
-            // expires meanwhile.
-            self.player.death_owned_blue[s] = self.g.ent[m].flags & BLUE_SPELL != 0;
-            self.player.owned[s] = 0;
             let (d1, d2, d3) = {
                 let r = match cs {
                     Some(c) => &mut self.g.ent[c].rand,
@@ -6468,43 +6559,130 @@ impl World {
         // survive death untouched (the original never clears
         // var_940/944 on respawn).
         self.death_regrant(Some(seat));
+        // :55034 — the respawn's own `sub_47DD0` call on the bound
+        // castle: the FRESH Create-Castle token leaves the respawn
+        // wearing the ladder price, not the ctor row. The castle
+        // tick's per-tick stamp already ran this frame (the respawn
+        // command applies post-walk), so without this the token
+        // reads 1000/9 for one boundary where retail reads
+        // CAP[level]/101 (mc1hwl0 t=7629: (12,16) slot 21 =
+        // 80000/792 under castle 498's level 4).
+        if let Some(c) = self.player_castle() {
+            let e = &self.g.ent[c];
+            if e.f26 > 0 && e.flags & 2 != 0 {
+                let cap = features::Gen::CASTLE_CAP[(e.f26 as usize).min(7)];
+                let own = e.id24;
+                if let Some(m) = self.castle_owner_token(own) {
+                    self.g.ent[m].f136 = cap;
+                    self.g.ent[m].f140 = cap / 101;
+                }
+            }
+        }
     }
 
-    /// Drain the death bank into owned manifestations. A starved
-    /// grant (full pool — the endgame crowd plus the player's own
-    /// still-decaying scattered jars) keeps its bank entry, and the
-    /// wizard tick retries while alive: the bank forgets a spell only
-    /// when the manifestation actually exists.
+    /// Drain the death bank into owned manifestations.
     ///
-    /// DEVIATION (docs/DEVIATIONS.md): retail's loop is one-shot and
-    /// its alloc-failure branch zeroes the banked model id (:54917,
-    /// HW :50985) — permanent silent loss. Retail affords that
-    /// because the respawn first rebuilds both free lists (:54842)
-    /// and its allocator sacrifices recycle victims before failing
-    /// (:43910); our MC1 allocator does neither, so the one-shot
-    /// loop ate spells far more often than retail — the intermittent
-    /// hand-spell eater (mc1:49 + mc1hw:0): grants run in spell-id
-    /// order, so a partial starve ate the high-id late-book spells,
-    /// exactly the ones a veteran keeps equipped.
+    /// STRICT ARM — retail's own one-shot walk (:54888-923, HW
+    /// :50952-991, byte-identical): the 24 list entries IN ORDER, in
+    /// place. A negative entry (the scatter's empty) becomes 0; any
+    /// other entry is a banked MODEL (0 = fireball — a dead-form 0 is
+    /// never "empty") and mints unconditionally; a successful mint
+    /// writes its pool slot back over ITS OWN entry (:54897) — never
+    /// a find: session 48's find-based restore collided three ways
+    /// (s=0 matched the first free entry; a banked model matched a
+    /// same-valued freshly-written SLOT — models 20 and 23 both did),
+    /// and `grant_spell`'s push appended a duplicate per mint, so one
+    /// respawn left 17 entries where retail leaves 9. A starved mint
+    /// ZEROES the entry (:54917) — the spell is permanently, silently
+    /// lost; that loss is retail's own shipped bug (the l49 "lost
+    /// wall of fire") and strict mode must reproduce it.
+    ///
+    /// NATIVE ARM — the registered player-favoring deviation
+    /// (docs/DEVIATIONS.md `death_regrant`): a starved grant keeps
+    /// its bank entry and the wizard tick retries while alive, so the
+    /// spell returns as soon as any slot frees. Grants run in list
+    /// order first, ascending spell id behind it.
     ///
     /// `seat` is the respawning wizard's own axis — retail's spawn
     /// call takes it (:54894) and the token is laid there, so the
     /// re-minted set sits on the castle the wizard just returned to.
-    /// `None` = the Alive-arm retry, which has no fresh seat.
+    /// `None` = the native Alive-arm retry, which has no fresh seat.
     fn death_regrant(&mut self, seat: Option<(u16, u16, i16)>) {
         let strict = self.strict_retail;
-        // RE-MINT ORDER IS THE ACQUISITION LIST'S (:54888-905 walks
-        // `Type_160+532`, whose entries the landing left holding each
-        // token's MODEL), and it is observable through the allocator:
-        // mc1l42 t=17398 re-mints onto slots 110/112/114/115/117 in
-        // pickup order 0, 3, 1, 16, 2 — ascending spell id put model 1
-        // where retail has model 3. Anything the list does not name
-        // (a blue grant, a pre-list world) falls in behind it, in the
-        // old order.
+        if std::env::var_os("MGC_ACQ_TRACE").is_some() {
+            eprintln!(
+                "[regrant] t={} strict={strict} seat={seat:?} acq={:?} owned={:?}",
+                crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                self.mc1_acq,
+                self.player.owned
+            );
+        }
+        if strict {
+            for idx in 0..SPELL_COUNT {
+                let entry = self.mc1_acq[idx];
+                if entry < 0 {
+                    // :54893-95 — the dead-form empty goes back to
+                    // the alive-form one.
+                    self.mc1_acq[idx] = 0;
+                    continue;
+                }
+                if entry == 0 && !self.player.death_owned[0] {
+                    // An alive-form empty (a respawn whose scatter
+                    // never ran holds no bank — nothing to mint).
+                    // Retail cannot distinguish this from a banked
+                    // fireball and mints one per :54893; the port
+                    // reaches here only through its own respawn, so
+                    // the bank flag disambiguates without deviating
+                    // on any scattered list.
+                    continue;
+                }
+                let s = entry as usize;
+                if s >= SPELL_COUNT {
+                    // Memory safety only — a scattered entry is a
+                    // signed char and retail's book stops at 23.
+                    self.mc1_acq[idx] = 0;
+                    continue;
+                }
+                let Some(m) = self.mint_spell_token(SpellId(s as u8)) else {
+                    // :54917 — the starved mint zeroes the bank
+                    // entry: permanent silent loss, retail's own.
+                    self.mc1_acq[idx] = 0;
+                    self.player.death_owned[s] = false;
+                    continue;
+                };
+                self.player.death_owned[s] = false;
+                // :54897 — the slot back over its own entry, so the
+                // list keeps its PICKUP ORDER across the death and
+                // the next scatter walks it the same way.
+                self.mc1_acq[idx] = m as i32;
+                // :54895-96 — the token stamped back onto the wizard
+                // (+42, our f144, which the mint already writes) and
+                // its OWNED bit back up; retail's class-12 state is
+                // `spell*3 + phase`, re-minted on phase 0.
+                {
+                    let e = &mut self.g.ent[m];
+                    e.flags |= 1;
+                    e.tick70 = 3 * s as u8;
+                }
+                if let Some((x, y, z)) = seat {
+                    self.g.move_relink(m, x, y, z);
+                }
+                if self.player.death_owned_blue[s] {
+                    // :54908-12 — the re-grant restores blue: the
+                    // unrestricted marker + the blue sprite type.
+                    // Retail reads the +916 bank without clearing it
+                    // (only the next scatter rewrites it).
+                    self.g.ent[m].flags |= BLUE_SPELL;
+                    self.g.ent[m].type86 = 280;
+                }
+            }
+            return;
+        }
+        // NATIVE: list order first, ascending spell id behind it.
         let mut order: Vec<usize> = Vec::with_capacity(SPELL_COUNT);
         for &e in self.mc1_acq.iter() {
             let s = e as usize;
-            if s < SPELL_COUNT && self.player.death_owned[s] && !order.contains(&s) {
+            if e >= 0 && s < SPELL_COUNT && self.player.death_owned[s] && !order.contains(&s) {
                 order.push(s);
             }
         }
@@ -6513,55 +6691,27 @@ impl World {
                 order.push(s);
             }
         }
-        if std::env::var_os("MGC_ACQ_TRACE").is_some() {
-            eprintln!(
-                "[regrant] t={} seat={seat:?} order={order:?} acq={:?} owned={:?}",
-                crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
-                self.mc1_acq,
-                self.player.owned
-            );
-        }
         for s in order {
             if !self.player.death_owned[s] {
                 continue;
             }
-            let Some(m) = self.grant_spell(SpellId(s as u8)) else {
+            let Some(m) = self.mint_spell_token(SpellId(s as u8)) else {
                 continue;
             };
             self.player.death_owned[s] = false;
-            // :54897 — the re-minted token's slot goes back into the
-            // acquisition list, at the entry the landing left holding
-            // its model, so the list keeps its PICKUP ORDER across a
-            // death and the next scatter walks it the same way.
-            // ⚠ APPROX: retail re-mints IN LIST ORDER (:54888-905)
-            // while this loop runs ascending spell id, so the pool
-            // slots the two hand out can differ — the ORDER the
-            // scatter observes is what this restores.
-            if let Some(e) = self
-                .mc1_acq
-                .iter_mut()
-                .find(|e| **e == s as u16 && s < SPELL_COUNT)
-            {
-                *e = m as u16;
+            // The re-minted slot replaces the entry the landing left
+            // holding its model; a bank entry the list does not name
+            // (the pre-list fallback) appends like a fresh pickup.
+            if let Some(e) = self.mc1_acq.iter_mut().find(|e| **e == s as i32) {
+                *e = m as i32;
+            } else {
+                self.mc1_acq_push(m as u16);
             }
-            // :54895-96 — the token is stamped back onto the wizard
-            // (+42, our f144, which `grant_spell` already writes) and
-            // its OWNED bit goes back up. A strict pool carries
-            // retail's `spell*3 + phase` state, so the re-mint lands
-            // on phase 0.
-            {
-                let e = &mut self.g.ent[m];
-                e.flags |= 1;
-                if strict {
-                    e.tick70 = 3 * s as u8;
-                }
-            }
+            self.g.ent[m].flags |= 1;
             if let Some((x, y, z)) = seat {
                 self.g.move_relink(m, x, y, z);
             }
             if std::mem::take(&mut self.player.death_owned_blue[s]) {
-                // :54908-12 — the re-grant restores blue: the
-                // unrestricted marker + the blue sprite type.
                 self.g.ent[m].flags |= BLUE_SPELL;
                 self.g.ent[m].type86 = 280;
             }
@@ -6929,11 +7079,16 @@ impl World {
     /// A slot already listed is not re-appended (retail's `break` on
     /// finding the model, :64831).
     fn mc1_acq_push(&mut self, slot: u16) {
-        if slot == 0 || self.mc1_acq.contains(&slot) {
+        if slot == 0 || self.mc1_acq.contains(&(slot as i32)) {
             return;
         }
-        if let Some(e) = self.mc1_acq.iter_mut().find(|e| **e == 0) {
-            *e = slot;
+        // First EMPTY entry — the scan's own test is `<= 0` (:64826
+        // forms `&pool[entry]` and takes anything at or below the
+        // pool base as free), which also recycles a native list's
+        // leftover −1s. A full list refuses the append, like retail's
+        // `v24 == -1` arm refuses the whole grant (:64841).
+        if let Some(e) = self.mc1_acq.iter_mut().find(|e| **e <= 0) {
+            *e = slot as i32;
         }
     }
 
@@ -6963,19 +7118,55 @@ impl World {
         self.player.owned = [0; SPELL_COUNT];
         for k in 0..self.mc1_acq.len() {
             let e = self.mc1_acq[k];
-            if e == 0 {
+            if e <= 0 {
+                // Retail skips only `== 0` (:55315) and would index
+                // pool[−1] for a negative — but a human list never
+                // holds −1 while the dispatch runs (the scatter's −1s
+                // exist only in the dead window, where the dispatch
+                // is skipped, and the respawn zeroes them at :54893
+                // before its own rebuild call at :55033), so the
+                // extra guard is memory safety on an unreachable arm.
                 continue;
             }
             if let Some(r) = self.g.ent.get(e as usize) {
                 let m = r.model65 as usize;
                 if m < SPELL_COUNT {
-                    self.player.owned[m] = e;
+                    self.player.owned[m] = e as u16;
                 }
             }
         }
     }
 
     fn grant_spell(&mut self, spell: SpellId) -> Option<usize> {
+        // Same MC2 gate as the mint — the owned-map early return must
+        // not fire on the MC2 column either.
+        if matches!(self.game, GameId::Mc2) {
+            return None;
+        }
+        let id = spell.0 as usize;
+        if id >= SPELL_COUNT {
+            return None;
+        }
+        if self.player.owned[id] != 0 {
+            return Some(self.player.owned[id] as usize);
+        }
+        let m = self.mint_spell_token(spell)?;
+        // The pickup scan's list append (:64854). The respawn regrant
+        // does NOT go through here — its slot goes back over the
+        // entry the landing left holding its model (:54897), never an
+        // append; the push half of session 48's duplicate storm was
+        // exactly this call running under the regrant.
+        self.mc1_acq_push(m as u16);
+        Some(m)
+    }
+
+    /// The bare token mint — `grant_spell` without the owned-map
+    /// early-return and without the acquisition-list append, because
+    /// the two writer sites disagree on both: the pickup/init grant
+    /// appends (:64854) while the respawn regrant writes in place
+    /// over its own entry (:54897) and mints unconditionally per
+    /// entry.
+    fn mint_spell_token(&mut self, spell: SpellId) -> Option<usize> {
         // MC1 class-12 manifestations never exist on the MC2 column
         // (the native book owns spells there; the dev/plausible
         // instruments grant through mc2_dev_grant instead). Without
@@ -6987,9 +7178,6 @@ impl World {
         let id = spell.0 as usize;
         if id >= SPELL_COUNT {
             return None;
-        }
-        if self.player.owned[id] != 0 {
-            return Some(self.player.owned[id] as usize);
         }
         let m = self.g.new_event()?;
         // ⚠ The GAME's table, not the base one: HW forks spell 20's
@@ -7042,7 +7230,6 @@ impl World {
         };
         self.g.extents(m, h4, v4);
         self.player.owned[id] = m as u16;
-        self.mc1_acq_push(m as u16);
         // NO hand binding here: retail's level-init rebuild assigns the
         // hands from the OWNED SET in book order, not in grant order
         // (see `rebind_hands_canonical`). Binding incrementally here
@@ -18995,6 +19182,130 @@ mod tests {
             recovered >= 24,
             "the pool freed but only {recovered}/24 spells came back — \
              the respawn grant failure ate the rest"
+        );
+    }
+
+    /// mc1hwl0 t=7592→7628 (dump-state ground truth): the death
+    /// scatter is retail's BLIND in-place walk of all 24 list entries
+    /// (:55517-24) — every live entry becomes the pointed-at record's
+    /// MODEL byte, every empty becomes −1, and ORDER is preserved.
+    /// Retail's own list read [17,57,94,109,28,108,107,161,162] before
+    /// the landing and [0,3,16,2,20,23,4,7,10,−1×15] after it; the
+    /// old guarded loop skipped entries that failed its invented
+    /// ownership test (leaving them in SLOT form — session 48's
+    /// stale-17 alias) and left empties at 0, which the dead form
+    /// cannot mean (0 = fireball there).
+    #[test]
+    fn the_death_scatter_banks_models_in_place_and_stamps_minus_one_empties() {
+        let mut w = flat_world();
+        w.grant_spells(&[0, 3, 16, 2]);
+        let expect: Vec<i32> = w.mc1_acq[..4]
+            .iter()
+            .map(|&e| w.g.ent[e as usize].model65 as i32)
+            .collect();
+        assert_eq!(expect, vec![0, 3, 16, 2], "grant order IS list order");
+        w.player.grace = 0;
+        hit_player(&mut w, 30000, 1);
+        w.tick(firing_line(), PlayerCommand::default());
+        w.tick(grounded_line(), PlayerCommand::default());
+        assert_eq!(w.vitals().state, LifeState::Dead);
+        assert_eq!(
+            &w.mc1_acq[..4],
+            &[0, 3, 16, 2],
+            "live entries bank the MODEL at their own index — 0 is \
+             fireball's, not an empty"
+        );
+        assert!(
+            w.mc1_acq[4..].iter().all(|&e| e == -1),
+            "every empty entry is stamped the dead-form −1 sentinel \
+             (got {:?})",
+            &w.mc1_acq[4..]
+        );
+    }
+
+    /// mc1hwl0 t=7629→7630: the STRICT respawn regrant is retail's
+    /// one-shot in-place walk (:54893-917). Each banked model mints
+    /// over ITS OWN entry; −1 goes back to 0; a starved mint ZEROES
+    /// the entry — the permanent silent loss (:54917, the l49 "lost
+    /// wall of fire"). Session 48's find-based restore collided three
+    /// ways on this exact take (s=0 matched the first free entry,
+    /// banked models 20 and 23 matched freshly-written slots 20 and
+    /// 23) and `grant_spell`'s push appended a duplicate per mint —
+    /// one respawn left 17 entries where retail leaves 9.
+    #[test]
+    fn the_strict_respawn_regrant_is_in_place_one_shot_with_silent_loss() {
+        let mut w = flat_world();
+        w.strict_retail = true;
+        // The mc1hwl0 dead-form list, verbatim.
+        let bank = [0i32, 3, 16, 2, 20, 23, 4, 7, 10];
+        w.mc1_acq = [-1; SPELL_COUNT];
+        for (i, &m) in bank.iter().enumerate() {
+            w.mc1_acq[i] = m;
+            w.player.death_owned[m as usize] = true;
+        }
+        w.player.owned = [0; SPELL_COUNT];
+        w.death_regrant(Some((140 << 8, 140 << 8, 3200)));
+        for (i, &m) in bank.iter().enumerate() {
+            let e = w.mc1_acq[i];
+            assert!(e > 0, "entry {i} re-minted in place (got {e})");
+            assert_eq!(
+                w.g.ent[e as usize].model65 as i32, m,
+                "entry {i} holds the slot of ITS OWN model {m}, not a \
+                 find-collision neighbour's"
+            );
+            assert_eq!(
+                w.g.ent[e as usize].tick70,
+                3 * m as u8,
+                "strict re-mint lands on retail phase 0 (spell*3)"
+            );
+        }
+        assert!(
+            w.mc1_acq[bank.len()..].iter().all(|&e| e == 0),
+            "−1 empties go back to alive-form 0 and NOTHING is \
+             appended behind them (the push-per-mint duplicate storm): {:?}",
+            &w.mc1_acq[bank.len()..]
+        );
+        let listed: Vec<i32> = w.mc1_acq.iter().copied().filter(|&e| e > 0).collect();
+        let mut dedup = listed.clone();
+        dedup.sort_unstable();
+        dedup.dedup();
+        assert_eq!(
+            listed.len(),
+            dedup.len(),
+            "no duplicate entries: {listed:?}"
+        );
+
+        // The starve arm: a full pool at respawn is retail's own
+        // permanent loss under strict — the entry zeroes and the
+        // spell does NOT come back when the pool frees (the native
+        // retry deviation stays native-only).
+        let mut s = flat_world();
+        s.strict_retail = true;
+        s.mc1_acq = [-1; SPELL_COUNT];
+        s.mc1_acq[0] = 20;
+        s.player.death_owned[20] = true;
+        s.player.owned = [0; SPELL_COUNT];
+        let mut hogs = Vec::new();
+        while let Some(h) = s.g.new_event() {
+            s.g.ent[h].class64 = 10;
+            hogs.push(h);
+        }
+        s.death_regrant(Some((140 << 8, 140 << 8, 3200)));
+        assert_eq!(s.mc1_acq[0], 0, ":54917 — the starved entry zeroes");
+        assert!(
+            !s.player.death_owned[20],
+            "strict keeps no retry bank — the spell is silently lost"
+        );
+        for &h in &hogs {
+            s.g.free_entity(h);
+        }
+        for _ in 0..4 {
+            s.tick(firing_line(), PlayerCommand::default());
+        }
+        assert_eq!(
+            s.player.owned[20], 0,
+            "the pool freed and the spell must STAY lost under strict \
+             (the alive-retry is the native-only deviation)"
         );
     }
 

@@ -544,12 +544,16 @@ fn dump_state(args: &Args) -> i32 {
                     .filter(|(_, c)| **c != 0)
                     .map(|(s, c)| (s, *c))
                     .collect();
-                let acq: Vec<i32> = w.spell_list.iter().copied().filter(|&s| s != 0).collect();
+                // Verbatim, position included — the list is a
+                // phase-tagged union (alive slots / dead models with
+                // −1 empties) and INDEX is meaningful to the scatter
+                // and the respawn regrant, so no zero-filtering.
+                let acq: Vec<i32> = w.spell_list.to_vec();
                 println!(
                     "t={t} wiz {i}: ent={} mv={:#x} hands=({},{}) charge={} \
                      grace={} stall={} rate={} ai_state={} burst={} pov={} \
-                     castle={} aggro={} breg={:?} owned={owned:?} cool={cools:?} \
-                     learn={learn:?} acq={acq:?}",
+                     castle={} aggro={} tempo={} breg={:?} owned={owned:?} \
+                     cool={cools:?} learn={learn:?} acq={acq:?}",
                     w.play_index,
                     w.move_bits,
                     w.hand_left,
@@ -563,6 +567,7 @@ fn dump_state(args: &Args) -> i32 {
                     w.poverty,
                     w.castle,
                     w.aggro,
+                    w.tempo,
                     w.balloon_reg,
                 );
             }

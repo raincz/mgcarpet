@@ -383,20 +383,14 @@ impl World {
             pitch: carpet.f32,
             speed: carpet.f126,
         };
-        // The human's acquisition list (`Type_160+532`) verbatim: the
-        // death scatter walks it in order (:55519-24) and the port has
-        // no native model of it. Entries are pool slots while the
-        // wizard lives and MODEL numbers once his landing has run
-        // (:55523) — only the live form is a scatter order, and by
-        // then the corpse has nothing left to throw, so the raw
-        // negative/model values simply fail the class-12 gate in
-        // `player_land`.
-        self.mc1_acq = std::array::from_fn(|i| {
-            wiz.spell_list
-                .get(i)
-                .and_then(|&s| u16::try_from(s).ok())
-                .unwrap_or(0)
-        });
+        // The human's acquisition list (`Type_160+532`) VERBATIM,
+        // sentinels included: the entries are a phase-tagged union
+        // (alive = pool slot, `<= 0` empty; dead = model, −1 empty —
+        // :55517-24) and the dead-window −1s are real state the
+        // respawn regrant reads back (:54893-95). The old u16 clamp
+        // folded −1 into 0 = fireball's model — the exact collision
+        // the union is built around avoiding.
+        self.mc1_acq = std::array::from_fn(|i| wiz.spell_list.get(i).copied().unwrap_or(0));
         // The carpet's Type_156 is the canonical `&unk_98F38[7]`
         // (retail's own load-fixup anchor) — derive the table base
         // from it instead of hardcoding a per-build guest address.
@@ -702,6 +696,17 @@ impl World {
             r.knock_dir = w.knock_dir;
             r.knock_mag = w.knock_mag;
             r.grace = w.grace;
+            // The TEMPO scalar (+526) — the live field behind every
+            // AI cadence (think period, turn-servo divisor, burst
+            // lockout). The level config's static twin approximates
+            // it for native play, but retail re-stamps it from the
+            // per-wizard level table at init and at every respawn;
+            // an imported world must carry the recorded value
+            // (mc1hwl0 rival 1: 252+ ⇒ think period 1 — the port's
+            // config 16 made the dodge re-stamp fire every 16th tick
+            // and the strafe decay one step ahead of retail, the
+            // t=16772 x,y head).
+            r.tempo = w.tempo;
             // Brain lanes: without these the record imports as Fresh
             // and the cascade re-aims f34 away from retail's lock.
             self.reanchor_rival_ai(
@@ -747,10 +752,20 @@ impl World {
             };
             s.filter(|&s| (s as usize) < SPELL_COUNT).map(SpellId)
         };
+        // The death bank is port scaffolding for the dead window —
+        // retail's only bank IS the model-form list. Arming it from a
+        // LIVE wizard's +676 register invented a bank for spells that
+        // were never lost, and the alive-retry arm then "restored"
+        // them into the list: mc1hwl0's t=4438 retry wrote a
+        // duplicate slot-form 17 that aliased the (9,1) claim bolt
+        // reusing slot 17 at t≈7991 into phantom owned[1] — the
+        // t=7993 `(12,1)slot106:flags` head. Dead imports keep it
+        // (the +676 the recorder sampled is the pre-death owned set,
+        // frozen because the corpse's dispatch never rebuilds it).
         let mut death_owned = [false; SPELL_COUNT];
         let mut death_owned_blue = [false; SPELL_COUNT];
         for s in 0..SPELL_COUNT {
-            death_owned[s] = wiz.owned_slots[s] != 0;
+            death_owned[s] = dead && wiz.owned_slots[s] != 0;
             death_owned_blue[s] = wiz.blue[s] != 0;
         }
         self.player = Player {
@@ -1136,8 +1151,28 @@ impl World {
                 // lane every mana divergence rides one tick before
                 // the graded f140 moves.
                 ("mana_delta", self.player.mana_delta as i64),
+                // The life-regen chain — rival-only through session
+                // 49's t=10097 `life` head (the same asymmetry as
+                // `acq`/`owned` below): the graded life lane shows
+                // the sum, these show the terms.
+                ("grace", self.player.grace as i64),
+                ("regen_stall", self.player.regen_delay as i64),
+                ("life_rate", self.player.life_rate as i64),
             ],
-            arrays: vec![("balloon_reg", breg(PLAYER_TARGET))],
+            arrays: vec![
+                ("balloon_reg", breg(PLAYER_TARGET)),
+                // The human's acquisition list + owned register were
+                // shadow-blind through session 48 (only RIVALS
+                // exported `acq`/`owned`) — the t=7993 stale-entry
+                // alias could only be seen by hand-dumping. 5th
+                // instrument-asymmetry occurrence; keep both sides
+                // exporting the same lanes.
+                ("acq", self.mc1_acq.iter().map(|&v| v as i64).collect()),
+                (
+                    "owned",
+                    self.player.owned.iter().map(|&v| v as i64).collect(),
+                ),
+            ],
         }];
         for r in &self.rivals {
             if r.eliminated {

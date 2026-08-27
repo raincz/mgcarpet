@@ -198,7 +198,11 @@ pub(crate) struct Rival {
     /// Personality (u16_522/524/526).
     agg: u16,
     acc: u16,
-    tempo: u16,
+    /// Retail wizext +526 — the live cadence scalar (think period,
+    /// turn-servo divisor, burst lockout). Seeded from the level
+    /// config natively; the conformance import overwrites it with the
+    /// recorded value (retail re-stamps it at init and every respawn).
+    pub(crate) tempo: u16,
     pub state: AiState,
     /// Hate ledger + war flags per player slot (str_456; baseline
     /// [`HATE_NEUTRAL`]).
@@ -1134,6 +1138,14 @@ impl World {
         if jink != 0 {
             Gen::polar_step(&mut pos, yaw.wrapping_add(0x200) & 0x7FF, 0, jink);
             self.rivals[ri].jink -= 4 * jink.signum();
+            if std::env::var_os("MGC_JINK_TRACE").is_some() {
+                eprintln!(
+                    "[jink] t={} ri={ri} mover decays {} -> {}",
+                    crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                    jink,
+                    self.rivals[ri].jink
+                );
+            }
         }
         self.g.move_relink(i, pos.0, pos.1, pos.2);
         // Accel 16/tick toward the desired speed (:18828-31).
@@ -1760,6 +1772,15 @@ impl World {
             let e = &self.g.ent[i];
             (e.x, e.y, e.z)
         };
+        // ⭐ THE RANGE IS 2D. Both this scan's 5120 gate and the
+        // reactive-cast's 1024 gate measure through `sub_42410`
+        // (:52748-54) = (Δx)² + (Δy)² — NO z term. The port's
+        // invented dz² leg dropped a high bolt out of dodge range
+        // one tick early (mc1hwl0 t=16771: threat 516 at dz 2617
+        // reads 27.7M in 3D against the 26.2M gate, 20.9M in
+        // retail's 2D — retail re-stamps the strafe, the port let
+        // it decay, and the 4-unit lateral gap is the t=16772
+        // x,y head).
         let mut best: Option<(usize, i32)> = None;
         for k in 0..self.g.proj_chain.visible_len() {
             let j = self.g.proj_chain.list[k] as usize;
@@ -1768,11 +1789,30 @@ impl World {
                 continue;
             }
             let d2 = Gen::dist2_sq(px, py, e.x, e.y);
-            let dz = e.z.wrapping_sub(pz) as i32;
-            let d3 = d2.wrapping_add(dz.wrapping_mul(dz));
-            if d3 < 5120 * 5120 && best.is_none_or(|(_, bd)| d3 < bd) {
-                best = Some((j, d3));
+            if d2 < 5120 * 5120 && best.is_none_or(|(_, bd)| d2 < bd) {
+                best = Some((j, d2));
             }
+        }
+        if std::env::var_os("MGC_JINK_TRACE").is_some() {
+            let cand: Vec<(u16, u16, u16, u16, i16, i32)> = (0..self.g.proj_chain.visible_len())
+                .map(|k| {
+                    let j = self.g.proj_chain.list[k] as usize;
+                    let e = &self.g.ent[j];
+                    (
+                        j as u16,
+                        e.f146,
+                        e.x,
+                        e.y,
+                        e.z,
+                        Gen::dist2_sq(px, py, e.x, e.y),
+                    )
+                })
+                .collect();
+            eprintln!(
+                "[jink] t={} ri={ri} me={me} scan best={best:?} cand={cand:?} me_pos=({px},{py},{pz}) jink_pre={}",
+                crate::DEBUG_TICK.load(std::sync::atomic::Ordering::Relaxed),
+                self.rivals[ri].jink
+            );
         }
         let Some((threat, d3)) = best else { return };
         self.rivals[ri].jink = 80;
@@ -4215,6 +4255,26 @@ mod tests {
         assert_eq!(
             w.rivals[ri].jink, 80,
             "a soft-killed member stopped arming the dodge"
+        );
+        // (d) THE RANGE IS 2D (`sub_42410` :52748-54 = Δx² + Δy², no z
+        // term): a bolt 5,000 units OVERHEAD is still a dodge threat —
+        // in 3D its dz² alone would clear the 5120² gate. mc1hwl0
+        // t=16771: threat 516 at dz 2617 read 27.7M in the port's old
+        // 3D math against the 26.2M gate (out), 20.9M in retail's 2D
+        // (in) — retail re-stamped the strafe, the port let it decay,
+        // and the lateral gap became the t=16772 x,y head.
+        w.rivals[ri].jink = 0;
+        let high = {
+            let e = &mut w.g.ent[threat];
+            e.z = e.z.saturating_add(5000);
+            e.z
+        };
+        w.g.rebuild_proj_chain();
+        w.rival_defense(ri, i);
+        assert_eq!(
+            w.rivals[ri].jink, 80,
+            "a bolt {high} high stopped arming the dodge — the range \
+             gate grew a z leg retail does not have"
         );
     }
 

@@ -1056,6 +1056,15 @@ pub struct RetailWizardMc1 {
     pub kills: u32, // +359
     /// Village-aggro timer (+528).
     pub aggro: i16,
+    /// The wizard's TEMPO scalar (+526) — the live field behind every
+    /// AI cadence: think period `64 − (+526 >> 2)` (:18025), turn-servo
+    /// divisor `8 + (255 − +526)/16` (:18837), burst lockout
+    /// `(255 − +526)/8 + 1` (:19129-36). Stamped from the per-wizard
+    /// level table at init AND at every respawn (:54964-68); the port
+    /// carried only a static config twin until session 49 (mc1hwl0
+    /// t=16771: rival 1's dodge re-stamp needs period 1, the config
+    /// said 16).
+    pub tempo: u16,
     // AI brain lanes (rival AI-state reconstruction):
     /// Brain state byte (+415; dispatch sub_13170 :17847).
     pub ai_state: u8,
@@ -1367,6 +1376,7 @@ fn decode_retail_wizard_mc1(d: &[u8], i: u16) -> RetailWizardMc1 {
         hits: u32_(d, t + 347),
         kills: u32_(d, t + 359),
         aggro: i16_(d, t + 528),
+        tempo: u16_(d, t + 526),
         ai_state: u8_(d, t + 415),
         burst: i16_(d, t + 404),
         poverty: u16_(d, t + 406),
