@@ -133,6 +133,15 @@ pub struct TickRecord {
     /// string parsed to the u64 it carries. Describes tick `t`'s
     /// PRE-input state (the phase convention, docs/RECORDING.md).
     pub hash: Option<u64>,
+    /// Port-side live-option events (port recordings): options the
+    /// player applied from the running app between the previous row
+    /// and this row's hash point — `{"invincible": true}` and kin.
+    /// These are PORT constructs applied through the port's own
+    /// setters; they are NOT the retail cheat lane (`input.cheat`),
+    /// whose opcodes replay retail's semantics. A replayer must apply
+    /// them BEFORE grading this row's hash, and must REFUSE a key it
+    /// does not implement — the take's course depends on it.
+    pub set: Option<serde_json::Map<String, serde_json::Value>>,
 }
 
 /// The static-frame input registers (same ±1-tick attribution caveat as
@@ -242,6 +251,7 @@ impl TickRecord {
                 .get("hash")
                 .and_then(|h| h.as_str())
                 .and_then(|h| u64::from_str_radix(h, 16).ok()),
+            set: v.get("set").and_then(|s| s.as_object()).cloned(),
         })
     }
 }

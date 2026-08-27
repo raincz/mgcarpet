@@ -66,9 +66,16 @@ pub struct ReplayFile {
     /// run-constant — and applied to the world at every anchor.
     pub mc2_replayed: bool,
     /// The import pin the take was recorded under
-    /// ([`mgc_sim::engine::world::World::import_pin`]); all-default
-    /// for a native session, which needs no re-establishing.
-    pub sim_import_pin: ImportPin,
+    /// ([`mgc_sim::engine::world::World::import_pin`]) — the world
+    /// state a snapshot deliberately does not carry (the MC1 acq
+    /// list, the hand bits). `None` = the header has no key: either
+    /// the pin was all-default at record time, or the take predates
+    /// live `--record` writing its real pin. Both replay by LEAVING
+    /// the natively-built world's pin alone — clobbering it to
+    /// all-default is what emptied a plausible-spellbook take's
+    /// spellbook (the acq list survives only in the pin, and zeroing
+    /// it desyncs the take at t=1).
+    pub sim_import_pin: Option<ImportPin>,
     pub snapshot: Option<Vec<u8>>,
 }
 
@@ -203,8 +210,7 @@ impl ReplayFile {
                         }
                         r
                     },
-                })
-                .unwrap_or_default(),
+                }),
             snapshot,
             rec,
         })
@@ -331,6 +337,10 @@ pub struct ReplayDriver {
     /// The recorded pose for the GHOST billboard: (x, alt, z) tiles,
     /// yaw radians, sprite type index.
     pub ghost: Option<(f32, f32, f32, f32, u16)>,
+    /// The current row's live-option events (port takes), already
+    /// applied to the sim by `next_port` — a re-recording drains them
+    /// into its own rows via [`ReplayDriver::take_row_set`].
+    row_set: serde_json::Map<String, serde_json::Value>,
     pub finished: bool,
 }
 
@@ -382,8 +392,15 @@ impl ReplayDriver {
             diverged: None,
             hud: String::from("REPLAY starting"),
             ghost: None,
+            row_set: serde_json::Map::new(),
             finished: false,
         })
+    }
+
+    /// Drain the current row's applied live-option events (see
+    /// [`ReplayDriver::row_set`]).
+    pub fn take_row_set(&mut self) -> serde_json::Map<String, serde_json::Value> {
+        std::mem::take(&mut self.row_set)
     }
 
     /// The next tick's input, driving anchors/segments along the way.
@@ -462,6 +479,21 @@ impl ReplayDriver {
             }
             Some(Ok(t)) => t,
         };
+        // Live-option events recorded on this row: the player applied
+        // them from the running app between the previous row and this
+        // row's hash point, so they replay HERE — before the grade —
+        // through the same setters the options menu uses. An
+        // unimplemented key is a refusal, not a shrug: the take's
+        // whole course depends on it.
+        self.row_set.clear();
+        if let Some(set) = &tick.set {
+            if let Err(e) = apply_live_options(sim, set) {
+                eprintln!("replay: t={}: {e}", tick.t);
+                self.finish_stream();
+                return None;
+            }
+            self.row_set = set.clone();
+        }
         // The hash channel describes tick t's PRE-input state — the
         // sim sits exactly there right now (the phase convention).
         if let Some(want) = tick.hash {
@@ -927,13 +959,28 @@ impl PortRecorder {
     }
 
     /// One tick: `t`/`hash` describe the PRE-step state, `input` is
-    /// what the step consumed (the phase convention).
-    pub fn record(&mut self, t: u64, input: &FlightInput, hash: u64) -> Result<(), String> {
-        self.w.write_record(&serde_json::json!({
+    /// what the step consumed (the phase convention). `set` carries
+    /// any live-option events applied since the previous row — the
+    /// hash already includes their effect, so a replayer applies them
+    /// before grading (see [`mgcr::TickRecord::set`]).
+    pub fn record(
+        &mut self,
+        t: u64,
+        input: &FlightInput,
+        hash: u64,
+        set: &serde_json::Map<String, serde_json::Value>,
+    ) -> Result<(), String> {
+        let mut row = serde_json::json!({
             "t": t,
             "input": port_input_from(input),
             "hash": format!("{hash:016x}"),
-        }))
+        });
+        if !set.is_empty()
+            && let Some(o) = row.as_object_mut()
+        {
+            o.insert("set".into(), serde_json::Value::Object(set.clone()));
+        }
+        self.w.write_record(&row)
     }
 
     pub fn finish(self) -> (PathBuf, u64, Result<(), String>) {
@@ -1004,6 +1051,57 @@ fn flight_input_from(p: &PortInput) -> FlightInput {
     }
 }
 
+/// Apply one row's recorded live-option events (`TickRecord::set`) —
+/// the replay half of the port toggle channel. Each key routes to the
+/// SAME setter the app's options menu calls (`apply_option`), which is
+/// what makes record and replay agree by construction; these are port
+/// constructs and deliberately NOT the retail cheat lane, whose
+/// opcodes run retail's own (subtly different) semantics.
+fn apply_live_options(
+    sim: &mut Simulation,
+    set: &serde_json::Map<String, serde_json::Value>,
+) -> Result<(), String> {
+    for (key, v) in set {
+        let b = || {
+            v.as_bool()
+                .ok_or_else(|| format!("live option {key:?} wants a bool, got {v}"))
+        };
+        match key.as_str() {
+            "invincible" => sim
+                .world
+                .as_mut()
+                .ok_or("live option needs a world")?
+                .set_invincible(b()?),
+            "dev_spells" => sim
+                .world
+                .as_mut()
+                .ok_or("live option needs a world")?
+                .set_dev_spells(b()?),
+            "lift_unclamped" => sim.lift_unclamped = b()?,
+            "thrust_model" => {
+                sim.set_thrust_model(match v.as_str() {
+                    Some("classic") => ThrustModel::Mc1,
+                    Some("enhanced") => ThrustModel::Enhanced,
+                    other => return Err(format!("unknown thrust_model {other:?}")),
+                });
+            }
+            "altitude_model" => {
+                sim.set_altitude_model(match v.as_str() {
+                    Some("classic") => AltitudeModel::Faithful,
+                    Some("enhanced") => AltitudeModel::ExtendedLift,
+                    other => return Err(format!("unknown altitude_model {other:?}")),
+                });
+            }
+            other => {
+                return Err(format!(
+                    "take sets live option {other:?} this build does not implement — refusing"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 // -------------------------------------------------------- replay-check
 
 /// Headless verification playback (`--replay-check`): the whole take
@@ -1022,6 +1120,17 @@ pub fn replay_check(
 ) -> Result<bool, String> {
     let game = level.game;
     let lvl = file.level;
+    // The source take's offline chassis params, forwarded into a
+    // re-recording's header — the world stepping here was built at
+    // exactly these (the boot pinned cfg from the take), and a new
+    // header without them embeds a snapshot its own replay would
+    // refuse ("chassis.pool_slots differs"). Port takes only; a
+    // retail take runs the faithful chassis.
+    let (src_pool, src_awake) = if file.source == ReplaySource::Port {
+        (file.sim_pool_slots, file.sim_awake_range)
+    } else {
+        (None, None)
+    };
     let w = level.world.take().ok_or("level built no world")?;
     let mut sim = Simulation::with_world(w);
     let (thrust, altitude) = file.models()?;
@@ -1044,7 +1153,11 @@ pub fn replay_check(
                 // Rule 1: the world only becomes the take's world once
                 // the driver has anchored, which happens inside the
                 // first `next`.
-                None => rec = Some(begin_replay_recording(path, &sim, game, lvl, None, None)?),
+                None => {
+                    rec = Some(begin_replay_recording(
+                        path, &sim, game, lvl, src_pool, src_awake,
+                    )?);
+                }
                 // A LATER anchor is a capture gap the take healed by
                 // re-seeding from the next closure. Input alone cannot
                 // cross a gap — the missing ticks are missing — so the
@@ -1059,11 +1172,27 @@ pub fn replay_check(
         }
         // The `--record` phase convention: t/hash describe the state
         // the step is ABOUT to consume, `input` is what it consumed.
-        let pre = rec.as_ref().map(|_| (sim.tick, sim.state_hash()));
+        // The row's live-option events came from the driver (it just
+        // applied them, so this pre-step hash includes their effect)
+        // and are carried into the re-recording verbatim.
+        let pre = rec
+            .as_ref()
+            .map(|_| (sim.tick, sim.state_hash(), d.take_row_set()));
         sim.step(&input);
         d.grade(&sim);
-        if let (Some(r), Some((t, hash))) = (rec.as_mut(), pre) {
-            r.record(t, &input, hash)?;
+        if let (Some(r), Some((t, hash, set))) = (rec.as_mut(), pre) {
+            r.record(t, &input, hash, &set)?;
+        }
+        // The windowed session drains the sim's sound requests every
+        // tick (`audio_tick` → `World::take_audio`) and that vec is
+        // HASHED — a take recorded windowed carries post-drain hashes,
+        // so the headless check must drain on the same cadence or it
+        // desyncs at t=1 on accumulated sounds alone.
+        let f = &sim.flyer;
+        let pose =
+            mgc_sim::engine::world::PlayerPose::from_tiles(f.x, f.y, f.z, f.yaw, f.pitch, 0.0);
+        if let Some(w) = sim.world.as_mut() {
+            let _ = w.take_audio(pose);
         }
     }
     println!("replay-check: {}", d.summary());
@@ -1218,7 +1347,8 @@ mod tests {
                 fire_left: t % 7 == 0,
                 ..FlightInput::default()
             };
-            rec.record(a.tick, &input, a.state_hash()).unwrap();
+            rec.record(a.tick, &input, a.state_hash(), &serde_json::Map::new())
+                .unwrap();
             a.step(&input);
         }
         let (_, n, res) = rec.finish();

@@ -1863,6 +1863,13 @@ struct App {
     /// `--record`: the destination path, then the live recorder.
     record_path: Option<PathBuf>,
     recorder: Option<replay::PortRecorder>,
+    /// Live-option events applied since the last recorded row (the
+    /// port toggle channel, `TickRecord::set`): a menu cheat/model
+    /// flip is an app-side sim write the input channel never sees, so
+    /// `apply_option` queues it here and the next row carries it —
+    /// without this a mid-take toggle silently forked the take's
+    /// course (test.mgcr's t=97 invincibility, 2026-08-27).
+    rec_toggles: serde_json::Map<String, serde_json::Value>,
     /// A deferred replay recording ended at a re-anchor; do not restart.
     recorder_cut: bool,
     /// The MC2 world-map screen assets (lazy-loaded on first entry;
@@ -2078,6 +2085,7 @@ impl App {
             replay: None,
             record_path,
             recorder: None,
+            rec_toggles: serde_json::Map::new(),
             recorder_cut: false,
             worldmap: None,
             mainmenu: None,
@@ -2138,8 +2146,14 @@ impl App {
                         w.entities_dirty = true;
                         // The snapshot restored the pool and the
                         // terrain but not the MODE they were
-                        // established in (`World::import_pin`).
-                        w.set_import_pin(pin);
+                        // established in (`World::import_pin`). A
+                        // header without the key keeps the native
+                        // build's own pin — for a pre-pin take that
+                        // is the acq list the (re-run) instrument
+                        // grants just built, not something to zero.
+                        if let Some(pin) = pin {
+                            w.set_import_pin(pin);
+                        }
                     }
                 }
                 replay::ReplayDriver::install(file, &mut sess.sim)
@@ -2185,10 +2199,20 @@ impl App {
                             altitude,
                             cfg.sim.parameters.entity_pool_size.map(|n| n as usize),
                             cfg.sim.parameters.awake_range,
-                            // A live session never imports, so its pin
-                            // is all-default; only a replay recording
-                            // carries a real one.
-                            Default::default(),
+                            // The pin is NOT import-only bookkeeping:
+                            // it is every lane a snapshot deliberately
+                            // skips, and a live session has real values
+                            // there too — the plausible-spellbook /
+                            // dev-spells grants live in the acq list
+                            // and the hand bits, which passing
+                            // `Default::default()` here silently
+                            // dropped (the take then replayed with an
+                            // EMPTY spellbook and desynced at t=1).
+                            sess.sim
+                                .world
+                                .as_ref()
+                                .map(|w| w.import_pin())
+                                .unwrap_or_default(),
                         )
                     })
             };
@@ -2256,6 +2280,16 @@ impl App {
             );
             self.finish_recorder();
             self.record_path = None;
+        }
+    }
+
+    /// Queue a live-option event for the next recorded row (the port
+    /// toggle channel — see `rec_toggles`). No-op unless a recording
+    /// is live or pending; last write per key wins within a row,
+    /// which is also what the sim saw.
+    fn queue_rec_toggle(&mut self, key: &str, value: serde_json::Value) {
+        if self.recorder.is_some() || self.record_path.is_some() {
+            self.rec_toggles.insert(key.into(), value);
         }
     }
 
@@ -2639,6 +2673,13 @@ impl App {
                     sess.sim
                         .set_thrust_model(sim_thrust(self.cfg.controls.models.thrust));
                 }
+                self.queue_rec_toggle(
+                    "thrust_model",
+                    match self.cfg.controls.models.thrust {
+                        config::ThrustModel::Classic => "classic".into(),
+                        config::ThrustModel::Enhanced => "enhanced".into(),
+                    },
+                );
             }
             "controls.models.altitude" => {
                 if let Some(sess) = self.session.as_deref_mut() {
@@ -2647,11 +2688,19 @@ impl App {
                     sess.sim
                         .set_altitude_model(sim_altitude(self.cfg.controls.models.altitude));
                 }
+                self.queue_rec_toggle(
+                    "altitude_model",
+                    match self.cfg.controls.models.altitude {
+                        config::AltitudeModel::Classic => "classic".into(),
+                        config::AltitudeModel::Enhanced => "enhanced".into(),
+                    },
+                );
             }
             "dev.lift_unclamped" => {
                 if let Some(sess) = self.session.as_deref_mut() {
                     sess.sim.lift_unclamped = self.cfg.dev.lift_unclamped;
                 }
+                self.queue_rec_toggle("lift_unclamped", self.cfg.dev.lift_unclamped.into());
             }
             "gameplay.cheat.dev_spells" => {
                 if let Some(w) = self
@@ -2661,6 +2710,7 @@ impl App {
                 {
                     w.set_dev_spells(self.cfg.gameplay.cheat.dev_spells);
                 }
+                self.queue_rec_toggle("dev_spells", self.cfg.gameplay.cheat.dev_spells.into());
             }
             "gameplay.cheat.invincible" => {
                 if let Some(w) = self
@@ -2670,6 +2720,7 @@ impl App {
                 {
                     w.set_invincible(self.cfg.gameplay.cheat.invincible);
                 }
+                self.queue_rec_toggle("invincible", self.cfg.gameplay.cheat.invincible.into());
             }
             // Live selector-surface switch: the pane/book resolve is
             // cheap to redo mid-run. Quickselect
@@ -4222,8 +4273,14 @@ impl App {
     /// run), so the HUD hand icons wouldn't redraw until unpause —
     /// apply book bindings to the world immediately instead (binding
     /// is UI state, not simulation).
+    ///
+    /// NOT while a recording is live: this direct write bypasses the
+    /// input channel, so the take could never reproduce it. Deferring
+    /// keeps the binding queued in `pending_equip`, which the first
+    /// unpaused tick consumes into its RECORDED input — the HUD icon
+    /// lags until unpause, which is the price of a replayable take.
     fn flush_equip_if_paused(&mut self) {
-        if !self.paused {
+        if !self.paused || self.recorder.is_some() || self.record_path.is_some() {
             return;
         }
         if let Some(w) = self
@@ -5719,17 +5776,33 @@ impl App {
             if self.replay.is_some() {
                 self.cut_recorder_at_reanchor();
                 self.begin_deferred_recorder();
+                // `--replay --record`: the driver just applied this
+                // row's recorded live-option events — carry them into
+                // the re-recording alongside the app's own.
+                if self.record_path.is_some() || self.recorder.is_some() {
+                    let set = self.replay.as_mut().map(|d| d.take_row_set());
+                    if let Some(set) = set {
+                        self.rec_toggles.extend(set);
+                    }
+                }
             }
-            let pre = self.recorder.is_some().then(|| {
+            let pre = if self.recorder.is_some() {
+                // Live-option events queued since the last row: their
+                // sim writes already landed, so THIS row's pre-step
+                // hash includes them — the row carries the events and
+                // a replay re-applies them before grading it.
+                let set = std::mem::take(&mut self.rec_toggles);
                 let sess = sess!(self);
-                (sess.sim.tick, sess.sim.state_hash())
-            });
+                Some((sess.sim.tick, sess.sim.state_hash(), set))
+            } else {
+                None
+            };
             sess!(self).sim.step(&input);
             if let Some(d) = self.replay.as_mut() {
                 d.grade(&sess!(self).sim);
             }
-            if let (Some(r), Some((t, hash))) = (self.recorder.as_mut(), pre) {
-                if let Err(e) = r.record(t, &input, hash) {
+            if let (Some(r), Some((t, hash, set))) = (self.recorder.as_mut(), pre) {
+                if let Err(e) = r.record(t, &input, hash, &set) {
                     eprintln!("record: {e} — recording stopped");
                     self.recorder = None;
                 }
@@ -9744,7 +9817,16 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
         }
         cfg.gameplay.cheat.dev_spells = false;
         cfg.gameplay.cheat.invincible = false;
-        cfg.dev.plausible_spellbook = false;
+        // plausible_spellbook: off unless the CLI EXPLICITLY asks (the
+        // config file's value never leaks into a replay). A take whose
+        // header carries its import pin needs no flag — the grants ride
+        // the pin (acq list, hand bits) + the snapshot (the token pool)
+        // — and an explicit flag is harmless under it: the pin is
+        // applied after the grants and overrides them. A PRE-PIN take
+        // recorded under the instrument stored its acq list nowhere,
+        // so replaying it needs the same grants re-run at world init;
+        // the explicit flag is that re-run.
+        cfg.dev.plausible_spellbook = args.plausible_spellbook == Some(true);
         // The offline chassis params come FROM THE TAKE, not from this
         // run's CLI/config — the take's embedded start snapshot opens
         // its identity block with `chassis.pool_slots` and
@@ -9864,9 +9946,22 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
         // retail path needs no help here).
         if let Some(w) = level.world.as_mut() {
             w.set_patches(world_patches(&cfg.gameplay.patches));
+            // The windowed path's apply_instruments equivalent for the
+            // one instrument a replay honors (`--plausible-spellbook`,
+            // the pre-pin-take rescue): the grants must run BEFORE the
+            // pin so a recorded pin still overrides them.
+            if !level.plausible_spells.is_empty() {
+                w.grant_spells(&level.plausible_spells);
+            }
+            if !level.plausible_book_mc2.is_empty() {
+                w.mc2_grant_plausible(&level.plausible_book_mc2);
+            }
             // The snapshot restored the pool and the terrain but not
-            // the MODE they were established in.
-            w.set_import_pin(file.sim_import_pin);
+            // the MODE they were established in. No key in the header
+            // = keep the native build's pin (see ReplayFile).
+            if let Some(pin) = file.sim_import_pin {
+                w.set_import_pin(pin);
+            }
         }
         return match replay::replay_check(level, file, args.record.as_deref()) {
             Ok(true) => std::process::ExitCode::SUCCESS,

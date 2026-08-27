@@ -106,7 +106,7 @@ force-apply) a mismatched environment:
 ## Tick records
 
 ```json
-{"t":N, "input":…, "obs":…, "state":…, "hash":…, "terrain":…, "wallclock":…}
+{"t":N, "input":…, "obs":…, "state":…, "hash":…, "terrain":…, "wallclock":…, "set":…}
 ```
 
 **Phase convention:** the state-bearing channels (`obs`, `state`,
@@ -301,6 +301,24 @@ The golden state hash at tick N, as a hex string. Inputs + hashes is
 full byte-exact determinism verification at a few dozen bytes per
 tick — and it is the desync checksum retail's lockstep never had, so a
 future multiplayer inherits it unchanged.
+
+### `set` — live-option events (port only, optional)
+
+`"set":{"invincible":true}` — options the player applied from the
+running app between the previous row and this row's hash point. These
+are app-side sim writes the `input` channel never carries (a cheat
+toggle from the options menu forked test.mgcr's whole course invisibly
+— 2026-08-27), so the recorder emits them as row events and a replayer
+MUST apply them before grading the row's hash, through the same
+setters the options menu uses. Current keys: `invincible`,
+`dev_spells`, `lift_unclamped` (bools), `thrust_model`,
+`altitude_model` (`"classic"`/`"enhanced"`). A key the replaying build
+does not implement is a REFUSAL, not a warning — the take's course
+depends on it.
+
+These are port constructs and deliberately not the retail cheat lane
+(`input.cheat`): that lane replays retail's own cheat opcodes with
+retail's semantics, which differ from the port options' at the edges.
 
 ## Gaps
 
