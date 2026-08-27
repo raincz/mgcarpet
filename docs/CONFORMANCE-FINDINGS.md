@@ -20258,3 +20258,95 @@ clean.
    neighborhood; mc1l49 (player ruling: LAST).
 4. The mc2 onramp family (mc2l1/l4/l24 + mc2l6-rival-spells-galore,
    four takes at t≈1).
+
+## SESSION 2026-08-27 (50) — mc1hwl0 17050 → 18949 ON TWO LAWS (the
+## rival heal token's own body; the walker's state-mismatch soft-kill)
+
+Both heads fell in one move each; segment 1 of the free run
+(t=4437..18533) is now BIT-EXACT for its whole 14,096-tick span. All
+227 fixtures pass (both new laws fixture-pinned with reversion
+probes), workspace tests green under MGC_REQUIRE_GOLDENS=1, fmt +
+clippy clean.
+
+1. **t=17051 — THE HEAL TOKEN HEALS ITS OWNER AT ITS OWN POOL SLOT**
+   (`(3,1)slot473:life`). sub_56270_567A0 (:65091 / hw :61313,
+   byte-identical; class-12 state 3) is a body of its OWN, the rival
+   twin of the human's heal arm: admission = the sub_55DD0 gate AND
+   `actLife < maxLife` AND purse ≥ the token's live +136 cost, all
+   three EVERY tick (:65102-05); an admitted tick restores 5% of the
+   life CEILING capped (:65108-12), plays sound 25 on the FULL tick
+   only, and debits the WHOLE cost on the owner's regen delta with NO
+   mid-burst pin (:65113-19 — the positive-arm write is behind
+   remc1's `//fix` comment-out and is live: retail f132 = −1000 on
+   the heal tick); a refusal releases the burst (+48 = 1). The port
+   drove a heal from `rival_refresh_buffs` at the WIZARD's slot — one
+   pass late (the cast arms the token AFTER refresh runs) and paying
+   cost/count from the purse directly. mc1hwl0 t=17051: rival 1 eats
+   a quartered 25 through the shield, casts Heal at carpet slot 473,
+   retail's SAME-TICK token pass (478 > 473) restores 9975 → 10000
+   capped; the port read 9995 on the graded life lane. New
+   `Gen::rival_heal_token_tick`, routed in BOTH class-12 encodings;
+   fixture `the-heal-token-heals-its-owner-at-its-own-pool-s`.
+   RIDER: the port's invented rival `regen_stall` decay is REMOVED —
+   retail's only +383 decrement lives in sub_45C90 (class-3 state 0,
+   the human's record tick, str_254ADC row 0); the rival tick never
+   reads or decays it, so a hit rival's stall sits at 16 forever
+   (the shadow's noisiest wiz lane, ~29.5k rows, now silent).
+2. **t=18601 — THE WALKER SOFT-KILLS A STATE WITH NO TABLE ROW,
+   UN-TICKED** (`(9,13)slot109:flags`). The main walk direct-indexes
+   `table[class][state]` and requires the row's own state word to
+   match (`data4 == +70`, :212A0A/:212A70 region); a miss takes the
+   "STATE-ID does not match" arm — sub_41E80's soft-kill bit, no
+   handler, and NO +63 tick (retail's phase increment :52406 sits
+   INSIDE the dispatched branch — f63 counts DISPATCHED ticks, not
+   lifetime). Reachable through the death handoff's blind +52 stamp
+   (sub_1A6C0 :21702, the mc1l2 fire law's other face): griffon 162
+   dies at t=18600 still pointing at slot 109 — long since re-minted
+   as the castle guard's (9,13) arrow — and stamps it f146=17,
+   +70=50 (m8's chase = base 48+2). Retail's next walk reap-flags
+   the arrow un-ticked (flags 8198 → 9222, f63 parked 118), the
+   tick-top reap frees it at 18602; the port's `_ => no-op` arm
+   ticked f63 forever and the arrow never died. proj_tick's `_` arm
+   now soft-kills + compensates the shared f63 increment; states
+   6/16/18 stay inert (remc1 carries row 6 = sub_53060 unported,
+   16/18 unresolved — no witness, not touched). Fixture
+   `the-walker-soft-kills-a-state-with-no-table-row`.
+
+### BANKED FOR THE NEXT HEAD (t=18950 `(3,1)slot473:chase`)
+
+The post-Build decision fork: at t=18950 rival 1 PLANTS its castle
+(both sides mint slot 233 identically — position, life, state 5,
+sprite 177) and the same-tick re-decision cascade elects
+**AttackWizard (8, target 472/sig 856) in retail vs HuntMana (13,
+target 161/sig 809) in the port** — the first wiz-lane divergence of
+the whole take (every rival lane clean 18535..18949). Two facts in
+evidence:
+- The newborn castle's box: retail 57344/640/640/16384 vs the port's
+  art extents 200/184/184/200. That is sub_37150_37510 (:43798):
+  f78 = 0xE000, f84 = 0x4000, f80/82 = ((BUILD[level].dim<<8)+1280)>>1
+  — row-0 dims are empty → 640 at birth, 5120 at castle 498's level
+  4 (both verified in-capture). The port HAS the fn
+  (`Gen::castle_extents`) but guards it `lvl >= 1` (invented) and
+  never runs it on the plant tick. ⚠ mc1l5 (CARPET.EXE) recorded ART
+  extents at Vodor's plant — the stamp is NOT the ctor's; it arrives
+  through sub_37150's CALLERS, which include the selector's
+  castle-fit helpers (sub_12C50/sub_12D10 :17616-17800 — BOTH exit
+  paths restamp), the establish tick (:56019 in sub_46D20), the
+  respawn (:54995) and the castle level handlers (:17624-17781).
+- The overlap/at-castle test (sub_11950) reads +78/+84 as the
+  vertical extents, so the 0xE000/0x4000 stamp vs a 184-box changes
+  every "at castle" answer for the fresh castle — a prime suspect
+  for the cascade fork (and the box lanes themselves are graded rows
+  at 18950+).
+Next session: read the selector cascade (sub_13600-family) against
+`rival_selector`, port the fit-test callers WITH their sub_37150
+side effects, and re-measure.
+
+### NEXT
+
+1. mc1hwl0 t=18950 `(3,1)slot473:chase` — the banked dig above.
+2. mc1hwl0-noskip t=970 (rival castle upgrade chain, unchanged).
+3. mc1l37 t=2487 `(3,1)slot527:target_yaw` — same rival-law
+   neighborhood; mc1l49 (player ruling: LAST).
+4. The mc2 onramp family (mc2l1/l4/l24 + mc2l6-rival-spells-galore,
+   four takes at t≈1).

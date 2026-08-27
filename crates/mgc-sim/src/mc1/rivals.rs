@@ -774,9 +774,14 @@ impl World {
                 max / 500
             };
         }
-        if self.rivals[ri].regen_stall > 0 {
-            self.rivals[ri].regen_stall -= 1;
-        }
+        // ⚠ NO regen_stall decrement here: the shared intake arms
+        // +383 = 16 on every processed hit, but the ONLY decrement in
+        // retail lives in sub_45C90 (class-3 state 0 — the human's
+        // record tick, str_254ADC). The rival tick never reads or
+        // decays it, so a hit rival's +383 sits at 16 forever
+        // (mc1hwl0: pinned from t=1361 to end of take). The port used
+        // to invent a decay, which made the mirror lie on every
+        // shadow row after the first hit.
 
         // Spell learning (sub_15EC0 :19381-443).
         self.rival_learn_tick(ri);
@@ -1448,6 +1453,67 @@ impl World {
         }
     }
 
+    /// THE HEAL TOKEN'S OWN MACHINE — retail's `sub_56270_567A0`
+    /// (:65091 / hw :61313, byte-identical; class-12 state 3), the
+    /// rival twin of [`World::mc1_heal_token_tick`]. A body of its
+    /// OWN, not the launcher skeleton: admission is the shared
+    /// `sub_55DD0` gate AND `actLife < maxLife` AND the purse covers
+    /// the token's live `+136` cost — all three on EVERY tick
+    /// (:65102-05). An admitted tick restores 5% of the life CEILING,
+    /// capped (:65108-12), plays the cast sound on the FULL tick only
+    /// (:65106-07, area channel at the owner's slot), and debits the
+    /// WHOLE cost on the owner's regen delta — heal never calls
+    /// `sub_55E80`, so there is no mid-burst positive-delta pin and
+    /// the debit stacks every admitted tick (:65113-19; remc1
+    /// comments the positive-arm write out behind the same `//fix`
+    /// marker as sub_55E80's, and the corpus says it is live: retail
+    /// f132 reads −1000 on the heal tick). A refusal RELEASES the
+    /// burst (`+48 = 1`, then the shared decrement zeroes it,
+    /// :65122-24) — exactly one decrement per tick either way.
+    pub(crate) fn rival_heal_token_tick(&mut self, m: usize, ri: usize) {
+        if self.g.ent[m].f26 <= 0 {
+            return;
+        }
+        let i = self.rivals[ri].ent as usize;
+        if i == 0 {
+            // An unowned token still takes the shared decrement.
+            self.g.ent[m].f26 -= 1;
+            return;
+        }
+        let def = &self.spells()[1];
+        let full = self.g.ent[m].f26 == def.count as i16;
+        // The live per-manifestation cost (+136), not the table — the
+        // same field the human body reads.
+        let cost = {
+            let e = &self.g.ent[m];
+            if e.f136 > 0 {
+                e.f136 as u32
+            } else {
+                def.possess_mana
+            }
+        };
+        let (life, max) = {
+            let e = &self.g.ent[i];
+            (e.act_life, e.max_life as i32)
+        };
+        if self.rival_token_gate(ri, 1, full) && life < max && self.rivals[ri].mana >= cost {
+            if full {
+                self.g.snd(25, i); // :65106 — the burst's first tick only
+            }
+            self.g.ent[i].act_life = (life + max / 20).min(max);
+            let r = &mut self.rivals[ri];
+            let c = cost.min(i32::MAX as u32) as i32;
+            r.mana_delta = if r.mana_delta >= 0 {
+                -c
+            } else {
+                r.mana_delta - c
+            };
+        } else {
+            self.g.ent[m].f26 = 1;
+        }
+        self.g.ent[m].f26 -= 1;
+    }
+
     /// THE CASTLE TOKEN'S OWN MACHINE — retail's `sub_57610_57B40`
     /// (:65862-923, class-12 state 48), shared by human and rival
     /// owners alike. Unlike the generic launcher it has NO per-tick
@@ -1716,19 +1782,18 @@ impl World {
         let rebound = self
             .rival_token(ri, 14)
             .is_some_and(|m| self.g.ent[m].f26 > 0);
-        // Heal channel (1): 5% per tick while live, paid per tick.
-        let heal_m = self.rival_token(ri, 1).unwrap_or(0);
-        let healing = heal_m != 0 && self.g.ent[heal_m].f26 > 0;
-        if healing {
-            let def = &SPELLS[1];
-            if self.rivals[ri].mana >= def.possess_mana / def.count as u32 {
-                self.rivals[ri].mana -= def.possess_mana / def.count as u32;
-                let i = self.rivals[ri].ent as usize;
-                let max = self.g.ent[i].max_life as i32;
-                self.g.ent[i].act_life = (self.g.ent[i].act_life + max / 20).min(max);
-            }
-            self.g.ent[heal_m].f26 -= 1;
-        }
+        // Heal (1) is NOT clocked here either: retail's sub_56270 is
+        // the token's OWN class-12 body (state 3), run at the token's
+        // pool slot ([`Self::rival_heal_token_tick`]) — it owns the
+        // counter, the owner's +5%/tick restore and the full-cost
+        // f132 debit. Driving it from this refresh healed one pass
+        // late (the cast arms the token AFTER refresh has run) and
+        // paid cost/count from the purse instead of the full cost
+        // through the regen delta. mc1hwl0 t=17051: rival 1 eats a
+        // quartered 25 through the shield, casts Heal at carpet slot
+        // 473, and retail's SAME-TICK token pass (478 walks after
+        // 473) restores 5% capped and parks the delta at −1000; the
+        // refresh-driven port read 9995 on the graded life lane.
         // ⚠ The speed-up (2) burst is NOT decremented here. Retail
         // winds it down inside the token's OWN handler at the token's
         // pool slot ([`Self::rival_speed_token_tick`], :65190), which

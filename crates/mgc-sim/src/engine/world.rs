@@ -9362,6 +9362,10 @@ impl World {
                         // Shield's twin (sub_566C0 — the SET-only
                         // 0x4000 absorb bit).
                         self.rival_shield_token_tick(i, ri);
+                    } else if spell == 1 {
+                        // Heal's own body (sub_56270 — 5%/tick to
+                        // the OWNER, full-cost delta debit).
+                        self.rival_heal_token_tick(i, ri);
                     } else {
                         self.rival_manifestation_tick(i, ri, spell);
                     }
@@ -9511,6 +9515,12 @@ impl World {
                         // Shield's twin (sub_566C0, mc1hwl0 t=5593
                         // — the SET-only 0x4000 absorb bit).
                         self.rival_shield_token_tick(i, ri);
+                    } else if spell == 1 {
+                        // Heal's own body (sub_56270, mc1hwl0
+                        // t=17051 — 5%/tick to the OWNER at the
+                        // token's slot, full-cost delta debit; the
+                        // refresh-driven arm healed a pass late).
+                        self.rival_heal_token_tick(i, ri);
                     } else {
                         self.rival_manifestation_tick(i, ri, spell);
                     }

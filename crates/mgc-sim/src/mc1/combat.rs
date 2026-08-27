@@ -1811,7 +1811,38 @@ impl Gen {
                 }
                 false
             }
-            _ => false,
+            // States 6/16/18 stay INERT, not killed: remc1's table
+            // carries row 6 (sub_53060, unported) and the truncated/
+            // relocated listings leave 16/18 unresolved — no corpus
+            // witness either way, so today's no-op stands.
+            6 | 16 | 18 => false,
+            // ⭐ THE WALKER SOFT-KILLS A STATE WITH NO TABLE ROW. The
+            // main walk direct-indexes `table[class][state]` and
+            // requires the row's own state word to match (`data4 ==
+            // +70`); a miss is the "STATE-ID does not match" arm —
+            // `sub_41E80` (:212A70 dispatch, the soft-kill bit), NO
+            // handler, and NO `+63` tick, because retail's phase
+            // increment (:52406) sits INSIDE the dispatched branch.
+            // The port's shared walk increments +63 after this
+            // returns, so the un-dispatched tick compensates here to
+            // keep the lane at retail's frozen value.
+            //
+            // Reachable through the death handoff's blind `+52` stamp
+            // (sub_1A6C0 :21702, [`Gen::mob_death`]'s war story): the
+            // dying packmate writes chase = base+2 into whatever
+            // occupies the stale slot. mc1hwl0 t=18600: griffon 162
+            // dies still pointing at slot 109 — long since re-minted
+            // as the castle guard's (9,13) arrow — and stamps it
+            // f146 = 17, +70 = 50. Retail's next walk finds no
+            // class-9 row 50, reap-flags the arrow un-ticked
+            // (t=18601: flags 8198 → 9222, f63 parked at 118) and
+            // the tick-top reap frees it at 18602; the port's old
+            // no-op arm ticked f63 forever and the arrow never died.
+            _ => {
+                self.ent[i].flags |= 0x400;
+                self.ent[i].f63 = self.ent[i].f63.wrapping_sub(1);
+                false
+            }
         }
     }
 
