@@ -901,7 +901,18 @@ fn level_005_golden_state_hashes() {
         // certified takes still read END bit-exact in `replay
         // --segmented`, and mc1hwl0 goes 1920 → 3289 with
         // `--segmented` devs 4,921 → 3,825.
-        0xc02cc5c248ff38f5, // post-init
+        // ⭐ Post-init re-pinned (GOLDEN + OBSERVABLE; A-E hold
+        // byte-for-byte in BOTH) for THE FLAG-RECOLOR LAW: the
+        // authored castle mint now stamps the ctor's flat 177 like
+        // retail (:54974) and the owner's team color lands at the
+        // FIRST level-up commit's one-time latch stamp (`+86 +=
+        // wizard +48`, :56057-62) — the stamp the port skipped,
+        // which flew the HUMAN's white flag on every post-raze
+        // rival rebuild. Level 005's authored castles commit on
+        // their first tick, so only the pre-tick frame reads the
+        // flat row; A-E holding is the evidence the recolor
+        // converges with the old pre-stamp from tick 1 on.
+        0x6dea882cb20c2770, // post-init
         0xd0106aff56c316fb, // A
         0x3e7c352ebcd0d7fe, // B
         0xbed151642b91ccb6, // C
@@ -1013,7 +1024,11 @@ fn level_005_golden_state_hashes() {
         // aim lift, and `+128` is the occupancy cap, so the houses
         // draw differently, offer a different aim point, and take four
         // times the villagers off the map. Behavior, by design.
-        0x2dea118b36808b49, // post-init — + unclaimed-dwelling poses
+        // Post-init re-pinned with THE FLAG-RECOLOR LAW (see the
+        // GOLDEN note): the pre-tick pose set wears the authored
+        // castles' flat-177 ctor row for exactly one frame, as
+        // retail's would; A-E hold byte-for-byte.
+        0x3c0414f60b6311ae, // post-init — + unclaimed-dwelling poses
         0x9ef97ad683928ffc, // A
         // B..E re-pinned with THE mc1l2 RIVAL-WIZARD SESSION (see the
         // GOLDEN note). OBSERVABLE moving from B on is the CORRECT

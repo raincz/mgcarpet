@@ -4947,12 +4947,19 @@ impl Gen {
                 // advancing to the wait) without a painter deadlocks
                 // the castle under meteor pool exhaustion.
                 // The first-commit latch (:56057-62): flags bit 1 +
-                // the one-time team sprite stamp (+86 += wizard +48).
-                // The port keeps the ctor's sprite row — team art is
-                // the renderer's pose.team lane; the flag bit is the
-                // retail-visible half.
+                // the one-time team sprite stamp — a raw `+86 +=
+                // wizard +48` onto the ctor's flat 177, the same
+                // wizext var_48 recolor family as the claimed
+                // dwelling (:30808-09; rows 177-184 are the eight
+                // team flags). Raw like retail: no extent re-derive
+                // (the commit prices its own build-row extents
+                // below). The flag billboard's art is keyed off this
+                // row alone — there is no pose.team recolor stage —
+                // so skipping the stamp flew the HUMAN's white flag
+                // on every rebuilt rival castle.
                 if self.ent[i].flags & 2 == 0 {
                     self.ent[i].flags |= 2;
+                    self.ent[i].type86 += self.owner_team(own).unwrap_or(0) as u16;
                 }
                 let Some(p) = self.spawn_creator(42, x, y, site_z) else {
                     return;

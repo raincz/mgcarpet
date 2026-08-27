@@ -543,9 +543,13 @@ impl World {
             // that commit and leaves every authored castle one level
             // short with an unpainted top.
         }
-        // The castle flag wears the owner's team colors (sprite
-        // 177 + team, the :30809-10 family).
-        self.g.set_sprite(c, 177 + r.slot as u16);
+        // Ctor sprite row 177 FLAT: the owner's team color lands via
+        // the FIRST level-up commit's one-time `+86 += wizard +48`
+        // stamp (:56057-62, the :30809-10 family) — for the authored
+        // castle that is its first tick (the `+70` note above). A
+        // pre-stamped 177+slot here would double-color the row now
+        // that the commit stamp is ported.
+        self.g.set_sprite(c, 177);
         // Terrain: replay the build painter per stage (instant, the
         // divisor-1 flatten + paint). Retail's loop runs one pass per
         // AUTHORED LEVEL with the build row = the pass index
@@ -3504,8 +3508,10 @@ impl World {
         // slot 478): state 5 (TRANSFORM — it rises through the level
         // machine, whose first commit re-binds +50 idempotently),
         // sprite 177 FLAT (no per-slot offset; its art extents are
-        // the recorded 184), ceiling 0 (the establish tick prices
-        // it — the ctor stamps nothing).
+        // the recorded 184 — the owner's team color lands one tick
+        // later, at the first level-up commit's latch stamp,
+        // :56057-62), ceiling 0 (the establish tick prices it — the
+        // ctor stamps nothing).
         {
             let e = &mut self.g.ent[c];
             e.id24 = self.rivals[ri].ent;
@@ -4939,6 +4945,43 @@ mod tests {
         w.g.castle_tick(c, crate::patches::WorldPatches::default());
         assert_eq!(w.g.castle_reg[ws], 0, "teardown-to-0 clears wizext+50");
         assert!(w.g.ent[c].flags & 0x400 != 0, "the flag soft-kills");
+    }
+
+    /// ⭐ THE REBUILT FLAG WEARS THE OWNER'S COLORS: the plant's ctor
+    /// row is 177 FLAT and the recolor is the FIRST level-up commit's
+    /// one-time latch stamp (`+86 += wizard +48`, :56057-62 — the
+    /// claimed-dwelling family, :30808-09). The port used to latch
+    /// the bit but skip the stamp (the flag billboard's art is the
+    /// row; there is no pose.team recolor stage), so every post-raze
+    /// rival castle flew the HUMAN's white flag — masked on FIRST
+    /// castles because the authored mint pre-stamped 177+slot.
+    #[test]
+    fn the_first_commit_recolors_the_planted_flag() {
+        let mut w = castle_world();
+        let ri = 0;
+        let i = w.rivals[ri].ent as usize;
+        let team = w.rivals[ri].slot as u16;
+        assert_ne!(team, 0, "a team-0 rival would mask the stamp");
+        w.rivals[ri].state = AiState::Build;
+        w.rivals[ri].site = (w.g.ent[i].x, w.g.ent[i].y);
+        w.rivals[ri].mana = 200_000;
+        w.rivals[ri].cooldown[16] = 0;
+        w.rival_state_tick(ri, i, false);
+        let c = w.rival_castle(w.rivals[ri].ent).expect("the plant landed");
+        assert_eq!(w.g.ent[c].type86, 177, "born flat");
+        // The castle's own first transform tick (born state 5,
+        // sub-state 0) runs the level-up commit.
+        w.g.castle_tick(c, crate::patches::WorldPatches::default());
+        assert_eq!(
+            w.g.ent[c].type86,
+            177 + team,
+            "the first commit stamps the owner's flag row"
+        );
+        // One-time: a later re-entry into the commit (the upgrade
+        // chain) must not add the color again.
+        w.g.ent[c].f59 = 0;
+        w.g.castle_tick(c, crate::patches::WorldPatches::default());
+        assert_eq!(w.g.ent[c].type86, 177 + team, "the stamp is latched");
     }
 
     /// ⭐⭐ THE CLAIM GATE READS THE TOKEN'S LIVE +136 PRICE CACHE
