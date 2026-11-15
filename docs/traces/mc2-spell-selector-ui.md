@@ -697,9 +697,16 @@ three points above and settled the persistence law. Citations as before
    (EF:22546-53 reads the ring array), and drawn hover-only (or
    mid-cast) as §2.4 said. Our pane draws ring ∪ equipped — see
    DEVIATIONS.
-4. **Persistence:** the ring and `array_0x437` carry across campaign
-   levels (`sub_549A0` L:1261-68 via the `byteindex_256ar` template) and
-   ride the whole-D41A0 SLEV save (L:199). Spell LOSS (`sub_69300`
+4. **Persistence:** the ring carries across campaign levels; the
+   selected tiers (`array_0x437`) and the hands do NOT. `sub_549A0`
+   copies both arrays into the next level, but the level start
+   `sub_53160` (EF:38381) then calls `InitialiseSpells_54A50`
+   (EF:38502), which zeroes every tier (EF:38952 — tier 1 for all) and
+   sets both hands to −1, re-binding them to the first two spells it
+   grants (EF:39048-56). (Corrected 2026-11-15: this item used to say
+   the tiers carry, reading `sub_549A0` through the save-game load path
+   Level.cpp `LoadLevelSLEV`, which restores a MID-LEVEL save exactly.)
+   Everything rides the whole-D41A0 SLEV save (L:199). Spell LOSS (`sub_69300`
    EF:55811-24) clears possession + the equip pointer(s) but NOT the
    ring — a lost spell stays a member and is merely skipped. Equip
    pointers are validated at level load (drop to −1 unless possessed,
@@ -707,6 +714,6 @@ three points above and settled the persistence law. Citations as before
 
 Port: `Mc2Spellbook::ring` / `World::mc1_ring` (MC1 = enhancement twin),
 command `spell_ring` (cmd 0x26), app walk `ring_next` (sub_18DA0), carry
-`mc2_install_selector_carry` + the `.mgcs` header's `mc1_spell_ring`;
+`mc2_install_ring_carry` + the `.mgcs` header's `mc1_spell_ring`;
 wheel/SHIFT+wheel = `gameplay.enhancement.wheel_spells` (no retail
 analogue).

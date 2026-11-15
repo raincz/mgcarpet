@@ -19928,7 +19928,7 @@ impl World {
     }
 
     /// Install the campaign-carried MC1 cycle ring at level load (the
-    /// MC1 twin of `mc2_install_selector_carry` — native-save-only
+    /// MC1 twin of `mc2_install_ring_carry` — native-save-only
     /// state, the retail `.gam` has no room for it).
     pub fn install_mc1_ring(&mut self, hx: Hx, ring: [u8; 24]) {
         if matches!(self.game, GameId::Mc2) {
@@ -55290,30 +55290,26 @@ mod tests {
             "ring membership KEPT on loss"
         );
 
-        // The carry installer: ring raw, sel clamped, hands only
-        // where possessed (spell 2 is stolen -> right stays put).
-        let mut sel = [0u8; 26];
-        sel[0] = 2; // above the earned level -> clamps
+        // The carry installer: the ring only, raw (even unpossessed
+        // members). Tiers and hands are NOT carried — retail's level
+        // start resets them (`InitialiseSpells_54A50`).
+        let (left, right) = (w.mc2_book[Hx::FIRST].left, w.mc2_book[Hx::FIRST].right);
+        let sel = w.mc2_book[Hx::FIRST].sel;
         let mut ring = [0u8; 26];
         ring[2] = 2;
         ring[5] = 1; // not possessed -> still carried RAW
-        w.mc2_install_selector_carry(Hx::FIRST, &sel, &ring, 0, 2);
+        w.mc2_install_ring_carry(Hx::FIRST, &ring);
         assert_eq!(w.mc2_book[Hx::FIRST].ring[2], 2, "ring carried");
         assert_eq!(
             w.mc2_book[Hx::FIRST].ring[5],
             1,
             "unpossessed member carried raw"
         );
+        assert_eq!(w.mc2_book[Hx::FIRST].sel, sel, "tiers untouched by the carry");
         assert_eq!(
-            w.mc2_book[Hx::FIRST].sel[0],
-            w.mc2_book[Hx::FIRST].levels[0],
-            "carried sel clamps to the earned level"
-        );
-        assert_eq!(w.mc2_book[Hx::FIRST].left, 0, "possessed hand carried");
-        assert_eq!(
-            w.mc2_book[Hx::FIRST].right,
-            -1,
-            "unpossessed hand dropped (L:1332-35)"
+            (w.mc2_book[Hx::FIRST].left, w.mc2_book[Hx::FIRST].right),
+            (left, right),
+            "hands untouched by the carry"
         );
     }
 

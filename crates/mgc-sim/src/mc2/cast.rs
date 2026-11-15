@@ -2789,43 +2789,28 @@ impl World {
         self.g.snd_player(hx, 14);
     }
 
-    /// The rest of retail's cross-level carry (`sub_549A0` L:1261-68
-    /// beyond what `mc2_grant_plausible` re-derives): the per-spell
-    /// selected tier (`array_0x437`), the cycle ring (`array_0x3B5`,
-    /// carried RAW — even for spells not possessed this level), and
-    /// the hand pointers, kept only if the spell is possessed here
-    /// (the L:1332-35 load validation; otherwise the canonical
-    /// level-start binding from the grant pass stands). Call AFTER
-    /// `mc2_grant_plausible` — the tier clamp reads the levels that
-    /// pass derived.
-    pub fn mc2_install_selector_carry(
-        &mut self,
-        hx: Hx,
-        sel: &[u8; 26],
-        ring: &[u8; 26],
-        left: i8,
-        right: i8,
-    ) {
+    /// The rest of retail's cross-level carry beyond what
+    /// `mc2_grant_plausible` re-derives: the cycle ring
+    /// (`array_0x3B5`), carried RAW — even for spells not possessed
+    /// this level.
+    ///
+    /// ⚠ NOT the selected tiers and NOT the hands. `sub_549A0` does
+    /// copy `array_0x437` (the per-spell tier) into the next level, but
+    /// the level start `sub_53160` then runs `InitialiseSpells_54A50`,
+    /// which zeroes every tier (EF:38952 — every spell starts the level
+    /// at tier 1) and sets both hands to −1, re-binding them to the
+    /// first two spells it grants (EF:39048-56) — the canonical binding
+    /// the grant pass already makes. The port carried both, citing the
+    /// SAVE-GAME load path (Level.cpp `LoadLevelSLEV` → `sub_549A0`),
+    /// which restores a mid-level save exactly; corrected 2026-11-15
+    /// (player-reported: a level opening in danger with a high tier
+    /// still selected).
+    pub fn mc2_install_ring_carry(&mut self, hx: Hx, ring: &[u8; 26]) {
         if !matches!(self.game(), crate::ids::GameId::Mc2) {
             return;
         }
         for s in 0..26 {
             self.mc2_book[hx].ring[s] = ring[s].min(2);
-            // sel ≤ levels holds in any well-formed carry (select
-            // clamps at write); min() only guards a foreign save.
-            self.mc2_book[hx].sel[s] = sel[s].min(self.mc2_book[hx].levels[s]);
-            let m = self.mc2_book[hx].ent[s] as usize;
-            if m != 0 {
-                // Push the carried tier into the live manifestation
-                // (retail's sub_55AB0 SetSpells to array_0x437).
-                self.mc2_set_spell(hx, m, self.mc2_book[hx].sel[s]);
-            }
-        }
-        if (0..26).contains(&(left as i32)) && self.mc2_book[hx].ent[left as usize] != 0 {
-            self.mc2_set_hand(hx, false, left);
-        }
-        if (0..26).contains(&(right as i32)) && self.mc2_book[hx].ent[right as usize] != 0 {
-            self.mc2_set_hand(hx, true, right);
         }
     }
 

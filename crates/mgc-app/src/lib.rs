@@ -11977,18 +11977,12 @@ fn apply_campaign_book(
             if !withheld.is_empty() {
                 w.mc2_bank_withheld(local_hx(), &withheld);
             }
-            // The rest of retail's sub_549A0 carry: selected tiers +
-            // the cycle ring (raw), hands kept where still possessed
-            // (the L:1332-35 validation). A book that owns nothing is
-            // a fresh campaign: its hand fields carry no choice (a
-            // slot saved before the first level may hold a zeroed
-            // 0/0 = Fireball twice), so the level-start pair stands.
-            let (left, right) = if grants.is_empty() {
-                (-1, -1)
-            } else {
-                (book.left, book.right)
-            };
-            w.mc2_install_selector_carry(local_hx(), &book.sel, &book.ring, left, right);
+            // The rest of retail's carry: the cycle ring only. Every
+            // spell starts the level at tier 1 and the hands take the
+            // grant pass's canonical binding — retail's level start
+            // (`InitialiseSpells_54A50`) resets both (see
+            // `World::mc2_install_ring_carry`).
+            w.mc2_install_ring_carry(local_hx(), &book.ring);
         }
         _ => {
             if run.save.mc1().is_none() {
