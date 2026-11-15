@@ -322,19 +322,6 @@ pub fn billboards_from_poses(
         if enhanced_lightning && p.class == 9 && p.model == 9 {
             continue;
         }
-        // The (10,23) lightning hit-blast is NEVER a billboard in
-        // retail, in either game: its ctor sets byte[0] bit 0 (MC1
-        // `sub_3AE80` :47084, MC2 `sub_4F5F0` EF:36087), its tick
-        // never clears it (`sub_262D0` :28898 / `sub_33D80` EF:24746),
-        // and the billboard walk skips `byte[0] & 0x21` (MC1 :36830,
-        // MC2 GameRenderOriginal.cpp:1936). It is pure damage
-        // machinery; drawing its sprite-7 row put an explosion at the
-        // end of EVERY beam, misses included (player-reported). The
-        // sim keeps the pose — the enhanced-fire burst above consumes
-        // it.
-        if p.class == 10 && p.model == 23 {
-            continue;
-        }
         // Patch option `ball_owner_recolor` (presentation-only): a
         // real (10,39) mana ball draws the sprite family of its
         // CURRENT owner. Retail re-derives the family only when the
@@ -3364,25 +3351,6 @@ mod tests {
         let any_dims = |_: u16| Some((32u16, 64u16, 0u16));
         let mc1 = billboards_from_poses(GameId::Mc1, &poses, any_dims, false, false, true, false);
         assert!(mc1.iter().all(|b| !b.conceal), "MC1 never conceals");
-    }
-
-    /// The (10,23) lightning hit-blast carries retail's byte[0] bit-0
-    /// hide from ctor to death, so the billboard walk never draws it —
-    /// in either game and either fire mode — while its (10,0) fire
-    /// neighbour keeps its sprite under classic fire.
-    #[test]
-    fn lightning_hit_blast_is_never_a_billboard() {
-        let dims = |_: u16| Some((32u16, 64u16, 0u16));
-        let blast = [pose(10, 23, false, 7)];
-        let fire = [pose(10, 0, false, 7)];
-        for game in [GameId::Mc1, GameId::Mc2] {
-            for enhanced in [false, true] {
-                let b = billboards_from_poses(game, &blast, dims, enhanced, false, false, false);
-                assert!(b.is_empty(), "{game:?} enhanced={enhanced}: the hit-blast drew");
-            }
-            let classic = billboards_from_poses(game, &fire, dims, false, false, false, false);
-            assert_eq!(classic.len(), 1, "{game:?}: the (10,0) fire still draws");
-        }
     }
 
     fn rival(

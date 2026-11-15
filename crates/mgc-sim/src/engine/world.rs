@@ -5404,7 +5404,21 @@ impl World {
                     self.owner_slot(owner)
                 },
                 blend: bits.blend,
-                map_only: bits.map_only || flc == Some(None),
+                // RETAIL'S BILLBOARD HIDE: both games' billboard walk
+                // skips `byte[0] & 0x21` (MC1 :36830, MC2
+                // GameRenderOriginal.cpp:1936). 0x20 is the cloak skip
+                // above; bit 0 is the ctor/state "no billboard" bit —
+                // the (10,23) lightning hit-blast and the (10,19)
+                // eruption plume / fire spray carry it from ctor to
+                // death (their visible part is the (10,13)/(10,14)
+                // smoke), MC1's genie while phased out, an unclaimed
+                // dwelling's absent flag. Map-only, NOT skipped: the
+                // minimap keeps its own per-class rules (the magnet and
+                // Global Death dots carry bit 0 too), and the enhanced-
+                // fire pass still consumes the pose. Retail census
+                // (`hide_bit_census`, 120 takes): (10,19)/(10,23) are
+                // bit 0 on every recorded row, both games.
+                map_only: bits.map_only || flc == Some(None) || e.flags & 1 != 0,
                 flame_scale: flame_scale[i],
                 // THE VISSULUTH SIZE LAW. Retail's doomsday machine
                 // does not scale itself through any entity lane — it
@@ -59473,6 +59487,39 @@ mod tests {
         assert!(p.map_only, "no sprite in the world: map only");
         assert_eq!(p.team, Some(0), "the human's field wears the human's team");
         assert_eq!(count(&w, 10, 55), 1);
+    }
+
+    /// RETAIL'S BILLBOARD HIDE IS BYTE[0] BIT 0. The (10,23) lightning
+    /// hit-blast and the (10,19) eruption plume / fire spray are born
+    /// with it and never clear it (retail census: bit 0 on every
+    /// recorded row of both, both games), so they export MAP-ONLY —
+    /// no billboard — while a (10,0) fire keeps drawing. Regression:
+    /// only bit 0x20 hid a billboard, so every beam ended in an
+    /// explosion, misses included (player-reported 2026-11-15).
+    #[test]
+    fn byte0_bit0_hides_the_billboard() {
+        let pose_of = |w: &World, s: usize| {
+            w.live_poses(Hx::FIRST)
+                .into_iter()
+                .find(|p| p.slot == s as u16)
+                .expect("pose exported")
+        };
+        let mut w = flat_world();
+        let (x, y) = ((100u16 << 8) | 128, (100u16 << 8) | 128);
+        let z = w.g.ground_z(x, y) as i16;
+        for model in [23u8, 19] {
+            let s = w.g.spawn_effect(model, x, y, z).expect("effect");
+            assert!(pose_of(&w, s).map_only, "MC1 (10,{model}): no billboard");
+        }
+        let f = w.g.spawn_effect(0, x, y, z).expect("fire");
+        assert!(!pose_of(&w, f).map_only, "the (10,0) fire still draws");
+
+        let mut w = mc2_flat_world();
+        let z = w.g.ground_z(x, y) as i16;
+        let s = w.g.mc2_spawn_blast23(x, y, z).expect("blast");
+        assert!(pose_of(&w, s).map_only, "MC2 (10,23): no billboard");
+        let s = w.g.mc2_spawn_fire_spray(x, y, z).expect("spray");
+        assert!(pose_of(&w, s).map_only, "MC2 (10,19): no billboard");
     }
 
     /// THE RESPAWN PRESS MUST NOT ALSO WIN. Retail issues cmd 15 THEN

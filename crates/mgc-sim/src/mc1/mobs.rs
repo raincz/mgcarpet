@@ -2153,9 +2153,10 @@ impl Gen {
     /// every expiry and NEVER blinked. mc1l42 slot 101 shows it as a
     /// matched pair: flags want 13 got 8204 on the toggle tick, then
     /// x/y/rand on the next (retail teleports whole tiles away, the
-    /// port stands still). ⚠ `World`'s class-5 draw gate reads the
-    /// same bit as INVISIBLE (an MC2-corpus reading); MC1's genie is
-    /// phased-out for half its life by this law, not hidden.
+    /// port stands still). Bit 0 is ALSO retail's billboard hide (the
+    /// `& 0x21` walk, :36830), so the phased-out genie is genuinely
+    /// unseen: retail's state 67 carries it on every recorded row
+    /// (`hide_bit_census`), and `World::live_poses` exports it map-only.
     fn genie_idle(&mut self, i: usize, base: u8) {
         let v1 = self.ent[i].f26;
         if v1 != 0 {
