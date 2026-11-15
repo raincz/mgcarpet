@@ -540,6 +540,7 @@ impl Gen {
         self.mc2_set_sprite(i, 7);
         self.mc2_shift_rot(i, 200, 200);
         self.ent[i].flags |= 1;
+        self.blast_hits.set(i, false);
         Some(i)
     }
 
@@ -3010,6 +3011,7 @@ impl Gen {
             if self.ent[i].flags & 2 == 0 {
                 let amt = self.ent[i].f140 as u32;
                 let hits = self.area_write(i, 0, amt, ctx, false, false);
+                self.blast_hits.set(i, hits != 0);
                 // Lightning burst batch XP (EF:24802).
                 if hits != 0 && self.is_human_tag(self.ent[i].id24) {
                     self.mc2_cast_xp.0.push((self.ent[i].id24, 7, hits as i32));
@@ -3021,6 +3023,7 @@ impl Gen {
             }
         } else {
             self.ent[i].flags |= 0x400;
+            self.blast_hits.set(i, false);
         }
     }
 

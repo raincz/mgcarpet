@@ -5382,8 +5382,13 @@ impl World {
                 // is lightning-family (bolts, storm rain, Fool's Mana
                 // beam, doomsday vortex bolts), so the model keys the
                 // enhanced-fire explosion wholesale.
+                // …but only a blast whose burst STRUCK something burns
+                // (player ruling 2026-11-15: enhanced fire on hits
+                // only; retail draws no blast either way). Until its
+                // first tick lands the burst, a blast reads as a miss.
                 fire_life: if e.class64 == 10
-                    && (matches!(e.model65, 0 | 1 | 6 | 23)
+                    && (matches!(e.model65, 0 | 1 | 6)
+                        || (e.model65 == 23 && self.g.blast_hits.hit(i))
                         || (e.model65 == 19 && self.game == GameId::Mc2))
                     && e.max_life > 0
                 {
@@ -59520,6 +59525,33 @@ mod tests {
         assert!(pose_of(&w, s).map_only, "MC2 (10,23): no billboard");
         let s = w.g.mc2_spawn_fire_spray(x, y, z).expect("spray");
         assert!(pose_of(&w, s).map_only, "MC2 (10,19): no billboard");
+    }
+
+    /// The ENHANCED-fire burst on a (10,23) lightning hit-blast reads
+    /// the blast's own ch0 burst: `fire_life` only when it STRUCK
+    /// something (player ruling 2026-11-15 — retail draws no blast at
+    /// all, so a miss shows nothing in either mode).
+    #[test]
+    fn lightning_blast_burns_only_on_a_hit() {
+        let fire_of = |w: &World, s: usize| {
+            w.live_poses(Hx::FIRST)
+                .into_iter()
+                .find(|p| p.slot == s as u16)
+                .and_then(|p| p.fire_life)
+        };
+        let mut w = flat_world();
+        let (x, y) = ((100u16 << 8) | 128, (100u16 << 8) | 128);
+        let z = w.g.ground_z(x, y) as i16;
+        let t = w.g.spawn_creature(4, x, y, z).expect("archer");
+        w.g.ent[t].f58 = 64;
+        let hit = w.g.spawn_effect(23, x, y, z).expect("hit blast");
+        let (mx, my) = ((40u16 << 8) | 128, (160u16 << 8) | 128);
+        let mz = w.g.ground_z(mx, my) as i16;
+        let miss = w.g.spawn_effect(23, mx, my, mz).expect("miss blast");
+        assert!(fire_of(&w, hit).is_none(), "no burst before the blast resolves");
+        w.tick(away(), PlayerCommand::default());
+        assert!(fire_of(&w, hit).is_some(), "a blast that struck burns");
+        assert!(fire_of(&w, miss).is_none(), "a miss never burns");
     }
 
     /// THE RESPAWN PRESS MUST NOT ALSO WIN. Retail issues cmd 15 THEN

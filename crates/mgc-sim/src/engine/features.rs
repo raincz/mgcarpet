@@ -797,6 +797,7 @@ impl Gen {
             mc2_steal_mail,
             bolt_fx,
             volcano_blind,
+            blast_hits,
             mc1_aim_latch,
             mc2_beam_defer,
             mc2_pred_axis,
@@ -982,6 +983,8 @@ impl Gen {
         bolt_fx.hash(h);
         h.section(|| "g.volcano_blind".into());
         volcano_blind.hash(h);
+        h.section(|| "g.blast_hits".into());
+        blast_hits.hash(h);
         h.section(|| "g.mc1_aim_latch".into());
         mc1_aim_latch.hash(h);
         h.section(|| "g.mc2_beam_defer".into());
@@ -2020,6 +2023,15 @@ pub(crate) struct Gen {
     /// Hash-silent and never saved, like [`Gen::bolt_fx`]: it records
     /// writes already made and feeds nothing back.
     pub(crate) volcano_blind: VolcanoBlind,
+    /// The live (10,23) lightning hit-blasts whose ONE ch0 burst
+    /// struck something (MC1 `sub_262D0` / MC2 `sub_33D80`: the
+    /// area write's hit count — MC2 retail even returns it for the
+    /// spell-XP report). Retail draws no blast at all (byte[0] bit 0);
+    /// this feeds only the ENHANCED-fire burst, which the player wants
+    /// on hits only (2026-11-15). The ctor clears the slot, the burst
+    /// adds it, death removes it. Hash- and save-silent like
+    /// [`Gen::bolt_fx`].
+    pub(crate) blast_hits: BlastHits,
     /// THE SHOT-STATS AIM LATCH: the class-9 record's `+146` as it
     /// stood at the handler's DISPATCH ENTRY, stamped by `proj_tick`
     /// and read by `proj_explode`'s `hits` test — every retail flight
@@ -2245,6 +2257,27 @@ pub(crate) struct BoltFx(pub Vec<BoltStrike>);
 
 impl std::hash::Hash for BoltFx {
     fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {}
+}
+
+/// See [`Gen::blast_hits`] — hash-SILENT ALWAYS, like [`BoltFx`].
+#[derive(Default, Clone)]
+pub(crate) struct BlastHits(pub Vec<u16>);
+
+impl std::hash::Hash for BlastHits {
+    fn hash<H: std::hash::Hasher>(&self, _state: &mut H) {}
+}
+
+impl BlastHits {
+    pub(crate) fn set(&mut self, slot: usize, hit: bool) {
+        let s = slot as u16;
+        self.0.retain(|&x| x != s);
+        if hit {
+            self.0.push(s);
+        }
+    }
+    pub(crate) fn hit(&self, slot: usize) -> bool {
+        self.0.contains(&(slot as u16))
+    }
 }
 
 /// See [`Gen::volcano_blind`] — hash-SILENT ALWAYS, exactly like
@@ -6528,6 +6561,7 @@ impl Gen {
             mc2_castle_lock_mail: Mc2LockMail::default(),
             bolt_fx: BoltFx::default(),
             volcano_blind: VolcanoBlind::default(),
+            blast_hits: BlastHits::default(),
             mc1_aim_latch: HashSilent(0),
             mc2_beam_defer: BeamDefer::default(),
             mc2_pred_axis: Mc2PredAxis::default(),
@@ -13895,6 +13929,7 @@ impl Gen {
             // Presentation feed, never saved — a load starts clean.
             bolt_fx: _,
             volcano_blind: _,
+            blast_hits: _,
             // Transient within one class-9 dispatch — never live at a
             // boundary.
             mc1_aim_latch: _,
@@ -14137,6 +14172,7 @@ impl Gen {
         // load.
         self.bolt_fx.0.clear();
         self.volcano_blind.0.clear();
+        self.blast_hits.0.clear();
         self.mc2_beam_defer = BeamDefer::default();
         // Retail's load empties the victim list (see `snap_write`).
         self.mc2_recycle.stack.clear();

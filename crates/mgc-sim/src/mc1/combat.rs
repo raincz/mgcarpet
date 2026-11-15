@@ -7307,6 +7307,7 @@ impl Gen {
                 self.refill_life(s);
                 self.set_sprite(s, 7);
                 self.extents(s, 200, 200);
+                self.blast_hits.set(s, false);
             }
             // sub_3B3E0 (:47370): the (10,36) UNDEAD-ARMY spawner —
             // life 8, sprite 41, extents 512, and `+44` = −1536 which
@@ -8444,12 +8445,14 @@ impl Gen {
         self.ent[i].act_life = life - 1;
         if life < 0 {
             self.ent[i].flags |= 0x400;
+            self.blast_hits.set(i, false);
             return false;
         }
         if self.ent[i].flags & 2 == 0 {
             self.ent[i].flags |= 2;
             let amt = self.ent[i].f44 as u32;
-            self.area_write(i, 0, amt, ctx, false, false);
+            let hits = self.area_write(i, 0, amt, ctx, false, false);
+            self.blast_hits.set(i, hits != 0);
             self.snd(24, i);
             self.ent[i].act_life = 1;
         }
