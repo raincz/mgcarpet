@@ -1179,15 +1179,25 @@ impl Gen {
     /// creature is airborne where it stands and would pass clear over
     /// the destination tile, so that tile's fence does not stop it.
     /// Always false on retail law and in caves.
+    ///
+    /// ⚠ Both tests read the CANDIDATE altitude `pos.2` — the z this
+    /// move flies at, after `mc2_alt_core` floored it to the ground
+    /// under the creature plus the row's hover — never the committed
+    /// `e.z`. A same-tile move skips the fence (retail), so a flyer
+    /// drifting up a steep tile can commit a z BELOW the rising ground;
+    /// judged on that, it read as grounded in the middle of steep
+    /// tiles, all four tries hit the retail fence, and the boxed-in
+    /// arm killed every `DIE_ON_WATER` row (player-reported 2026-11-15:
+    /// wyverns cutting across tall buildings and dying on them).
     fn mc2_flies_over(&self, i: usize, pos: (u16, u16, i16)) -> bool {
         if !self.mc2_flyers_clear.0 || self.is_cave() {
             return false;
         }
         let e = &self.ent[i];
-        let here = self.ground_z(e.x, e.y);
-        let there = self.ground_z(pos.0, pos.1);
-        let z = (e.z as i32).max(pos.2 as i32);
-        e.z as i32 - here as i32 >= FLY_OVER_AIRBORNE && z - there as i32 >= FLY_OVER_CLEARANCE
+        let here = self.ground_z(e.x, e.y) as i32;
+        let there = self.ground_z(pos.0, pos.1) as i32;
+        let z = pos.2 as i32;
+        z - here >= FLY_OVER_AIRBORNE && z - there >= FLY_OVER_CLEARANCE
     }
 
     /// `sub_1B8C0` (:8741): the MC2 creature move core. Result codes
