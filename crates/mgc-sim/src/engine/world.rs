@@ -47725,40 +47725,42 @@ mod tests {
         assert!(crossed[1], "patched: the airborne flyer passes over");
     }
 
-    /// THE FLY-OVER MUST NOT STRAND A FLYER. A wyvern (row 84: every
-    /// tile type admitted, roughness fence 70, `DIE_ON_WATER`) above
-    /// its hover band, sinking toward a one-row steep ridge: the patch
-    /// let it onto the ridge, a same-tile move then carried it BELOW
-    /// the rising ground, and judged on that committed z it read as
-    /// grounded — all four tries hit the retail fence and the boxed-in
-    /// arm killed it (player-reported 2026-11-15: wyverns that circle
-    /// tall buildings in retail cut across them and die).
+    /// ⚖ THE FLY-OVER IS THE WORM'S AND THE DWELLER'S ONLY (player
+    /// ruling 2026-11-15). A wyvern (row 84) and a bee (row 73) flying
+    /// high above a one-row steep ridge stay on retail's altitude-blind
+    /// fence under the patch: the castle is a refuge from them in both
+    /// games. Unscoped, the patch let them over castle rims and
+    /// buildings, where they sank to their hover band, read as grounded
+    /// among steep tiles and the boxed-in arm (`DIE_ON_WATER`) killed
+    /// them (player-reported: wyverns dying on tall buildings, bees
+    /// chasing the player up over the level-2 castle).
     #[test]
-    fn mc2_fly_over_never_strands_a_wyvern_on_a_wall() {
-        let mut w = mc2_flat_world();
-        for tx in 0..256usize {
-            w.g.t.height[(120 << 8) | tx] = 200;
-        }
-        let (x, y) = ((100u16 << 8) | 128, (126u16 << 8) | 128);
-        let i = w.g.mc2_spawn_m16(x, y, 0).expect("wyvern");
-        // High above its hover band (a chase altitude), just clearing
-        // the wall top; `mc2_alt_core` sinks it 8 per move.
-        let top = w.g.ground_z(100 << 8 | 128, 120 << 8 | 128) as i16;
-        w.g.ent[i].z = top + 200;
-        w.g.ent[i].f126 = 128;
-        w.g.mc2_flyers_clear = crate::engine::features::HashSilent(true);
-        let mut crossed = false;
-        for _ in 0..60 {
-            w.g.ent[i].f30 = 0;
-            w.g.ent[i].f34 = 0;
-            w.g.mc2_move_core(i);
-            assert_ne!(w.g.ent[i].act_life, -1, "stranded on the wall and suicided");
-            if w.g.ent[i].y >> 8 <= 117 {
-                crossed = true;
-                break;
+    fn mc2_fly_over_leaves_wyverns_and_bees_on_the_retail_fence() {
+        for wyvern in [true, false] {
+            let mut w = mc2_flat_world();
+            for tx in 0..256usize {
+                w.g.t.height[(120 << 8) | tx] = 200;
+            }
+            let (x, y) = ((100u16 << 8) | 128, (126u16 << 8) | 128);
+            let i = if wyvern {
+                w.g.mc2_spawn_m16(x, y, 0).expect("wyvern")
+            } else {
+                w.g.mc2_spawn_m2(x, y, 0).expect("bee")
+            };
+            let top = w.g.ground_z(100 << 8 | 128, 120 << 8 | 128) as i16;
+            w.g.ent[i].z = top + 1000;
+            w.g.ent[i].f126 = 128;
+            w.g.mc2_flyers_clear = crate::engine::features::HashSilent(true);
+            for _ in 0..60 {
+                w.g.ent[i].f30 = 0;
+                w.g.ent[i].f34 = 0;
+                w.g.mc2_move_core(i);
+                assert!(
+                    w.g.ent[i].y >> 8 > 120,
+                    "wyvern={wyvern}: crossed the ridge under the patch"
+                );
             }
         }
-        assert!(crossed, "the wyvern passes clean over the wall");
     }
 
     /// A bare flat MC2 world built from the given THING table.

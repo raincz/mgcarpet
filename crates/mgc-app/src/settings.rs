@@ -2763,21 +2763,23 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc2_flyers_clear_terrain.on(),
                 faithful: false,
             },
-            desc: "Flying creatures pass over steep walls they are well above \
-                   (MC2). Retail stops every creature at a steep or forbidden \
-                   tile whatever its altitude, so a mana worm heading straight \
-                   for its castle can hang forever against a rampart far below \
-                   it, until a crater clears the way. Patched, a creature that \
-                   is already airborne and would pass clear over the tile is \
-                   not stopped by it; walkers and caves keep retail's rule.",
+            desc: "Mana worms and moon dwellers pass over steep walls they are \
+                   well above (MC2). Retail stops every creature at a steep or \
+                   forbidden tile whatever its altitude, so a mana worm heading \
+                   straight for its castle can hang forever against a rampart \
+                   far below it, until a crater clears the way. Patched, a worm \
+                   or dweller that is already airborne and would pass clear over \
+                   the tile is not stopped by it. Every other creature keeps \
+                   retail's rule, so bees and wyverns still cannot follow you \
+                   over a castle wall; caves keep retail's rule too.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc2_flyers_clear_terrain =
                         crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "Flyers stall against steep tiles far below them, as retail.",
-                    "Airborne flyers pass over steep tiles below them (default).",
+                    "Worms and dwellers stall against steep tiles far below them, as retail.",
+                    "Airborne worms and dwellers pass over steep tiles below them (default).",
                 ],
             },
         },

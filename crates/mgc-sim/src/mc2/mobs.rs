@@ -1189,11 +1189,20 @@ impl Gen {
     /// tiles, all four tries hit the retail fence, and the boxed-in
     /// arm killed every `DIE_ON_WATER` row (player-reported 2026-11-15:
     /// wyverns cutting across tall buildings and dying on them).
+    ///
+    /// ⚖ SCOPED TO THE TWO SPECIES IT WAS MADE FOR (player ruling
+    /// 2026-11-15): the (5,22) mana worm and the (5,23) moon dweller.
+    /// Every other creature keeps retail's altitude-blind fence — the
+    /// castle is a REFUGE in both games, and bees that chased the player
+    /// up over its rim stranded themselves inside it and died.
     fn mc2_flies_over(&self, i: usize, pos: (u16, u16, i16)) -> bool {
         if !self.mc2_flyers_clear.0 || self.is_cave() {
             return false;
         }
         let e = &self.ent[i];
+        if e.class64 != 5 || !matches!(e.model65, 22 | 23) {
+            return false;
+        }
         let here = self.ground_z(e.x, e.y) as i32;
         let there = self.ground_z(pos.0, pos.1) as i32;
         let z = pos.2 as i32;
