@@ -5400,7 +5400,21 @@ impl World {
                 player_owned: e.id24 == self.g.human_tag[hx].0
                     || (e.class64 == 10 && e.f144 == self.g.human_tag[hx].0),
                 team: {
-                    let owner = if e.class64 == 10 && matches!(e.model65, 39 | 45) {
+                    // MC2's (10,57) FOOL'S-MANA sphere: retail's map
+                    // reads the BALL OWNER `+0x94` (`f144`) for it like
+                    // for a real sphere (GameUI.cpp:1293-1300, the
+                    // 0x27/0x39 arm) — 0 on a plain decoy, so it plots
+                    // as WILD mana; the caster's id only on tier 3,
+                    // which retail stamps owned on purpose. The port
+                    // read `id24` (the caster), so every decoy showed
+                    // its caster's colour on EVERY map — a free tell
+                    // in multiplayer (player-reported 2026-11-15).
+                    // ENHANCEMENT (player-ruled): the caster still sees
+                    // HIS OWN decoys in his colour.
+                    let fools = self.game == GameId::Mc2 && e.class64 == 10 && e.model65 == 57;
+                    let owner = if fools && e.id24 == self.g.human_tag[hx].0 {
+                        e.id24
+                    } else if e.class64 == 10 && (matches!(e.model65, 39 | 45) || fools) {
                         e.f144
                     } else {
                         e.id24
@@ -47761,6 +47775,38 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// THE FOOL'S-MANA MAP TELL. Retail's minimap reads a (10,57)
+    /// sphere's ball owner `+0x94` (`f144`), so a plain decoy (owner 0)
+    /// plots as WILD mana for everyone and a tier-3 one in its owner's
+    /// colour. The port read the caster id, handing every map a tell
+    /// (player-reported 2026-11-15). Enhancement: the CASTER still sees
+    /// his own decoys in his colour.
+    #[test]
+    fn fools_mana_shows_its_owner_only_to_its_caster() {
+        let mut w = mc2_flat_world();
+        let me = w.g.human_tag[Hx::FIRST].0;
+        let s = w.g.mc2_spawn_mana_sphere(57, 100 << 8, 100 << 8, 100).expect("sphere");
+        let team = |w: &World| {
+            w.live_poses(Hx::FIRST)
+                .into_iter()
+                .find(|p| p.slot == s as u16)
+                .expect("pose")
+                .team
+        };
+        let mine = w.owner_slot(me);
+        assert!(mine.is_some(), "the human tag resolves to a team");
+        // My plain decoy: my colour, on MY map.
+        w.g.ent[s].id24 = me;
+        w.g.ent[s].f144 = 0;
+        assert_eq!(team(&w), mine, "the caster sees his own decoy");
+        // Someone else's plain decoy: wild, like ground mana.
+        w.g.ent[s].id24 = 4242;
+        assert_eq!(team(&w), None, "a foreign decoy reads as wild mana");
+        // A tier-3 decoy stamped owned (`f144`): retail plots the owner.
+        w.g.ent[s].f144 = me;
+        assert_eq!(team(&w), mine, "tier 3 shows its f144 owner");
     }
 
     /// A bare flat MC2 world built from the given THING table.
