@@ -1610,6 +1610,37 @@ const MANA_WHITE: [f32; 4] = [0.95, 0.95, 0.95, 1.0];
 /// recalibrate in both games, every seat and environment).
 const METER_TONE: f32 = 0.5;
 
+/// The dimmest a HUD pip may DISPLAY, as relative luminance (linear
+/// Rec. 709 weights): a near-black team colour — MC1 seat 7 (81,73,69),
+/// MC2 seat 6 (97,77,52) by day and (52,40,24) at night — would vanish
+/// on the dark panel, and its half-tone gauge with it (player-ruled
+/// 2026-11-15: lift, keeping the hue).
+const PIP_FLOOR: f32 = 0.25;
+
+/// A team colour as a HUD pip: unchanged when it is bright enough,
+/// else its sRGB-encoded channels scaled up together (hue kept) until
+/// it reaches [`PIP_FLOOR`] — brown stays brown, just lighter.
+pub(crate) fn hud_pip(c: [f32; 4]) -> [f32; 4] {
+    fn enc(c: f32) -> f32 {
+        if c <= 0.003_130_8 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+    }
+    fn dec(c: f32) -> f32 {
+        if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    }
+    let lum = |l: [f32; 3]| 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
+    let srgb = [enc(c[0]), enc(c[1]), enc(c[2])];
+    let at = |k: f32| srgb.map(|v| dec((v * k).min(1.0)));
+    if lum(at(1.0)) >= PIP_FLOOR || srgb.iter().all(|&v| v <= 0.0) {
+        return c;
+    }
+    let mut k = 1.0f32;
+    while lum(at(k)) < PIP_FLOOR && k < 64.0 {
+        k += 0.02;
+    }
+    let l = at(k);
+    [l[0], l[1], l[2], c[3]]
+}
+
 /// The gauge colour for a pip colour: [`METER_TONE`] of its displayed
 /// (sRGB-encoded) value, decoded back to the linear tint the UI pass
 /// writes. Scaling in linear light instead would read far brighter
@@ -1796,7 +1827,7 @@ pub fn hud_quads(
     // the level palette by the caller). Seat 0 keeps the tuned
     // white (`None`). The gauge colour is NOT retail's odd member of
     // the pair: it is the pip colour at [`METER_TONE`] (see there).
-    let mana_c = team.map_or(MANA_WHITE, |t| t.0);
+    let mana_c = team.map_or(MANA_WHITE, |t| hud_pip(t.0));
     let meter_c = meter_of(mana_c);
     // The strip splits into two anchored groups (see `HudFrame`): the
     // radar + three wizard sub-panels are LEFT-anchored — they already
@@ -3226,7 +3257,34 @@ mod marker_halo_tests {
 
 #[cfg(test)]
 mod tests {
-    use super::{MANA_WHITE, METER_TONE, meter_of};
+    use super::{MANA_WHITE, METER_TONE, PIP_FLOOR, hud_pip, meter_of};
+
+    /// A near-black team colour is lifted to the pip floor with its hue
+    /// kept (the sRGB channels scale together); a bright one is left
+    /// alone (player ruling 2026-11-15).
+    #[test]
+    fn dark_team_pips_are_lifted_keeping_their_hue() {
+        let dec = |b: u8| {
+            let c = b as f32 / 255.0;
+            if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        };
+        let enc = |c: f32| {
+            if c <= 0.003_130_8 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+        };
+        let lum = |c: [f32; 4]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+        let rgb = |r, g, b| [dec(r), dec(g), dec(b), 1.0];
+        // MC2 seat 6 at night: (52,40,24).
+        let brown = rgb(52, 40, 24);
+        let p = hud_pip(brown);
+        assert!(lum(p) >= PIP_FLOOR - 1e-3, "lifted to the floor");
+        let (r, g, b) = (enc(p[0]), enc(p[1]), enc(p[2]));
+        assert!((r / b - 52.0 / 24.0).abs() < 0.05 && (g / b - 40.0 / 24.0).abs() < 0.05, "hue kept");
+        let shown = (r * 255.0).round();
+        assert!((165.0..=175.0).contains(&shown), "brown pip red channel shows at {shown}");
+        // MC1 seat 1 (235,138,134) is bright enough: untouched.
+        let red = rgb(235, 138, 134);
+        assert_eq!(hud_pip(red), red);
+    }
 
     /// The gauge under the pips sits half-way between the pip and the
     /// black slab IN DISPLAYED BRIGHTNESS, in the pip's own hue — for

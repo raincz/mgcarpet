@@ -691,11 +691,16 @@ fn scan_mc2_slots() -> Vec<(String, bool)> {
 }
 
 /// The HUD bars' team colour pair for the human flying wizard `seat`
-/// (`ui::hud_quads`): MC1/HW's `byte_99B58` pair through the level
-/// palette. Seat 0 — every launch but `--seat` — and MC2 keep the
-/// HUD's tuned white/grey (`None`).
+/// (`ui::hud_quads`, which takes the pip colour from it): MC1/HW's
+/// `byte_99B58` pair, MC2's `playersColors_E88E0x` per map type —
+/// retail's `DrawSpellIcon_2E260` reads `[GetTrueWizardNumber(colour)]
+/// [0]` for the pips and `[1]` for the bar (GameUI.cpp), and the port's
+/// seat IS the true wizard. (MC2 was excluded here, so every MC2 seat
+/// drew white pips — unfaithful; fixed 2026-11-15.) Seat 0 — every
+/// launch but `--seat` / netplay — keeps the HUD's tuned white
+/// (`None`).
 fn hud_team_colors(seat: u8, level: &LoadedLevel) -> Option<([f32; 4], [f32; 4])> {
-    if seat == 0 || level.game == mgc_sim::ids::GameId::Mc2 {
+    if seat == 0 {
         return None;
     }
     let colors = entities::roster_team_colors(level.game, level.mc2_env, &level.palette_rgba);
