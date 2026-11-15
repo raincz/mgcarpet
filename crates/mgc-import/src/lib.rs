@@ -33,6 +33,7 @@ pub mod redbook;
 pub mod rnc;
 pub mod smf;
 pub mod sound;
+pub mod sources;
 pub mod sprites;
 pub mod synth;
 pub mod tmaps;

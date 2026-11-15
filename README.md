@@ -60,12 +60,37 @@ and playable.
    macOS quarantines it on download; release it once with
    `xattr -dr com.apple.quarantine <the unpacked folder>` (or right-click
    → Open on the binary).
-2. Copy your installed GOG game directories into a `gamedata/` folder
-   next to the binary — see [gamedata/README.md](gamedata/README.md)
-   for the expected layout. Any subset works (MC1 only is fine).
-3. Run it. Starting `mgcarpet` with no arguments opens the
-   **launcher**: pick one of the three games (a game whose data is not
-   baked yet is crossed out) and press Start. You can also skip it and
+2. Unpack the archive anywhere and run `mgcarpet`. It opens the
+   **launcher**, with a card for each of the three games.
+3. **Add your game data from the launcher.** On a first run the
+   **Game data** dialog opens by itself (later, it's the
+   **Game data…** button at the bottom left, or click a game that is
+   still crossed out). Press **Add game data…**, say what you have, and
+   pick it:
+
+   * **GOG installer** — the `setup_magic_carpet_….exe` you downloaded
+     from GOG. Nothing needs installing first, and no Wine: it is
+     unpacked with the [innoextract](https://constexpr.org/innoextract/)
+     tool, which every Linux distribution packages (macOS: `brew install
+     innoextract`). The dialog tells you if it's missing. On Windows,
+     the simplest is to run the installer as usual and pick the
+     installed folder instead.
+   * **Installed GOG game** — the folder GOG's installer put the game
+     in (it contains `game.gog` for Magic Carpet 2, or a `CARPET.CD`
+     folder for Magic Carpet Plus).
+   * **Original CD image** — a `.cue` with its `.img` or `.bin`
+     (Magic Carpet 2).
+
+   The launcher checks what you picked, copies what it needs into its
+   own `gamedata/` folder (next to the binary, when started from its
+   folder — so the original can go afterwards), and then prepares the
+   game data: a minute or two, a few minutes the first time, which
+   also renders the music. **Leave the launcher open until the green
+   "please wait" message is gone**;
+   the games' cards light up when it is done. Any subset works: Magic
+   Carpet Plus brings Magic Carpet and Hidden Worlds, Magic Carpet 2
+   is separate.
+4. Pick a game and press Start. You can also skip the launcher and
    double-click the campaign launcher for the game you want to play:
 
    * `magic-carpet-1` — the Magic Carpet campaign
@@ -88,13 +113,12 @@ and playable.
    ./mgcarpet --campaign <game> [--slot N]
    ```
 
-   On first run the game finds no baked data and **bakes it from your
-   GOG installs automatically** (once per machine; also after an
-   upgrade that changes the bake — the data carries an epoch stamp).
-   The launcher does this in the background and lights up each game's
-   card when it is done.
-   To point elsewhere than `gamedata/`, set `MGC_GAMEDATA` or
-   `"gamedata"` in `mgcarpet.json`.
+   The prepared ("baked") data is redone by itself after an upgrade
+   that changes it (it carries an epoch stamp). To keep the game data
+   somewhere other than `gamedata/`, set `MGC_GAMEDATA` or
+   `"gamedata"` in `mgcarpet.json`. Placing the files by hand still
+   works — [gamedata/README.md](gamedata/README.md) describes the
+   layout, the command-line importer and community mods.
 
    Most tweakable options are available in several ways:
    * Runtime menu (displayed when game is paused)
@@ -164,7 +188,7 @@ not listed there is the retail game.
 ## Architecture
 
 ```
-gamedata/  (your GOG installs — never committed)
+gamedata/  (your game data, added by the launcher — never committed)
     │
     ▼
 mgc-import  ── the only code that understands Bullfrog formats (RNC,
@@ -201,15 +225,20 @@ Windows and macOS need no system dependencies.
 
 ## Game data
 
-The engine consumes *baked* packages, generated from your GOG installs
-under `gamedata/` — the game shell does this by itself on first run
-(see Quickstart), and `mgc-import` exposes the same importer as a
+The engine consumes *baked* packages, generated from the original game
+data under `gamedata/`. The launcher adds that data and bakes it by
+itself (see Quickstart); `mgc-import` exposes the same machinery as a
 standalone tool:
 
 ```sh
-cargo run -p mgc-import -- scan gamedata   # integrity-check the data
+cargo run -p mgc-import -- add gamedata <installer, folder or .cue>  # import a source
+cargo run -p mgc-import -- sources gamedata   # what is found, and what is used
+cargo run -p mgc-import -- scan gamedata      # integrity-check the data
 cargo run -p mgc-import -- bake gamedata baked   # bake everything
 ```
+
+The layout, the supported sources and community mods are described in
+[gamedata/README.md](gamedata/README.md).
 
 ## The level package format
 

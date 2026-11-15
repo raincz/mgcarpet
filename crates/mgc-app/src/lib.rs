@@ -18,6 +18,7 @@ mod entities;
 mod film;
 mod frontend;
 mod frontend_mc1;
+mod launcher_data;
 mod launcher_screen;
 mod lobby;
 mod lobby_mc1;
@@ -9529,6 +9530,13 @@ impl ApplicationHandler for App {
                     MouseScrollDelta::LineDelta(_, y) => -y,
                     MouseScrollDelta::PixelDelta(p) => -(p.y as f32) / 30.0,
                 };
+                // …and so does the launcher's file browser.
+                if self.screen == Screen::Launcher {
+                    if let Some(l) = &mut self.launcher {
+                        l.scroll(rows);
+                    }
+                    return;
+                }
                 let size = self.view_size();
                 let assets = match &self.session {
                     Some(sess) => sess.level.ui.as_ref(),

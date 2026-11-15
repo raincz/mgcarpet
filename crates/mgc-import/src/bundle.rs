@@ -624,7 +624,10 @@ pub fn bake_mc2_audio(
         return Ok(Vec::new());
     };
     let image = image.to_path_buf();
-    let cue_path = image.with_extension("ins");
+    // GOG's `game.ins`, or a retail dump's own `.cue`.
+    let cue_path = src
+        .cue_sheet()
+        .unwrap_or_else(|| image.with_extension("ins"));
     // A missing cue sheet loses ONLY the redbook voiceover rip —
     // sounds.bin and the music renders still bake.
     let cue = match std::fs::read_to_string(&cue_path) {

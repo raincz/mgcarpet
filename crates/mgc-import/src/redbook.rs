@@ -44,9 +44,15 @@ pub fn parse_cue(cue: &str, image_sectors: u64) -> Result<Vec<AudioTrack>, Strin
                 current = (kind == "AUDIO").then_some(number);
             }
             Some("INDEX") => {
-                let idx = words.next().ok_or("INDEX without number")?;
+                // The index number is numeric: GOG's `game.ins` writes
+                // `INDEX 01`, a retail CloneCD `.cue` writes `INDEX 1`.
+                let idx: u32 = words
+                    .next()
+                    .ok_or("INDEX without number")?
+                    .parse()
+                    .map_err(|_| "bad INDEX number")?;
                 let msf = words.next().ok_or("INDEX without MSF")?;
-                if idx == "00" {
+                if idx == 0 {
                     // A pregap start: the PREVIOUS track's audio ends
                     // HERE, not at the next INDEX 01 — otherwise the
                     // ~2 s pregap leaks into its tail. The GOG sheet
@@ -60,7 +66,7 @@ pub fn parse_cue(cue: &str, image_sectors: u64) -> Result<Vec<AudioTrack>, Strin
                     }
                     continue;
                 }
-                if idx != "01" {
+                if idx != 1 {
                     continue;
                 }
                 let sector = msf_to_sector(msf)?;
@@ -297,6 +303,19 @@ mod tests {
         assert_eq!(tracks[0].start_sector, (18 * 60 + 57) * 75 + 63);
         assert_eq!(tracks[0].end_sector, (19 * 60 + 48) * 75 + 68);
         assert_eq!(tracks[1].end_sector, 100_000);
+    }
+
+    /// A retail CloneCD `.cue`: unpadded index numbers (`INDEX 1`) and
+    /// the pregap STORED in the file (`INDEX 0`), which ends the
+    /// previous track and is skipped by the next.
+    #[test]
+    fn parses_a_retail_clonecd_cue() {
+        let cue = "FILE \"Magic Carpet 2.img\" BINARY\n   TRACK 1 MODE1/2352\n   INDEX 1 00:00:00\n   TRACK 2 AUDIO\n   INDEX 0 18:57:63\n   INDEX 1 18:59:63\n   TRACK 3 AUDIO\n   INDEX 1 19:50:68\n";
+        let tracks = parse_cue(cue, 100_000).unwrap();
+        assert_eq!(tracks.len(), 2);
+        assert_eq!(tracks[0].number, 2);
+        assert_eq!(tracks[0].start_sector, (18 * 60 + 59) * 75 + 63);
+        assert_eq!(tracks[0].end_sector, (19 * 60 + 50) * 75 + 68);
     }
 
     #[test]

@@ -3,6 +3,12 @@
 The engine requires original game data from legally owned copies. Nothing
 in this directory except this README is ever committed to git.
 
+> **You normally don't need anything on this page.** Run `mgcarpet` and
+> use the launcher's **Game data** dialog: it takes a GOG installer, an
+> installed GOG folder or a CD image, and puts what it needs here by
+> itself. What follows is the reference — the layout it produces,
+> placing files by hand, the command-line importer, and community mods.
+
 Expected layout: **1:1 copies of the GOG install directories**, kept
 exactly as the installer laid them down (cruft, DOSBox, manuals and all —
 that makes them trivially reproducible for anyone who owns the games),
@@ -18,6 +24,38 @@ gamedata/
 │   └── GAME/NETHERW/          (hard-disk portion)
 └── overlay/              ← OPTIONAL: community mods (may be a git clone)
 ```
+
+**Retail CD dumps (MC2 so far).** A directory holding a cue sheet
+(`.cue`) and the raw image it names — CloneCD's `.img`/`.cue` (the
+`.ccd`/`.sub` sidecars may sit beside them and are ignored), or
+`.bin`/`.cue` — is an MC2 source on its own. The CD carries the whole
+game. Canonical home: its own folder, e.g. `gamedata/Magic Carpet 2 CD/`.
+
+**Adding data without installing anything:** `mgc-import add gamedata
+<path>` takes a GOG install folder, a GOG offline installer (`.exe`,
+unpacked with [innoextract](https://constexpr.org/innoextract/) — no
+Wine), or a CD dump (its folder, `.cue` or image). It identifies the
+source by content, copies (or extracts) it into its canonical home,
+slimmed to what the importer reads, checks the copy reads back, and
+only then moves it into place:
+
+| Source | Canonical home |
+|---|---|
+| GOG install / installer, MC1 + Hidden Worlds | `gamedata/Magic Carpet Plus/` |
+| GOG install / installer, MC2 | `gamedata/Magic Carpet 2/` |
+| the installer itself (kept for re-extraction) | `gamedata/GOG-MagicCarpet1Plus.exe`, `gamedata/GOG-MagicCarpet2.exe` |
+| retail CD dump, MC2 | `gamedata/Magic Carpet 2 CD/` |
+
+An occupied home is never overwritten without `--replace`. `mgc-import
+sources gamedata` lists everything found, per game, and which source
+the bake uses. Placing files by hand works just as well: detection is
+by content, and GOG's own installer names are fine too.
+
+**Pecking order** when one game has several sources: the GOG install,
+then a retail CD dump, then the legacy layouts below. So a CD dump
+dropped beside an existing GOG install changes nothing; to bake from
+the dump alone, point the bake at its folder:
+`mgc-import bake "gamedata/Magic Carpet 2 CD" <out>`.
 
 Directory names don't matter — the importer detects layouts by content
 (`mgc_import::gamedata`) and reads game files straight out of the

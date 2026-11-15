@@ -1346,7 +1346,10 @@ pub fn book_quads(
         let mana = loadout.mana;
         let (mx, my) = (cell[0] + 4.0 * sx, cell[1] + 36.0 * sy);
         let partial = (56.0 * (mana % cost) as f32 / cost as f32).floor();
-        quads.push(solid([mx, my, partial * sx, 4.0 * sy], meter_of(MANA_WHITE)));
+        quads.push(solid(
+            [mx, my, partial * sx, 4.0 * sy],
+            meter_of(MANA_WHITE),
+        ));
         meter_dots(
             &mut quads,
             mx,
@@ -1622,10 +1625,18 @@ const PIP_FLOOR: f32 = 0.25;
 /// it reaches [`PIP_FLOOR`] — brown stays brown, just lighter.
 pub(crate) fn hud_pip(c: [f32; 4]) -> [f32; 4] {
     fn enc(c: f32) -> f32 {
-        if c <= 0.003_130_8 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+        if c <= 0.003_130_8 {
+            12.92 * c
+        } else {
+            1.055 * c.powf(1.0 / 2.4) - 0.055
+        }
     }
     fn dec(c: f32) -> f32 {
-        if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        if c <= 0.040_45 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     }
     let lum = |l: [f32; 3]| 0.2126 * l[0] + 0.7152 * l[1] + 0.0722 * l[2];
     let srgb = [enc(c[0]), enc(c[1]), enc(c[2])];
@@ -1647,10 +1658,18 @@ pub(crate) fn hud_pip(c: [f32; 4]) -> [f32; 4] {
 /// than "half".
 pub(crate) fn meter_of(pip: [f32; 4]) -> [f32; 4] {
     fn enc(c: f32) -> f32 {
-        if c <= 0.003_130_8 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+        if c <= 0.003_130_8 {
+            12.92 * c
+        } else {
+            1.055 * c.powf(1.0 / 2.4) - 0.055
+        }
     }
     fn dec(c: f32) -> f32 {
-        if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        if c <= 0.040_45 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
     }
     let f = |c: f32| dec(enc(c.clamp(0.0, 1.0)) * METER_TONE);
     [f(pip[0]), f(pip[1]), f(pip[2]), pip[3]]
@@ -2965,7 +2984,10 @@ pub fn selector_quads(
                 let cost = view.cost[spell].max(1);
                 let frac = (view.mana % cost) as f32 / cost as f32;
                 let (mx, my) = (cell[0] + 6.0 * g.sx, cell[1] + 28.0 * g.sy);
-                quads.push(solid([mx, my, 36.0 * g.sx * frac, 4.0 * g.sy], meter_of(MANA_WHITE)));
+                quads.push(solid(
+                    [mx, my, 36.0 * g.sx * frac, 4.0 * g.sy],
+                    meter_of(MANA_WHITE),
+                ));
                 let casts = ((view.mana / cost) as usize).min(36);
                 for d in 0..casts {
                     let (col, row) = ((d / 2) as f32, (d % 2) as f32);
@@ -3266,10 +3288,18 @@ mod tests {
     fn dark_team_pips_are_lifted_keeping_their_hue() {
         let dec = |b: u8| {
             let c = b as f32 / 255.0;
-            if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+            if c <= 0.040_45 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
         };
         let enc = |c: f32| {
-            if c <= 0.003_130_8 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+            if c <= 0.003_130_8 {
+                12.92 * c
+            } else {
+                1.055 * c.powf(1.0 / 2.4) - 0.055
+            }
         };
         let lum = |c: [f32; 4]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
         let rgb = |r, g, b| [dec(r), dec(g), dec(b), 1.0];
@@ -3278,9 +3308,15 @@ mod tests {
         let p = hud_pip(brown);
         assert!(lum(p) >= PIP_FLOOR - 1e-3, "lifted to the floor");
         let (r, g, b) = (enc(p[0]), enc(p[1]), enc(p[2]));
-        assert!((r / b - 52.0 / 24.0).abs() < 0.05 && (g / b - 40.0 / 24.0).abs() < 0.05, "hue kept");
+        assert!(
+            (r / b - 52.0 / 24.0).abs() < 0.05 && (g / b - 40.0 / 24.0).abs() < 0.05,
+            "hue kept"
+        );
         let shown = (r * 255.0).round();
-        assert!((165.0..=175.0).contains(&shown), "brown pip red channel shows at {shown}");
+        assert!(
+            (165.0..=175.0).contains(&shown),
+            "brown pip red channel shows at {shown}"
+        );
         // MC1 seat 1 (235,138,134) is bright enough: untouched.
         let red = rgb(235, 138, 134);
         assert_eq!(hud_pip(red), red);
@@ -3293,24 +3329,39 @@ mod tests {
     #[test]
     fn the_gauge_is_the_pip_colour_at_half_displayed_brightness() {
         let enc = |c: f32| {
-            if c <= 0.003_130_8 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+            if c <= 0.003_130_8 {
+                12.92 * c
+            } else {
+                1.055 * c.powf(1.0 / 2.4) - 0.055
+            }
         };
         let dec = |c: f32| {
-            if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+            if c <= 0.040_45 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
         };
         let team = [dec(0.2), dec(0.4), dec(0.9), 1.0];
         for pip in [MANA_WHITE, team] {
             let g = meter_of(pip);
             for k in 0..3 {
                 let want = enc(pip[k]) * METER_TONE;
-                assert!((enc(g[k]) - want).abs() < 1e-4, "channel {k}: {} vs {want}", enc(g[k]));
+                assert!(
+                    (enc(g[k]) - want).abs() < 1e-4,
+                    "channel {k}: {} vs {want}",
+                    enc(g[k])
+                );
             }
             assert_eq!(g[3], pip[3], "alpha untouched");
         }
         // The old tuned grey displayed at ~196/255 under ~249: the new
         // gauge lands near the middle of the slab-to-pip range.
         let shown = (enc(meter_of(MANA_WHITE)[0]) * 255.0).round();
-        assert!((120.0..=130.0).contains(&shown), "white pip gauge shows at {shown}");
+        assert!(
+            (120.0..=130.0).contains(&shown),
+            "white pip gauge shows at {shown}"
+        );
     }
 
     /// Cropping must CUT a partial sprite, not squash it: the visible

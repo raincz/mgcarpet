@@ -42,6 +42,10 @@ fn main() -> ExitCode {
             level(Path::new(&args[1]), Path::new(&args[2]), &args[3])
         }
         Some("bake") if args.len() == 3 => bake_cmd(Path::new(&args[1]), Path::new(&args[2])),
+        Some("sources") if args.len() == 2 => sources_cmd(Path::new(&args[1])),
+        Some("add") if args.len() == 3 || (args.len() == 4 && args[3] == "--replace") => {
+            add_cmd(Path::new(&args[1]), Path::new(&args[2]), args.len() == 4)
+        }
         _ => {
             eprintln!("mgc-import — Magic Carpet data importer/baker\n");
             eprintln!("Usage:");
@@ -55,6 +59,13 @@ fn main() -> ExitCode {
             eprintln!("  mgc-import extract <DAT> <TAB> <index> <out>  extract one archive entry");
             eprintln!("  mgc-import level <DAT> <TAB> <index>  inspect an MC1 level");
             eprintln!("  mgc-import bake <gamedata> <out>  bake all levels into .mgcl packages");
+            eprintln!(
+                "  mgc-import sources <gamedata>     list the game data found, in pecking order"
+            );
+            eprintln!(
+                "  mgc-import add <gamedata> <path> [--replace]  import a GOG install,\n\
+                 \x20                                    GOG installer or CD image"
+            );
             ExitCode::from(2)
         }
     }
@@ -234,6 +245,68 @@ fn bake_cmd(gamedata: &Path, out_dir: &Path) -> ExitCode {
             ExitCode::SUCCESS
         }
         Ok(_) => ExitCode::SUCCESS,
+        Err(e) => {
+            eprintln!("error: {e}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn sources_cmd(gamedata: &Path) -> ExitCode {
+    let found = mgc_import::sources::survey(gamedata);
+    if found.is_empty() {
+        println!("no game data found under {}", gamedata.display());
+    }
+    for f in found {
+        let mark = if f.used { "used  " } else { "unused" };
+        println!("{}  {mark}  {}", f.game, f.origin);
+    }
+    ExitCode::SUCCESS
+}
+
+fn add_cmd(gamedata: &Path, path: &Path, replace: bool) -> ExitCode {
+    use mgc_import::sources;
+    let id = match sources::identify(path) {
+        Ok(id) => id,
+        Err(e) => {
+            eprintln!("error: {e}");
+            return ExitCode::FAILURE;
+        }
+    };
+    println!(
+        "{}: {} — {}",
+        path.display(),
+        id.game.title(),
+        id.kind.label()
+    );
+    for n in &id.notes {
+        println!("note: {n}");
+    }
+    let cancel = std::sync::atomic::AtomicBool::new(false);
+    let mut last = (String::new(), u64::MAX);
+    let mut show = |p: &sources::Progress| {
+        let pct = (p.done * 100).checked_div(p.total).unwrap_or(0);
+        if p.stage != last.0 || pct / 10 != last.1 / 10 {
+            if p.total > 0 {
+                eprintln!("{} {pct}%", p.stage);
+            } else {
+                eprintln!("{}", p.stage);
+            }
+            last = (p.stage.clone(), pct);
+        }
+    };
+    match sources::import(&id, gamedata, replace, &cancel, &mut show) {
+        Ok(dest) => {
+            println!("imported into {}", dest.display());
+            ExitCode::SUCCESS
+        }
+        Err(sources::ImportError::Exists(p)) => {
+            eprintln!(
+                "error: {} already exists — pass --replace to overwrite it",
+                p.display()
+            );
+            ExitCode::FAILURE
+        }
         Err(e) => {
             eprintln!("error: {e}");
             ExitCode::FAILURE

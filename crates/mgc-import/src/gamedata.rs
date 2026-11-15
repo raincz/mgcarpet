@@ -54,6 +54,10 @@ pub struct GameSource {
     /// Where this source was found, for logs and error messages.
     pub origin: String,
     layers: Vec<Layer>,
+    /// The cue sheet describing the CD image's tracks, when it is not
+    /// the GOG convention (`game.ins` beside `game.gog`) — a retail
+    /// CD dump's `.cue`. See [`GameSource::cue_sheet`].
+    cue: Option<PathBuf>,
 }
 
 impl GameSource {
@@ -99,6 +103,15 @@ impl GameSource {
             Layer::Iso { image, .. } => Some(image.image_path()),
             Layer::Dir { .. } => None,
         })
+    }
+
+    /// Path of the cue sheet for [`Self::cd_image`]'s track layout: a
+    /// retail dump's own `.cue`, else GOG's `game.ins` beside the
+    /// image. May not exist on disk (the audio bake notes and skips).
+    pub fn cue_sheet(&self) -> Option<PathBuf> {
+        self.cue
+            .clone()
+            .or_else(|| self.cd_image().map(|i| i.with_extension("ins")))
     }
 
     /// Union of canonical paths across all layers, sorted, deduplicated.
@@ -223,7 +236,8 @@ impl Gamedata {
             dirs.extend(children);
         }
 
-        let (mut mc1_gog, mut mc1_flat, mut mc2_gog, mut mc2_hd) = (None, None, None, None);
+        let (mut mc1_gog, mut mc1_flat, mut mc2_gog, mut mc2_cd, mut mc2_hd) =
+            (None, None, None, None, None);
         for dir in &dirs {
             if mc1_gog.is_none() {
                 mc1_gog = mc1_gog_install(dir);
@@ -234,13 +248,18 @@ impl Gamedata {
             if mc2_gog.is_none() {
                 mc2_gog = mc2_gog_install(dir);
             }
+            if mc2_cd.is_none() {
+                mc2_cd = mc2_cd_image(dir);
+            }
             if mc2_hd.is_none() {
                 mc2_hd = mc2_hd_only(dir);
             }
         }
         Gamedata {
             mc1: mc1_gog.or(mc1_flat),
-            mc2: mc2_gog.or(mc2_hd),
+            // The pecking order: the GOG install, then a retail CD
+            // dump, then the legacy hard-disk-only copy.
+            mc2: mc2_gog.or(mc2_cd).or(mc2_hd),
         }
     }
 }
@@ -256,7 +275,7 @@ fn origin(dir: &Path, kind: &str) -> String {
 /// GOG "Magic Carpet Plus": install runs from `CARPET.CD/game.gog`
 /// (cooked ISO, game tree under `CARPET/`), with `CARPET.CD/` itself
 /// holding the installed overlay.
-fn mc1_gog_install(dir: &Path) -> Option<GameSource> {
+pub(crate) fn mc1_gog_install(dir: &Path) -> Option<GameSource> {
     let overlay = dir.join("CARPET.CD");
     let image = IsoImage::open(&overlay.join("game.gog")).ok()?;
     image
@@ -273,13 +292,14 @@ fn mc1_gog_install(dir: &Path) -> Option<GameSource> {
                     prefix: "CARPET",
                 },
             ],
+            cue: None,
         })
 }
 
 /// Legacy fully-installed MC1 tree (old GOG release): game files flat
 /// on disk. `DTABLES.DAT` is MC1-only, so it doubles as the marker
 /// distinguishing this from other DATA/LEVELS-shaped trees.
-fn mc1_flat_dir(dir: &Path) -> Option<GameSource> {
+pub(crate) fn mc1_flat_dir(dir: &Path) -> Option<GameSource> {
     (dir.join("DATA/DTABLES.DAT").is_file() && dir.join("LEVELS/LEVELS.DAT").is_file()).then(|| {
         GameSource {
             origin: origin(dir, "flat install"),
@@ -287,13 +307,14 @@ fn mc1_flat_dir(dir: &Path) -> Option<GameSource> {
                 root: dir.to_path_buf(),
                 aliases: &[],
             }],
+            cue: None,
         }
     })
 }
 
 /// GOG "Magic Carpet 2": raw-sector CD image at the install root (game
 /// tree at the image root), hard-disk portion under `GAME/NETHERW/`.
-fn mc2_gog_install(dir: &Path) -> Option<GameSource> {
+pub(crate) fn mc2_gog_install(dir: &Path) -> Option<GameSource> {
     let netherw = dir.join("GAME/NETHERW");
     if !netherw.is_dir() {
         return None;
@@ -308,12 +329,58 @@ fn mc2_gog_install(dir: &Path) -> Option<GameSource> {
             },
             Layer::Iso { image, prefix: "" },
         ],
+        cue: None,
+    })
+}
+
+/// A retail MC2 CD dump: a directory holding a cue sheet (`.cue`)
+/// whose single `FILE` is a raw-sector (or cooked) image with the
+/// game tree at its root — CloneCD's `.img`/`.cue`, or `.bin`/`.cue`.
+/// The CD alone carries the whole game (GOG's `GAME/NETHERW` hard-disk
+/// files are byte-identical copies of CD files). MC1's CD keeps its
+/// tree under `CARPET/`, so the root `LEVELS/LEVELS.DAT` marker cannot
+/// mistake it. The first cue sheet in name order that qualifies wins.
+pub(crate) fn mc2_cd_image(dir: &Path) -> Option<GameSource> {
+    let mut cues: Vec<PathBuf> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.is_file() && p.extension().is_some_and(|x| x.eq_ignore_ascii_case("cue")))
+        .collect();
+    cues.sort();
+    cues.into_iter().find_map(|cue| mc2_cd_from_cue(&cue))
+}
+
+/// One cue sheet as an MC2 CD source: the image its `FILE` names
+/// (beside the sheet) must hold the MC2 tree at its root.
+pub(crate) fn mc2_cd_from_cue(cue: &Path) -> Option<GameSource> {
+    let dir = cue.parent()?;
+    let text = std::fs::read_to_string(cue).ok()?;
+    let image = dir.join(cue_image_name(&text)?);
+    let image = IsoImage::open(&image).ok()?;
+    image.contains("LEVELS/LEVELS.DAT").then(|| GameSource {
+        origin: origin(dir, "retail CD image"),
+        layers: vec![Layer::Iso { image, prefix: "" }],
+        cue: Some(cue.to_path_buf()),
+    })
+}
+
+/// The image file a single-FILE cue sheet names: `FILE "name" BINARY`
+/// (quoted, or a bare token).
+pub(crate) fn cue_image_name(cue: &str) -> Option<String> {
+    cue.lines().find_map(|l| {
+        let rest = l.trim_start().strip_prefix("FILE")?.trim_start();
+        if let Some(q) = rest.strip_prefix('"') {
+            q.split('"').next().map(str::to_owned)
+        } else {
+            rest.split_whitespace().next().map(str::to_owned)
+        }
     })
 }
 
 /// MC2 hard-disk tree without a CD image (the legacy copy): only the
 /// installed `CDATA`/`CLEVELS` subset is available.
-fn mc2_hd_only(dir: &Path) -> Option<GameSource> {
+pub(crate) fn mc2_hd_only(dir: &Path) -> Option<GameSource> {
     let netherw = dir.join("GAME/NETHERW");
     (netherw.join("CLEVELS/LEVELS.DAT").is_file() && !dir.join("game.gog").is_file()).then(|| {
         GameSource {
@@ -322,6 +389,55 @@ fn mc2_hd_only(dir: &Path) -> Option<GameSource> {
                 root: netherw,
                 aliases: &MC2_HD_ALIASES,
             }],
+            cue: None,
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::cue_image_name;
+
+    #[test]
+    fn cue_names_its_image() {
+        let retail = "FILE \"Magic Carpet 2.img\" BINARY\n   TRACK 1 MODE1/2352\n";
+        assert_eq!(
+            cue_image_name(retail).as_deref(),
+            Some("Magic Carpet 2.img")
+        );
+        assert_eq!(
+            cue_image_name("FILE game.bin BINARY\n").as_deref(),
+            Some("game.bin")
+        );
+        assert_eq!(cue_image_name("TRACK 1 AUDIO\n"), None);
+    }
+
+    /// The pecking order on the real data, self-skipping per missing
+    /// source: a retail CD dump is found on its own (with its `.cue`
+    /// as the cue sheet), and beside a GOG install the GOG install
+    /// still wins — existing setups are untouched.
+    #[test]
+    fn mc2_cd_dump_is_found_and_gog_still_wins() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gamedata");
+        let cd_dir = root.join("netherworlds-cd");
+        if !cd_dir.is_dir() {
+            eprintln!("skip: no gamedata/netherworlds-cd");
+            return;
+        }
+        let cd = super::Gamedata::locate(&cd_dir)
+            .mc2
+            .expect("the CD dump is an MC2 source");
+        assert!(cd.origin.contains("retail CD image"), "{}", cd.origin);
+        let cue = cd.cue_sheet().expect("cue sheet");
+        assert_eq!(cue.extension().and_then(|x| x.to_str()), Some("cue"));
+        assert!(cd.exists("LEVELS/LEVELS.DAT") && cd.exists("SOUND/SOUND.DAT"));
+        if root.join("Magic Carpet 2/game.gog").is_file() {
+            let all = super::Gamedata::locate(&root).mc2.expect("mc2");
+            assert!(
+                all.origin.contains("GOG install"),
+                "GOG must win: {}",
+                all.origin
+            );
+        }
+    }
 }
