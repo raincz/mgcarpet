@@ -2443,15 +2443,18 @@ impl Gen {
         yaw: u16,
         pitch: u16,
         set: AimPreviewSet,
+        yaw_cone: u32,
     ) -> Option<u16> {
         let own = self.human_tag[hx].0;
         let mut best: Option<(u16, u32)> = None;
         // sub_54A90's measurement, mirroring the live consider: yaw
-        // wedge, pitch wedge, 2-D ground range, weighted score.
+        // wedge (`yaw_cone` — 0x71 on every arm but Hidden Worlds'
+        // homing meteor, 0x100), pitch wedge, 2-D ground range,
+        // weighted score.
         let mut consider = |tx: u16, ty: u16, tz: i16, slot: u16| {
             let ty_yaw = Self::angle_between(px, py, tx, ty);
             let dy = Self::angdist(yaw, ty_yaw) as u32;
-            if dy > 0x71 {
+            if dy > yaw_cone {
                 return;
             }
             let dist = Self::isqrt(Self::dist2_sq(px, py, tx, ty) as u32) as i32;

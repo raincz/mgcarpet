@@ -41,10 +41,12 @@ pub enum AutofireHand {
     Ready,
 }
 
-/// MC1 / Hidden Worlds: Fireball, Possess, Meteor, Duel, Steal Mana.
-/// HW adds 20, its homing meteor (base MC1's 20 is the Wall of Fire).
-fn mc1_listed(game: GameId, id: usize) -> bool {
-    matches!(id, 0 | 3 | 7 | 11 | 13) || (id == 20 && game == GameId::Mc1Hw)
+/// MC1 / Hidden Worlds: Fireball, Possess, Meteor, Duel, Steal Mana,
+/// and spell 20 — HW's homing meteor, and base MC1's Wall of Fire
+/// (player ruling 2026-11-15: it launches a click-only bolt like the
+/// rest, so it gets the slow held-button repeat too).
+fn mc1_listed(id: usize) -> bool {
+    matches!(id, 0 | 3 | 7 | 11 | 13 | 20)
 }
 
 /// MC2: Fireball, Possession, Meteor, Steal Mana, Duel, Alliance —
@@ -80,7 +82,7 @@ impl World {
         let Some(id) = hand.map(|s| s.0 as usize) else {
             return AutofireHand::Manual;
         };
-        if !mc1_listed(self.game, id) || self.players[hx].owned.get(id).is_none_or(|&m| m == 0) {
+        if !mc1_listed(id) || self.players[hx].owned.get(id).is_none_or(|&m| m == 0) {
             return AutofireHand::Manual;
         }
         if halted {
@@ -196,7 +198,8 @@ mod tests {
     fn mc1_lists_the_click_projectiles_only() {
         let mut w = mc1_world(GameId::Mc1);
         for id in 0..24u8 {
-            let want = if matches!(id, 0 | 3 | 7 | 11 | 13) {
+            // 20 = Wall of Fire (player ruling 2026-11-15).
+            let want = if matches!(id, 0 | 3 | 7 | 11 | 13 | 20) {
                 AutofireHand::Ready
             } else {
                 AutofireHand::Manual

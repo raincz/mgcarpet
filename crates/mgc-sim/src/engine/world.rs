@@ -19982,12 +19982,20 @@ impl World {
                 self.players[hx].left?.0
             } as usize;
             use crate::mc1::combat::AimPreviewSet as Set;
-            let set = match spell {
+            let hw = self.game == GameId::Mc1Hw;
+            let (set, yaw_cone) = match spell {
                 // Fireball, meteor, volcano, lightning, rapid fireball.
-                0 | 7 | 8 | 15 | 23 => Set::Creatures,
-                3 => Set::Possess,
+                0 | 7 | 8 | 15 | 23 => (Set::Creatures, 0x71),
+                // Spell 20's m16 bolt acquires in BOTH games (see
+                // `proj_firewall_tick`): base MC1's Wall of Fire on the
+                // shared 0x71 arm (CARPET.EXE 0x544CC[0x10] = 0x54682),
+                // Hidden Worlds' HOMING METEOR on its own arm with the
+                // yaw cone widened to 0x100 (HIDDEN.EXE 0x54BB0,
+                // remc1hw :60322). Same creature list.
+                20 => (Set::Creatures, if hw { 0x100 } else { 0x71 }),
+                3 => (Set::Possess, 0x71),
                 // Duel, steal, undead army.
-                11 | 13 | 17 => Set::Wizards,
+                11 | 13 | 17 => (Set::Wizards, 0x71),
                 _ => return None,
             };
             // The down-arc launch bias (cast_projectile): the
@@ -20000,7 +20008,7 @@ impl World {
             let (mx, my, mz) = self.muzzle(p, right);
             let slot = self
                 .g
-                .aim_preview_scan(hx, mx, my, mz, p.heading, pitch, set)?;
+                .aim_preview_scan(hx, mx, my, mz, p.heading, pitch, set, yaw_cone)?;
             let e = &self.g.ent[slot as usize];
             // The acquire aims at the +78 half-height point — except
             // castles (sub_524C0's model-2 guard aims at the flag).
@@ -45656,6 +45664,34 @@ mod tests {
         for k in 0..8u16 {
             assert!(w.aim_preview(Hx::FIRST, pose(k * 256))[1].is_none());
         }
+    }
+
+    /// Spell 20's autoaim hint follows its m16 bolt's real acquire
+    /// cone over the creature list: base MC1's Wall of Fire on the
+    /// shared ±0x71 arm, Hidden Worlds' HOMING METEOR on its own ±0x100
+    /// (HIDDEN.EXE 0x54BB0). Neither had a hint before (player-reported
+    /// 2026-11-15).
+    #[test]
+    fn aim_preview_covers_the_homing_meteor_cone() {
+        let mut w = bare_creature_world(2);
+        w.grant_spells(Hx::FIRST, &[20, 3]);
+        let alt = w.g.ent[1].z;
+        let pose = move |heading: u16| PlayerPose::level(108 << 8, 110 << 8, alt, heading);
+        for _ in 0..5 {
+            w.tick(pose(0), PlayerCommand::default());
+        }
+        w.players[Hx::FIRST].left = Some(SpellId(20));
+        let locks = |w: &World| {
+            (0..64u16)
+                .filter(|&k| w.aim_preview(Hx::FIRST, pose(k * 32))[0].is_some())
+                .count()
+        };
+        // ±0x71 over 32-unit steps is ~7 headings; ±0x100 is ~16.
+        let base = locks(&w);
+        assert!((6..=8).contains(&base), "wall of fire cone: {base} headings lock");
+        w.game = GameId::Mc1Hw;
+        let hw = locks(&w);
+        assert!((14..=18).contains(&hw), "homing meteor cone: {hw} headings lock");
     }
 
     /// The barrel roll's homing-lock break (`sub_55EB0`, file
