@@ -1346,7 +1346,7 @@ pub fn book_quads(
         let mana = loadout.mana;
         let (mx, my) = (cell[0] + 4.0 * sx, cell[1] + 36.0 * sy);
         let partial = (56.0 * (mana % cost) as f32 / cost as f32).floor();
-        quads.push(solid([mx, my, partial * sx, 4.0 * sy], METER_GREY));
+        quads.push(solid([mx, my, partial * sx, 4.0 * sy], meter_of(MANA_WHITE)));
         meter_dots(
             &mut quads,
             mx,
@@ -1600,10 +1600,30 @@ const LIFE_RED: [f32; 4] = [0.85, 0.15, 0.12, 1.0];
 /// byte_99B58[2*owner]) — WHITE, not blue, for seat 0 (other seats
 /// draw their own team pair, see `hud_quads`).
 const MANA_WHITE: [f32; 4] = [0.95, 0.95, 0.95, 1.0];
-/// Spell availability progress bar (sub_23D40 :27705, color v26 =
-/// byte_99B58[1+2*owner]) — GREY, not blue; the partial mana toward
-/// the next cast, under the equipped-spell icon.
-const METER_GREY: [f32; 4] = [0.55, 0.55, 0.55, 1.0];
+/// The GAUGE under the pips (the spell meter's partial-cast bar, the
+/// panels' mana-capacity bars) as a fraction of the pip colour's
+/// DISPLAYED brightness — the pip's own hue, half-way to the black
+/// slab. Retail draws a separate palette grey (`byte_99B58[1+2·owner]`
+/// in MC1, e.g. seat 0 (154,142,162) under (227,227,235)), and the
+/// port's old hand-tuned linear 0.55 displayed at 196/255 under pips
+/// at 249 — the two were hard to tell apart (player-ruled 2026-11-15:
+/// recalibrate in both games, every seat and environment).
+const METER_TONE: f32 = 0.5;
+
+/// The gauge colour for a pip colour: [`METER_TONE`] of its displayed
+/// (sRGB-encoded) value, decoded back to the linear tint the UI pass
+/// writes. Scaling in linear light instead would read far brighter
+/// than "half".
+pub(crate) fn meter_of(pip: [f32; 4]) -> [f32; 4] {
+    fn enc(c: f32) -> f32 {
+        if c <= 0.003_130_8 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+    }
+    fn dec(c: f32) -> f32 {
+        if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+    }
+    let f = |c: f32| dec(enc(c.clamp(0.0, 1.0)) * METER_TONE);
+    [f(pip[0]), f(pip[1]), f(pip[2]), pip[3]]
+}
 /// The flyout XP bar (EF:22668-70): background = CLRD code 0,
 /// fill = CLRD 3840 (0xF00 — pure red).
 const XP_BAR_BG: [f32; 4] = [0.0, 0.0, 0.0, 1.0];
@@ -1774,8 +1794,10 @@ pub fn hud_quads(
     // banked, cargo, ticks, dots) and `[1 + 2·owner]` (capacity, the
     // spell meter) — the HUMAN's team pair (`team`, resolved through
     // the level palette by the caller). Seat 0 keeps the tuned
-    // white/grey (`None`).
-    let (mana_c, meter_c) = team.unwrap_or((MANA_WHITE, METER_GREY));
+    // white (`None`). The gauge colour is NOT retail's odd member of
+    // the pair: it is the pip colour at [`METER_TONE`] (see there).
+    let mana_c = team.map_or(MANA_WHITE, |t| t.0);
+    let meter_c = meter_of(mana_c);
     // The strip splits into two anchored groups (see `HudFrame`): the
     // radar + three wizard sub-panels are LEFT-anchored — they already
     // read as `native * s` from x=0, so nothing below changes — and the
@@ -2912,7 +2934,7 @@ pub fn selector_quads(
                 let cost = view.cost[spell].max(1);
                 let frac = (view.mana % cost) as f32 / cost as f32;
                 let (mx, my) = (cell[0] + 6.0 * g.sx, cell[1] + 28.0 * g.sy);
-                quads.push(solid([mx, my, 36.0 * g.sx * frac, 4.0 * g.sy], METER_GREY));
+                quads.push(solid([mx, my, 36.0 * g.sx * frac, 4.0 * g.sy], meter_of(MANA_WHITE)));
                 let casts = ((view.mana / cost) as usize).min(36);
                 for d in 0..casts {
                     let (col, row) = ((d / 2) as f32, (d % 2) as f32);
@@ -3034,7 +3056,7 @@ pub fn selector_quads(
                         (cell[2] - 6.0 * g.sx) * frac,
                         2.0 * g.sy,
                     ],
-                    METER_GREY,
+                    meter_of(MANA_WHITE),
                 ));
             }
         }
@@ -3204,6 +3226,35 @@ mod marker_halo_tests {
 
 #[cfg(test)]
 mod tests {
+    use super::{MANA_WHITE, METER_TONE, meter_of};
+
+    /// The gauge under the pips sits half-way between the pip and the
+    /// black slab IN DISPLAYED BRIGHTNESS, in the pip's own hue — for
+    /// the seat-0 white and for a team colour alike (player ruling
+    /// 2026-11-15).
+    #[test]
+    fn the_gauge_is_the_pip_colour_at_half_displayed_brightness() {
+        let enc = |c: f32| {
+            if c <= 0.003_130_8 { 12.92 * c } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 }
+        };
+        let dec = |c: f32| {
+            if c <= 0.040_45 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        };
+        let team = [dec(0.2), dec(0.4), dec(0.9), 1.0];
+        for pip in [MANA_WHITE, team] {
+            let g = meter_of(pip);
+            for k in 0..3 {
+                let want = enc(pip[k]) * METER_TONE;
+                assert!((enc(g[k]) - want).abs() < 1e-4, "channel {k}: {} vs {want}", enc(g[k]));
+            }
+            assert_eq!(g[3], pip[3], "alpha untouched");
+        }
+        // The old tuned grey displayed at ~196/255 under ~249: the new
+        // gauge lands near the middle of the slab-to-pip range.
+        let shown = (enc(meter_of(MANA_WHITE)[0]) * 255.0).round();
+        assert!((120.0..=130.0).contains(&shown), "white pip gauge shows at {shown}");
+    }
+
     /// Cropping must CUT a partial sprite, not squash it: the visible
     /// part keeps its scale and the uv window follows the rect, so the
     /// texels shown are exactly the ones inside the viewport.
