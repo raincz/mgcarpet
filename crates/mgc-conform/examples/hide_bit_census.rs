@@ -27,20 +27,28 @@ fn main() {
             }
             let Some(state) = &tick.state else { continue };
             let mut add = |c: u8, m: u8, f: u32, st: u8| {
-                let st = if c == 5 || (c == 10 && m == 45) { st } else { 0 };
+                let st = if c == 5 || (c == 10 && m == 45) {
+                    st
+                } else {
+                    0
+                };
                 let t = tally.entry((mc2, c, m, st)).or_default();
                 t.0 += 1;
                 t.1 += (f & 1) as u64;
             };
             if mc2 {
-                let Ok(st) = mgc_formats::mgcr::decode_retail_mc2(state) else { continue };
+                let Ok(st) = mgc_formats::mgcr::decode_retail_mc2(state) else {
+                    continue;
+                };
                 for e in &st.ents {
                     if e.class3f != 0 {
                         add(e.class3f, e.model40, e.flags, e.action45);
                     }
                 }
             } else {
-                let Ok(st) = mgc_formats::mgcr::decode_retail_mc1(state) else { continue };
+                let Ok(st) = mgc_formats::mgcr::decode_retail_mc1(state) else {
+                    continue;
+                };
                 for e in &st.ents {
                     if e.class64 != 0 {
                         add(e.class64, e.model65, e.flags, e.f70);

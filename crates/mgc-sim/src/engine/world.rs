@@ -45688,10 +45688,16 @@ mod tests {
         };
         // ±0x71 over 32-unit steps is ~7 headings; ±0x100 is ~16.
         let base = locks(&w);
-        assert!((6..=8).contains(&base), "wall of fire cone: {base} headings lock");
+        assert!(
+            (6..=8).contains(&base),
+            "wall of fire cone: {base} headings lock"
+        );
         w.game = GameId::Mc1Hw;
         let hw = locks(&w);
-        assert!((14..=18).contains(&hw), "homing meteor cone: {hw} headings lock");
+        assert!(
+            (14..=18).contains(&hw),
+            "homing meteor cone: {hw} headings lock"
+        );
     }
 
     /// The barrel roll's homing-lock break (`sub_55EB0`, file
@@ -47823,7 +47829,9 @@ mod tests {
     fn fools_mana_shows_its_owner_only_to_its_caster() {
         let mut w = mc2_flat_world();
         let me = w.g.human_tag[Hx::FIRST].0;
-        let s = w.g.mc2_spawn_mana_sphere(57, 100 << 8, 100 << 8, 100).expect("sphere");
+        let s =
+            w.g.mc2_spawn_mana_sphere(57, 100 << 8, 100 << 8, 100)
+                .expect("sphere");
         let team = |w: &World| {
             w.live_poses(Hx::FIRST)
                 .into_iter()
@@ -55387,7 +55395,11 @@ mod tests {
             1,
             "unpossessed member carried raw"
         );
-        assert_eq!(w.mc2_book[Hx::FIRST].sel, sel, "tiers untouched by the carry");
+        assert_eq!(
+            w.mc2_book[Hx::FIRST].sel,
+            sel,
+            "tiers untouched by the carry"
+        );
         assert_eq!(
             (w.mc2_book[Hx::FIRST].left, w.mc2_book[Hx::FIRST].right),
             (left, right),
@@ -59664,7 +59676,10 @@ mod tests {
         let (mx, my) = ((40u16 << 8) | 128, (160u16 << 8) | 128);
         let mz = w.g.ground_z(mx, my) as i16;
         let miss = w.g.spawn_effect(23, mx, my, mz).expect("miss blast");
-        assert!(fire_of(&w, hit).is_none(), "no burst before the blast resolves");
+        assert!(
+            fire_of(&w, hit).is_none(),
+            "no burst before the blast resolves"
+        );
         w.tick(away(), PlayerCommand::default());
         assert!(fire_of(&w, hit).is_some(), "a blast that struck burns");
         assert!(fire_of(&w, miss).is_none(), "a miss never burns");
