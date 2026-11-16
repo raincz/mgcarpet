@@ -41,7 +41,7 @@ x11rb = "0.13"
 # path recovers campaign progress from a container this build cannot
 # apply. Nothing in the binary writes ZIPs — `mgc-formats` owns that.
 [dev-dependencies]
-zip = { version = "2", default-features = false }
+zip = { version = "9", default-features = false }
 
 [[bin]]
 name = "mgcarpet"

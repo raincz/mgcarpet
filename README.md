@@ -219,7 +219,7 @@ cargo build --workspace
 cargo test --workspace
 ```
 
-Rust 1.85+ (edition 2024). Linux needs the ALSA headers for audio
+Rust 1.88+ (edition 2024). Linux needs the ALSA headers for audio
 (`libasound2-dev` on Debian/Ubuntu, `alsa-lib` headers elsewhere);
 Windows and macOS need no system dependencies.
 

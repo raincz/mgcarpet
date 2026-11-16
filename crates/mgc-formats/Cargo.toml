@@ -17,7 +17,7 @@ serde_json = { version = "1", features = ["raw_value"] }
 # so identical content keeps producing identical bytes. A save payload
 # is ~570 KiB of mostly-repetitive terrain and pool, and has no
 # committed-hash pinning requirement to preserve.
-zip = { version = "2", default-features = false, features = ["deflate"] }
+zip = { version = "9", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 zstd = "0.13"
 
 [lints]

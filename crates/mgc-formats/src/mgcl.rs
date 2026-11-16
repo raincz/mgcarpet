@@ -332,7 +332,7 @@ mod tests {
                 file.compression(),
                 CompressionMethod::Stored,
                 "member {} is compressed",
-                file.name()
+                file.name().unwrap_or_default()
             );
         }
     }
