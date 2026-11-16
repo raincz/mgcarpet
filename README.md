@@ -69,12 +69,8 @@ and playable.
    pick it:
 
    * **GOG installer** — the `setup_magic_carpet_….exe` you downloaded
-     from GOG. Nothing needs installing first, and no Wine: it is
-     unpacked with the [innoextract](https://constexpr.org/innoextract/)
-     tool, which every Linux distribution packages (macOS: `brew install
-     innoextract`). The dialog tells you if it's missing. On Windows,
-     the simplest is to run the installer as usual and pick the
-     installed folder instead.
+     from GOG. Nothing needs installing first: the launcher unpacks it
+     by itself, on every system (no Wine, no extra tools).
    * **Installed GOG game** — the folder GOG's installer put the game
      in (it contains `game.gog` for Magic Carpet 2, or a `CARPET.CD`
      folder for Magic Carpet Plus).

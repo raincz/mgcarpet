@@ -33,8 +33,8 @@ game. Canonical home: its own folder, e.g. `gamedata/Magic Carpet 2 CD/`.
 
 **Adding data without installing anything:** `mgc-import add gamedata
 <path>` takes a GOG install folder, a GOG offline installer (`.exe`,
-unpacked with [innoextract](https://constexpr.org/innoextract/) — no
-Wine), or a CD dump (its folder, `.cue` or image). It identifies the
+unpacked in process — no Wine, no extra tools), or a CD dump (its
+folder, `.cue` or image). It identifies the
 source by content, copies (or extracts) it into its canonical home,
 slimmed to what the importer reads, checks the copy reads back, and
 only then moves it into place:
@@ -64,11 +64,10 @@ disk. The legacy fully-installed flat layouts (`mc1/` with `DATA/` +
 `LEVELS/` on disk, `mc2/GAME/NETHERW/` without a CD image) are still
 recognized; GOG installs win when both are present.
 
-To obtain the installs: run the GOG installer (Windows, or Wine on
-Linux) and copy the resulting directory here — or skip Wine entirely
-with [innoextract](https://constexpr.org/innoextract/), which unpacks
-GOG's Inno Setup installers directly on Linux and yields this same
-layout.
+To obtain the installs: let the launcher (or `mgc-import add`) unpack
+the GOG installer — or run the installer yourself (Windows, or Wine on
+Linux) and copy the resulting directory here; the importer recognizes
+both.
 
 **Any subset is fine.** Each game (MC1, Hidden Worlds, MC2) is detected
 independently: `bake` processes whatever is present and skips the rest

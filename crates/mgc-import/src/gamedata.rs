@@ -2,7 +2,7 @@
 //! gamedata/README.md).
 //!
 //! The canonical source is a 1:1 copy of the GOG install directory —
-//! kept exactly as the installer (or innoextract) laid it down, cruft
+//! kept exactly as the installer (or the importer) laid it down, cruft
 //! and all, so it stays trivially reproducible. Those installs run the
 //! games from a CD image, so most data lives inside `game.gog` rather
 //! than on the filesystem; a [`GameSource`] resolves relative paths

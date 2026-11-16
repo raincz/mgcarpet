@@ -8,8 +8,11 @@
 //! - a **GOG install** — the directory GOG's installer (or Wine) lays
 //!   down; detected by [`crate::gamedata`]'s own detectors;
 //! - a **GOG offline installer** (`setup_magic_carpet_….exe`) — an Inno
-//!   Setup package, named by the GOG product id it carries (read with
-//!   `innoextract --gog-game-id`) and unpacked with `innoextract`;
+//!   Setup package, named by the GOG product id it carries (its
+//!   `goggame-<id>.info` file) and unpacked IN PROCESS (`innospect` for
+//!   the Inno container, our own reader for GOG's hashed, split, zlib
+//!   file parts — see `GogFile`): no `innoextract`, no Wine, on every
+//!   platform;
 //! - a **retail CD dump** (MC2 so far) — a `.cue` and the raw image it
 //!   names (CloneCD `.img`, or `.bin`).
 //!
@@ -23,7 +26,6 @@
 
 use std::io;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use sha2::{Digest, Sha256};
@@ -191,35 +193,312 @@ fn mc2_audio_note(image: &Path, cue: &Path) -> Option<String> {
     })
 }
 
-/// What a GOG installer is, from `innoextract --gog-game-id`.
-fn installer_game(exe: &Path) -> Result<Game, String> {
-    let out = Command::new("innoextract")
-        .arg("--gog-game-id")
-        .arg(exe)
-        .output()
-        .map_err(|e| {
-            if e.kind() == io::ErrorKind::NotFound {
-                "reading a GOG installer needs `innoextract`, which is not installed \
-                 (Linux: install the `innoextract` package; macOS: `brew install \
-                 innoextract`; on Windows, run the installer and pick the installed \
-                 folder instead)"
-                    .to_owned()
-            } else {
-                format!("could not run innoextract: {e}")
+/// One file of a GOG installer, as GOG's own installer script lays it
+/// down. GOG's ("Galaxy") installers store every game file under an
+/// MD5-hash name in `{tmp}`, split into parts (10 MiB each), each part
+/// zlib-compressed; the real name rides the FIRST part's Inno script
+/// hook — `before_install('<file md5>', '<path>', <parts>)` — and every
+/// part's own `after_install('<part md5>', <stored>, <real size>)`.
+/// The remaining parts follow the first as entries with no
+/// `before_install`. (`before_install_dependency` files are GOG's
+/// bundled DOSBox and helpers; never game data.)
+#[derive(Debug, Clone)]
+struct GogFile {
+    /// Install-relative, forward slashes.
+    path: String,
+    md5: String,
+    /// (installer file index, part md5, real size), in order.
+    parts: Vec<(usize, String, u64)>,
+}
+
+impl GogFile {
+    fn size(&self) -> u64 {
+        self.parts.iter().map(|p| p.2).sum()
+    }
+}
+
+/// The arguments of one script hook call: `name('a', 'b', 3)` → the
+/// quoted strings (`''` is a quote) and bare tokens, in order.
+fn hook_args(hook: &str, name: &str) -> Option<Vec<String>> {
+    let rest = hook
+        .trim()
+        .strip_prefix(name)?
+        .trim_start()
+        .strip_prefix('(')?;
+    let body = rest.trim_end().strip_suffix(')')?;
+    let mut out = Vec::new();
+    let mut chars = body.chars().peekable();
+    loop {
+        while chars.peek().is_some_and(|c| c.is_whitespace() || *c == ',') {
+            chars.next();
+        }
+        let Some(&c) = chars.peek() else { break };
+        let mut arg = String::new();
+        if c == '\'' {
+            chars.next();
+            loop {
+                match chars.next()? {
+                    '\'' if chars.peek() == Some(&'\'') => {
+                        chars.next();
+                        arg.push('\'');
+                    }
+                    '\'' => break,
+                    ch => arg.push(ch),
+                }
             }
-        })?;
-    let text = String::from_utf8_lossy(&out.stdout);
-    let id = text
-        .lines()
-        .find_map(|l| l.trim().strip_prefix("GOG.com game ID is "))
-        .map(str::trim)
+        } else {
+            while let Some(&ch) = chars.peek() {
+                if ch == ',' {
+                    break;
+                }
+                arg.push(ch);
+                chars.next();
+            }
+            arg = arg.trim().to_owned();
+        }
+        out.push(arg);
+    }
+    Some(out)
+}
+
+/// An install-relative path made safe: forward slashes, no root, no
+/// drive, no `.`/`..` — or `None` (it could leave the folder).
+fn safe_rel(path: &str) -> Option<String> {
+    let rel = path.replace('\\', "/");
+    let rel = rel.trim_start_matches('/').to_owned();
+    let ok = !rel.is_empty()
+        && !rel.contains(':')
+        && rel
+            .split('/')
+            .all(|c| !c.is_empty() && c != "." && c != "..");
+    ok.then_some(rel)
+}
+
+/// The installer's game files, from its script hooks.
+fn gog_files(inst: &innospect::InnoInstaller) -> Result<Vec<GogFile>, String> {
+    let files = inst.files();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < files.len() {
+        let c = &files[i].item.conditions;
+        let Some(args) = hook_args(&c.before_install, "before_install") else {
+            i += 1;
+            continue;
+        };
+        let (Some(md5), Some(path), Some(count)) = (args.first(), args.get(1), args.get(2)) else {
+            return Err(format!("unreadable install hook {:?}", c.before_install));
+        };
+        let count: usize = count
+            .parse()
+            .map_err(|_| format!("unreadable part count in {:?}", c.before_install))?;
+        let path = safe_rel(path).ok_or_else(|| format!("unsafe install path {path:?}"))?;
+        let mut parts = Vec::with_capacity(count);
+        for k in 0..count {
+            let entry = files
+                .get(i + k)
+                .ok_or_else(|| format!("{path}: part {} of {count} is missing", k + 1))?;
+            if k > 0 && !entry.item.conditions.before_install.is_empty() {
+                return Err(format!("{path}: part {} of {count} is missing", k + 1));
+            }
+            let after = hook_args(&entry.item.conditions.after_install, "after_install")
+                .filter(|a| a.len() >= 3)
+                .ok_or_else(|| format!("{path}: part {} has no size record", k + 1))?;
+            let size: u64 = after[2]
+                .parse()
+                .map_err(|_| format!("{path}: unreadable part size"))?;
+            parts.push((i + k, after[0].clone(), size));
+        }
+        out.push(GogFile {
+            path,
+            md5: md5.clone(),
+            parts,
+        });
+        i += count.max(1);
+    }
+    Ok(out)
+}
+
+fn read_installer(exe: &Path) -> Result<Vec<u8>, String> {
+    std::fs::read(exe).map_err(|e| format!("could not read {}: {e}", exe.display()))
+}
+
+fn parse_installer<'a>(exe: &Path, data: &'a [u8]) -> Result<innospect::InnoInstaller<'a>, String> {
+    innospect::InnoInstaller::from_bytes(data).map_err(|e| {
+        format!(
+            "{} is not a GOG installer this version can read ({e})",
+            exe.display()
+        )
+    })
+}
+
+/// What a GOG installer is: the product id of the `goggame-<id>.info`
+/// it installs.
+fn installer_game(exe: &Path) -> Result<Game, String> {
+    let data = read_installer(exe)?;
+    let inst = parse_installer(exe, &data)?;
+    let id = gog_files(&inst)?
+        .iter()
+        .find_map(|f| {
+            f.path
+                .strip_prefix("goggame-")
+                .and_then(|r| r.strip_suffix(".info"))
+                .map(str::to_owned)
+        })
         .ok_or_else(|| format!("{} is not a GOG installer", exe.display()))?;
-    Game::from_gog_id(id).ok_or_else(|| {
+    Game::from_gog_id(&id).ok_or_else(|| {
         format!(
             "{} is a GOG installer, but not for Magic Carpet (product {id})",
             exe.display()
         )
     })
+}
+
+/// The bytes of installer file `index` as Inno stores them (for GOG,
+/// one zlib-compressed part).
+///
+/// GOG's installers store their chunks UNCOMPRESSED (the parts are zlib
+/// already) — each data entry says so by lacking `ChunkCompressed` —
+/// and `innospect` 0.2.0 decompresses every chunk with the installer's
+/// method regardless (it fails on these with an LZMA2 error). So an
+/// uncompressed, unencrypted, unfiltered single-slice chunk is sliced
+/// here directly: setup-1 + the entry's offset, the 4-byte `zlb\x1a`
+/// magic, then the file at its offset within the chunk. Anything else
+/// still goes through `innospect`'s extractor.
+fn part_reader<'a>(
+    inst: &'a innospect::InnoInstaller<'a>,
+    input: &'a [u8],
+    index: usize,
+) -> Result<Box<dyn std::io::Read + 'a>, String> {
+    use innospect::DataFlag;
+    let file = &inst.files()[index];
+    let loc = inst
+        .file_location_for(file)
+        .ok_or_else(|| "a part has no data".to_owned())?;
+    let plain = !loc.flags.contains(&DataFlag::ChunkCompressed)
+        && !loc.flags.contains(&DataFlag::ChunkEncrypted)
+        && !loc.flags.contains(&DataFlag::CallInstructionOptimized)
+        && loc.first_slice == loc.last_slice;
+    if !plain {
+        return inst
+            .extract(file)
+            .map(|r| Box::new(r) as Box<dyn std::io::Read>)
+            .map_err(|e| e.to_string());
+    }
+    let setup1 = inst.offset_table().offset_setup1;
+    let at = |n: u64| usize::try_from(n).map_err(|_| "the installer is too large".to_owned());
+    let chunk = at(setup1 + u64::from(loc.start_offset))?;
+    let magic = input
+        .get(chunk..chunk + 4)
+        .ok_or("the installer is truncated")?;
+    if magic != b"zlb\x1a" {
+        return Err("a data chunk is damaged".into());
+    }
+    let body = chunk + 4;
+    let end = body + at(loc.chunk_compressed_size)?;
+    let start = body + at(loc.chunk_sub_offset)?;
+    let stop = start + at(loc.original_size)?;
+    if stop > end {
+        return Err("a data chunk is damaged".into());
+    }
+    let bytes = input.get(start..stop).ok_or("the installer is truncated")?;
+    Ok(Box::new(bytes))
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// Unpack the kept game files of `exe` into `staging`: each part read
+/// from the installer (Inno verifies its own checksum), inflated, its
+/// MD5 and size checked against GOG's record, appended in order, and
+/// the whole file's MD5 checked at the end. Byte progress over the
+/// kept set; `cancel` polled between buffers.
+fn extract_installer(
+    exe: &Path,
+    game: Game,
+    staging: &Path,
+    cancel: &AtomicBool,
+    progress: &mut dyn FnMut(&Progress),
+) -> Result<(), ImportError> {
+    use md5::{Digest, Md5};
+    use std::io::{Read, Write};
+    let fail = ImportError::Failed;
+    progress(&Progress {
+        stage: "Reading the installer…".into(),
+        done: 0,
+        total: 0,
+    });
+    let data = read_installer(exe).map_err(fail)?;
+    let inst = parse_installer(exe, &data).map_err(fail)?;
+    let wanted = |rel: &str| {
+        let top = rel.split('/').next().unwrap_or("");
+        game.keep().iter().any(|k| k.eq_ignore_ascii_case(top))
+    };
+    let kept: Vec<GogFile> = gog_files(&inst)
+        .map_err(fail)?
+        .into_iter()
+        .filter(|f| wanted(&f.path))
+        .collect();
+    let total: u64 = kept.iter().map(GogFile::size).sum();
+    let mut done = 0u64;
+    let mut buf = vec![0u8; 1 << 20];
+    for f in &kept {
+        let dest = staging.join(&f.path);
+        if let Some(parent) = dest.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| io_failed("create", parent, &e))?;
+        }
+        let mut w = std::fs::File::create(&dest).map_err(|e| io_failed("write", &dest, &e))?;
+        let mut whole = Md5::new();
+        for (n, (index, part_md5, size)) in f.parts.iter().enumerate() {
+            let bad = |what: &str| {
+                fail(format!(
+                    "{} part {} of {} {what} — the installer may be damaged",
+                    f.path,
+                    n + 1,
+                    f.parts.len()
+                ))
+            };
+            let raw = part_reader(&inst, &data, *index)
+                .map_err(|e| fail(format!("reading {} from the installer failed: {e}", f.path)))?;
+            let mut z = flate2::read::ZlibDecoder::new(raw);
+            let mut part = Md5::new();
+            let mut got = 0u64;
+            loop {
+                if cancel.load(Ordering::Relaxed) {
+                    return Err(ImportError::Cancelled);
+                }
+                let k = z.read(&mut buf).map_err(|_| bad("does not unpack"))?;
+                if k == 0 {
+                    break;
+                }
+                part.update(&buf[..k]);
+                whole.update(&buf[..k]);
+                w.write_all(&buf[..k])
+                    .map_err(|e| io_failed("write", &dest, &e))?;
+                got += k as u64;
+                done += k as u64;
+                progress(&Progress {
+                    stage: "Unpacking the installer…".into(),
+                    done,
+                    total,
+                });
+            }
+            if got != *size {
+                return Err(bad("has the wrong size"));
+            }
+            if !hex(&part.finalize()).eq_ignore_ascii_case(part_md5) {
+                return Err(bad("fails its checksum"));
+            }
+        }
+        if !hex(&whole.finalize()).eq_ignore_ascii_case(&f.md5) {
+            return Err(fail(format!(
+                "{} fails its checksum — the installer may be damaged",
+                f.path
+            )));
+        }
+        w.sync_all().map_err(|e| io_failed("write", &dest, &e))?;
+    }
+    Ok(())
 }
 
 fn ext_is(path: &Path, ext: &str) -> bool {
@@ -410,40 +689,10 @@ fn stage(
             if cancel.load(Ordering::Relaxed) {
                 return Err(ImportError::Cancelled);
             }
-            progress(&Progress {
-                stage: "Extracting the installer…".into(),
-                done: 0,
-                total: 0,
-            });
-            let raw = staging.join(".raw");
-            let out = Command::new("innoextract")
-                .arg("-s")
-                .arg("-d")
-                .arg(&raw)
-                .arg(&keep_exe)
-                .output()
-                .map_err(|e| ImportError::Failed(format!("could not run innoextract: {e}")))?;
-            if !out.status.success() {
-                let err = String::from_utf8_lossy(&out.stderr);
-                let full = err.contains("No space left");
-                return Err(ImportError::Failed(if full {
-                    "not enough disk space to extract the installer — free some space \
-                     and try again"
-                        .into()
-                } else {
-                    format!("innoextract failed: {}", err.trim())
-                }));
-            }
-            // Slim: move the kept parts up, drop the rest (DOSBox, the
-            // uninstaller support, manuals, GOG's helper folders).
-            for name in src.game.keep() {
-                let from = raw.join(name);
-                if from.exists() {
-                    std::fs::rename(&from, staging.join(name))
-                        .map_err(|e| io_failed("move", &from, &e))?;
-                }
-            }
-            std::fs::remove_dir_all(&raw).map_err(|e| io_failed("clean up", &raw, &e))
+            // Only the kept parts are unpacked: the slim copy, straight
+            // into the staging folder (DOSBox, the uninstaller support,
+            // manuals and GOG's helper folders are never written).
+            extract_installer(&keep_exe, src.game, staging, cancel, progress)
         }
     }
 }
@@ -641,11 +890,48 @@ mod tests {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../gamedata")
     }
 
-    fn have_innoextract() -> bool {
-        Command::new("innoextract")
-            .arg("--version")
-            .output()
-            .is_ok()
+    /// GOG's script hooks parse into their arguments: quoted strings
+    /// (with `''` as a quote) and bare numbers; a different hook name
+    /// or a malformed call is no match.
+    #[test]
+    fn gog_hooks_parse() {
+        let a = hook_args(
+            "before_install('8c33cbfe4f0bf19a51e3c5a9289bcacf', 'game.gog', 38)",
+            "before_install",
+        )
+        .unwrap();
+        assert_eq!(a, ["8c33cbfe4f0bf19a51e3c5a9289bcacf", "game.gog", "38"]);
+        let a = hook_args("after_install('ab', 6641389, 10485760)", "after_install").unwrap();
+        assert_eq!(a, ["ab", "6641389", "10485760"]);
+        let a = hook_args(
+            r"before_install('x', 'GAME\Rahn''s Lair.DAT', 1)",
+            "before_install",
+        )
+        .unwrap();
+        assert_eq!(a[1], r"GAME\Rahn's Lair.DAT");
+        assert!(hook_args("before_install_dependency('x', 'y', 1)", "before_install").is_none());
+        assert!(hook_args("before_install('x', 'unterminated", "before_install").is_none());
+        assert!(hook_args("", "before_install").is_none());
+    }
+
+    /// An install path is kept only when it cannot leave the folder.
+    #[test]
+    fn install_paths_must_stay_inside() {
+        assert_eq!(
+            safe_rel(r"GAME\NETHERW\CDATA\FONT0.DAT").as_deref(),
+            Some("GAME/NETHERW/CDATA/FONT0.DAT")
+        );
+        assert_eq!(safe_rel("game.gog").as_deref(), Some("game.gog"));
+        for bad in [
+            r"..\evil.exe",
+            r"GAME\..\..\x",
+            r"C:\Windows\x",
+            "a//b",
+            "",
+            r"GAME\.\x",
+        ] {
+            assert_eq!(safe_rel(bad), None, "{bad:?}");
+        }
     }
 
     /// Every kind of source the player supplied reads as the right game
@@ -678,22 +964,63 @@ mod tests {
             Game::Mc2,
             SourceKind::CdImage,
         );
-        if have_innoextract() {
-            check(
-                "setup_magic_carpet_2_1.0_(28044).exe",
-                Game::Mc2,
-                SourceKind::GogInstaller,
-            );
-            check(
-                "setup_magic_carpet_plus_1.0_(28186).exe",
-                Game::Mc1Plus,
-                SourceKind::GogInstaller,
-            );
-        }
+        check(
+            "setup_magic_carpet_2_1.0_(28044).exe",
+            Game::Mc2,
+            SourceKind::GogInstaller,
+        );
+        check(
+            "setup_magic_carpet_plus_1.0_(28186).exe",
+            Game::Mc1Plus,
+            SourceKind::GogInstaller,
+        );
         assert!(
             identify(&root.join("README.md")).is_err(),
             "a stray file is no source"
         );
+    }
+
+    /// Every file the native extraction wrote is byte-identical to the
+    /// Wine-installed one, and nothing installed under the kept paths is
+    /// missing — bar what GOG's installer CREATES at install time (MC2's
+    /// `CONFIG.DAT` and save stubs, from its `__support/save` folder).
+    fn same_as_installed(extracted: &Path, installed: &Path, game: Game) {
+        fn walk(dir: &Path, base: &Path, out: &mut Vec<String>) {
+            for e in std::fs::read_dir(dir).unwrap().flatten() {
+                let p = e.path();
+                if p.is_dir() {
+                    walk(&p, base, out);
+                } else {
+                    let rel = p.strip_prefix(base).unwrap().to_string_lossy();
+                    out.push(rel.replace('\\', "/"));
+                }
+            }
+        }
+        let mut got = Vec::new();
+        walk(extracted, extracted, &mut got);
+        got.sort();
+        for rel in &got {
+            let a = std::fs::read(extracted.join(rel)).unwrap();
+            let b = std::fs::read(installed.join(rel))
+                .unwrap_or_else(|e| panic!("{rel}: not in the install ({e})"));
+            assert!(a == b, "{rel} differs from the installed copy");
+        }
+        let mut want = Vec::new();
+        for k in game.keep() {
+            let p = installed.join(k);
+            if p.is_dir() {
+                walk(&p, installed, &mut want);
+            } else if p.is_file() {
+                want.push((*k).to_owned());
+            }
+        }
+        let missing: Vec<&String> = want
+            .iter()
+            .filter(|w| !got.contains(w))
+            .filter(|w| !w.ends_with("CONFIG.DAT") && !w.contains("/SAVE/"))
+            .collect();
+        assert!(missing.is_empty(), "not extracted: {missing:?}");
+        assert!(got.len() > 10, "a real tree: {} files", got.len());
     }
 
     /// The whole import path on the real data, into a scratch gamedata
@@ -717,32 +1044,28 @@ mod tests {
             let id = identify(&p).expect("identify");
             Some(import(&id, &scratch, false, &no_cancel, &mut sink).expect("import"))
         };
-        if have_innoextract() {
-            if let Some(d) = run("setup_magic_carpet_2_1.0_(28044).exe") {
-                assert_eq!(d, scratch.join("Magic Carpet 2"));
-                assert!(scratch.join("GOG-MagicCarpet2.exe").is_file());
-                let mut names: Vec<_> = std::fs::read_dir(&d)
-                    .unwrap()
-                    .flatten()
-                    .map(|e| e.file_name().to_string_lossy().into_owned())
-                    .collect();
-                names.sort();
-                assert_eq!(
-                    names,
-                    ["GAME", "game.gog", "game.ins", "goggame-1207659187.info"]
-                );
-                let a = std::fs::read(d.join("game.gog")).unwrap();
-                let b = std::fs::read(root.join("Magic Carpet 2/game.gog")).unwrap();
-                assert!(a == b, "the extracted image equals the installed one");
-            }
-            run("setup_magic_carpet_plus_1.0_(28186).exe");
+        if let Some(d) = run("setup_magic_carpet_2_1.0_(28044).exe") {
+            assert_eq!(d, scratch.join("Magic Carpet 2"));
+            assert!(scratch.join("GOG-MagicCarpet2.exe").is_file());
+            let mut names: Vec<_> = std::fs::read_dir(&d)
+                .unwrap()
+                .flatten()
+                .map(|e| e.file_name().to_string_lossy().into_owned())
+                .collect();
+            names.sort();
+            assert_eq!(
+                names,
+                ["GAME", "game.gog", "game.ins", "goggame-1207659187.info"]
+            );
+            same_as_installed(&d, &root.join("Magic Carpet 2"), Game::Mc2);
+        }
+        if let Some(d) = run("setup_magic_carpet_plus_1.0_(28186).exe") {
+            same_as_installed(&d, &root.join("Magic Carpet Plus"), Game::Mc1Plus);
         }
         run("netherworlds-cd");
         let found = Gamedata::locate(&scratch);
         assert!(found.mc2.is_some_and(|s| s.origin.contains("GOG install")));
-        if have_innoextract() {
-            assert!(found.mc1.is_some());
-        }
+        assert!(found.mc1.is_some());
         // An occupied home is refused without `replace`.
         let id = identify(&root.join("netherworlds-cd")).unwrap();
         assert!(matches!(

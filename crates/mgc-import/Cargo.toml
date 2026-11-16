@@ -8,6 +8,14 @@ authors.workspace = true
 
 [dependencies]
 flacenc = "0.5.1"
+# GOG's offline installers are Inno Setup packages: read and unpacked in
+# process (src/sources.rs), so importing one needs no external tool on
+# any platform. `innospect` keeps the per-file script hooks that name
+# GOG's hashed file parts; the parts themselves are zlib (flate2) with
+# an MD5 per part and per file (md-5).
+innospect = "0.2.0"
+flate2 = "1"
+md-5 = "0.11"
 mgc-formats = { path = "../mgc-formats" }
 mgc-sim = { path = "../mgc-sim" }
 midly = { version = "0.5.3", default-features = false, features = ["std"] }

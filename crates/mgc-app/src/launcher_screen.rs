@@ -296,8 +296,6 @@ struct DataView {
 struct ChoiceView {
     title: &'static str,
     description: &'static str,
-    /// A blocking problem with this kind on this system (red).
-    warning: Option<&'static str>,
 }
 
 /// What the browser shows.
@@ -591,11 +589,6 @@ impl Launcher {
                     .map(|&w| ChoiceView {
                         title: w.title(),
                         description: w.description(),
-                        warning: (w == Want::Installer && !d.innoextract).then_some(
-                            "Needs the innoextract tool, which is not installed (Linux: \
-                             the innoextract package; macOS: brew install innoextract). \
-                             On Windows, run the installer and add the installed folder.",
-                        ),
                     })
                     .collect();
                 return Some(DataView {
@@ -1251,10 +1244,7 @@ impl Launcher {
                 GOLD,
                 Align::Left,
             );
-            let (body, ink, size) = match ch.warning {
-                Some(w) => (w, [236, 120, 110, 255], 14.0),
-                None => (ch.description, TEXT, 16.0),
-            };
+            let (body, ink, size) = (ch.description, TEXT, 16.0);
             for (n, line) in wrap(&self.font, body, size, text_w, false)
                 .iter()
                 .take(4)
@@ -2122,8 +2112,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&t);
     }
 
-    /// Every kind card's text — its description, or the innoextract
-    /// warning — fits the four lines a card has room for.
+    /// Every kind card's description fits the four lines a card has
+    /// room for.
     #[test]
     fn the_kind_cards_text_fits_its_card() {
         let font = FontRef::try_from_slice(FONT).unwrap();
@@ -2132,23 +2122,6 @@ mod tests {
             let n = wrap(&font, want.description(), 16.0, w, false).len();
             assert!(n <= 4, "{want:?}: {n} lines");
         }
-        let root = std::env::temp_dir().join(format!("mgc-launcher-k-{}", std::process::id()));
-        let cfg = Config {
-            gamedata: Some(root.join("gd")),
-            ..Default::default()
-        };
-        let mut l = Launcher::new(&root, &cfg);
-        l.open_data();
-        if let Some(d) = &mut l.data {
-            d.innoextract = false;
-            d.choose();
-        }
-        let view = l.data_view().unwrap();
-        let warning = view.choices.unwrap()[0]
-            .warning
-            .expect("the innoextract warning");
-        let n = wrap(&font, warning, 14.0, w, false).len();
-        assert!(n <= 4, "the warning wraps to {n} lines");
     }
 
     /// The game-data dialog's parts sit inside its panel, apart.

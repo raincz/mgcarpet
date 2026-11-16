@@ -113,8 +113,6 @@ pub struct DataDialog {
     pub bake_requested: bool,
     /// Where the browser was last, so it reopens there.
     last_dir: Option<PathBuf>,
-    /// `innoextract` is on this system (a GOG installer needs it).
-    pub innoextract: bool,
 }
 
 impl DataDialog {
@@ -127,10 +125,6 @@ impl DataDialog {
             outcome: None,
             bake_requested: false,
             last_dir: None,
-            innoextract: std::process::Command::new("innoextract")
-                .arg("--version")
-                .output()
-                .is_ok_and(|o| o.status.success()),
         }
     }
 
