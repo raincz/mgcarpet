@@ -636,14 +636,17 @@ mod tests {
             "a folder with a cue sheet looks like data"
         );
         assert!(!b.entries[0].data);
-        assert_eq!(
-            b.activate(3),
-            Some(t.join("setup.EXE")),
-            "a file is the pick"
-        );
+        // Paths compare by what they NAME: `path::absolute` resolves
+        // `..` on Windows but keeps it on Unix, so the spellings differ
+        // across platforms (Windows CI 2026-11-16).
+        let same = |a: &Path, b: &Path| {
+            std::fs::canonicalize(a).unwrap() == std::fs::canonicalize(b).unwrap()
+        };
+        let pick = b.activate(3).expect("a file is the pick");
+        assert!(same(&pick, &t.join("setup.EXE")), "{pick:?}");
         assert_eq!(b.activate(2), None, "a folder is entered");
         assert!(b.here.is_none(), "an installer is never a folder pick");
-        assert_eq!(b.dir, std::path::absolute(t.join("dump")).unwrap());
+        assert!(same(&b.dir, &t.join("dump")), "{:?}", b.dir);
         b.up();
         assert_eq!(
             b.selected,
