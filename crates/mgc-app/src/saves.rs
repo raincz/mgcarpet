@@ -510,7 +510,7 @@ pub fn native_path(tag: &str, slot: usize) -> PathBuf {
 /// tree's `get_baked_directory`: the public slot functions below all
 /// resolve through it, so a port moves every save by changing one body.
 fn saves_root() -> PathBuf {
-    PathBuf::from("saves")
+    crate::paths::saves_dir()
 }
 
 /// The player's netplay entries (recent hosts, last port and

@@ -27,6 +27,7 @@ mod menu;
 mod minimenu;
 mod movie;
 mod net;
+mod paths;
 mod replay;
 mod rules;
 mod saves;
@@ -3915,6 +3916,10 @@ impl App {
         }
         slot[*segs.last().unwrap()] = leaf.clone();
         let text = serde_json::to_string_pretty(&root).expect("json serializes") + "\n";
+        // The config folder may be a fresh one (`MGC_CONFIG_DIR`).
+        if let Some(dir) = self.cfg_file.parent().filter(|d| !d.as_os_str().is_empty()) {
+            let _ = std::fs::create_dir_all(dir);
+        }
         if let Err(e) = std::fs::write(&self.cfg_file, text) {
             eprintln!("note: config save {}: {e}", self.cfg_file.display());
         }
@@ -12600,7 +12605,7 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
     };
     let (config_path, explicit) = match &args.config {
         Some(p) => (p.clone(), true),
-        None => (PathBuf::from(config::DEFAULT_PATH), false),
+        None => (paths::config_file(), false),
     };
     let mut cfg = match config::Config::load(&config_path, explicit) {
         Ok(c) => {
@@ -14454,7 +14459,7 @@ fn run_server(addr: &str, args: &Args) -> std::process::ExitCode {
 /// whole tree by changing one body (the Android shell points it at
 /// the device's shared storage; `saves::saves_root` is its sibling).
 fn get_baked_directory() -> PathBuf {
-    PathBuf::from("baked")
+    paths::baked_dir()
 }
 
 #[cfg(test)]

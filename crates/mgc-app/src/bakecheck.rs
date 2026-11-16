@@ -123,12 +123,9 @@ fn locate_gamedata(config_override: Option<&Path>) -> Option<PathBuf> {
     if let Some(p) = config_override {
         return p.is_dir().then(|| p.to_path_buf());
     }
-    if let Some(p) = std::env::var_os("MGC_GAMEDATA") {
-        let p = PathBuf::from(p);
-        return p.is_dir().then_some(p);
-    }
-    let default = Path::new("gamedata");
-    default.is_dir().then(|| default.to_path_buf())
+    // `MGC_GAMEDATA`, else `gamedata/` (crate::paths).
+    let p = crate::paths::gamedata_dir();
+    p.is_dir().then_some(p)
 }
 
 /// Ensure the baked tree serving `level_path` is present and current;

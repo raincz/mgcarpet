@@ -112,9 +112,10 @@ and playable.
    The prepared ("baked") data is redone by itself after an upgrade
    that changes it (it carries an epoch stamp). To keep the game data
    somewhere other than `gamedata/`, set `MGC_GAMEDATA` or
-   `"gamedata"` in `mgcarpet.json`. Placing the files by hand still
-   works — [gamedata/README.md](gamedata/README.md) describes the
-   layout, the command-line importer and community mods.
+   `"gamedata"` in `mgcarpet.json` (see *Where files live* below).
+   Placing the files by hand still works —
+   [gamedata/README.md](gamedata/README.md) describes the layout, the
+   command-line importer and community mods.
 
    Most tweakable options are available in several ways:
    * Runtime menu (displayed when game is paused)
@@ -207,6 +208,34 @@ terrain and parsed data are validated byte-for-byte against reference
 dumps produced by the original code ([Magic Carpet 2 HD][remc2] for MC2,
 instrumented DOSBox for MC1). Fixtures live outside git (derived from copyrighted data); their
 SHA-256 hashes are committed as pins.
+
+## Where files live
+
+Everything is kept beside each other in the folder the game runs from
+(the campaign launchers switch to their own folder on a double-click):
+`mgcarpet.json`, `saves/`, `gamedata/` and `baked/`. Four environment
+variables move them — for packagers (a wrapper script, a Flatpak/Snap
+manifest, a Docker image) or anyone who wants them elsewhere:
+
+| Variable | Holds | Default |
+|---|---|---|
+| `MGC_CONFIG_DIR` | `mgcarpet.json` and `mgcarpet.json.defaults` | `.` |
+| `MGC_SAVES_DIR` | save slots and netplay history | `saves` |
+| `MGC_GAMEDATA` | the original game data | `gamedata` |
+| `MGC_BAKED_DIR` | the baked data (regenerable — a cache) | `baked` |
+
+Values are plain paths, used as given: nothing in them is expanded
+(no `$VAR`, no `~`), so a wrapper resolves those itself. Relative paths
+are relative to the working directory, like the defaults. Folders are
+created when first needed. For example, an XDG layout:
+
+```sh
+export MGC_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/mgcarpet"
+export MGC_SAVES_DIR="$MGC_CONFIG_DIR/saves"
+export MGC_GAMEDATA="${XDG_DATA_HOME:-$HOME/.local/share}/mgcarpet"
+export MGC_BAKED_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/mgcarpet"
+exec /usr/lib/mgcarpet/mgcarpet "$@"
+```
 
 ## Building
 

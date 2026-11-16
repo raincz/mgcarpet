@@ -1773,6 +1773,10 @@ fn ensure_defaults(path: &Path) -> Result<(), String> {
         o.insert("_version".into(), serde_json::json!(DEFAULTS_VERSION));
     }
     let text = serde_json::to_string_pretty(&v).expect("config serializes");
+    // The config folder may be a fresh one (`MGC_CONFIG_DIR`).
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::create_dir_all(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    }
     std::fs::write(path, text + "\n").map_err(|e| format!("{}: {e}", path.display()))?;
     println!("config: wrote defaults baseline {}", path.display());
     Ok(())

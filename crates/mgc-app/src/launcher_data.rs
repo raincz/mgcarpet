@@ -531,14 +531,13 @@ fn places(gamedata_root: &Path) -> Vec<(String, PathBuf)> {
     out
 }
 
-/// Where imports go: the configured / located `gamedata/`, else
-/// `gamedata/` in the working directory (the default the bake looks
-/// at, created on the first import).
+/// Where imports go: the config's `gamedata`, else `MGC_GAMEDATA` /
+/// `gamedata/` ([`crate::paths::gamedata_dir`]) — created on the first
+/// import, so a packager's fresh data folder needs no setup.
 pub fn gamedata_root(config_gamedata: Option<&Path>) -> PathBuf {
     config_gamedata
         .map(Path::to_path_buf)
-        .or_else(|| crate::bakecheck::gamedata(None))
-        .unwrap_or_else(|| PathBuf::from("gamedata"))
+        .unwrap_or_else(crate::paths::gamedata_dir)
 }
 
 #[cfg(test)]
