@@ -1083,11 +1083,13 @@ fn set_spellbook_table() -> String {
          \x20 MC1 / HW (0..23):\n",
     );
     for i in 0..mgc_sim::mc1::spells::SPELL_COUNT {
-        let _ = writeln!(
-            s,
-            "    {i:2}  {}",
-            mgc_sim::mc1::spells::SpellId(i as u8).name()
-        );
+        let id = mgc_sim::mc1::spells::SpellId(i as u8);
+        let hw = id.name_in(mgc_sim::ids::GameId::Mc1Hw);
+        let _ = if hw == id.name() {
+            writeln!(s, "    {i:2}  {}", id.name())
+        } else {
+            writeln!(s, "    {i:2}  {} (HW: {hw})", id.name())
+        };
     }
     s.push_str("  MC2 (0..25):\n");
     for (i, n) in ui::MC2_SPELL_NAMES.iter().enumerate() {
@@ -1272,6 +1274,12 @@ fn load_level_with(
         rgb.copy_from_slice(&bundle.palette[i][..3]);
     }
 
+    // The sim's game id, for game-aware spell names (HW renames one).
+    let sim_game = match package.meta.game {
+        Game::MagicCarpet1 => mgc_sim::ids::GameId::Mc1,
+        Game::HiddenWorlds => mgc_sim::ids::GameId::Mc1Hw,
+        Game::MagicCarpet2 => mgc_sim::ids::GameId::Mc2,
+    };
     let game = match package.meta.game {
         Game::MagicCarpet1 => "mc1",
         Game::HiddenWorlds => "mc1hw",
@@ -1306,7 +1314,7 @@ fn load_level_with(
         let names: Vec<&str> = p
             .spells
             .iter()
-            .map(|&s| mgc_sim::mc1::spells::SpellId(s).name())
+            .map(|&s| mgc_sim::mc1::spells::SpellId(s).name_in(sim_game))
             .collect();
         println!(
             "plausible-spellbook: {} spell(s) from {} campaign level(s) before level {} \
@@ -1329,7 +1337,7 @@ fn load_level_with(
                     " (level mask strips: {})",
                     p.masked
                         .iter()
-                        .map(|&s| mgc_sim::mc1::spells::SpellId(s).name())
+                        .map(|&s| mgc_sim::mc1::spells::SpellId(s).name_in(sim_game))
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
@@ -1399,7 +1407,7 @@ fn load_level_with(
         // experimental, arena). The mask is reported, not applied.
         Some(ids) => {
             let book: Vec<u8> = ids.iter().map(|&(s, _)| s).collect();
-            let name = |&s: &u8| mgc_sim::mc1::spells::SpellId(s).name();
+            let name = |&s: &u8| mgc_sim::mc1::spells::SpellId(s).name_in(sim_game);
             let masked: Vec<&str> = book
                 .iter()
                 .filter(|&&s| {
@@ -3333,6 +3341,14 @@ impl App {
 
     /// The running game's identity, session or not (the campaign id
     /// carries it while the frontend is level-less).
+    /// The running level's game (MC1 when none is loaded) — for the
+    /// game-aware spell names (`SpellId::name_in`).
+    fn sim_game(&self) -> mgc_sim::ids::GameId {
+        self.session
+            .as_deref()
+            .map_or(mgc_sim::ids::GameId::Mc1, |s| s.level.game)
+    }
+
     fn is_mc2(&self) -> bool {
         match (&self.session, &self.campaign) {
             (Some(sess), _) => matches!(sess.level.game, mgc_sim::ids::GameId::Mc2),
@@ -5978,7 +5994,7 @@ impl App {
                 name
             }
         } else {
-            mgc_sim::mc1::spells::SpellId(spell).name()
+            mgc_sim::mc1::spells::SpellId(spell).name_in(self.sim_game())
         }
     }
 
@@ -10226,7 +10242,11 @@ impl ApplicationHandler for App {
                                         }
                                     }
                                     self.quick_binds[d] = Some(spell.0);
-                                    println!("quick key {}: {}", (d + 1) % 10, spell.name());
+                                    println!(
+                                        "quick key {}: {}",
+                                        (d + 1) % 10,
+                                        spell.name_in(self.sim_game())
+                                    );
                                     // A rebind is a preference, not
                                     // progress: the campaign carry takes
                                     // it now, so every save and the next

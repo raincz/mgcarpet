@@ -50,7 +50,6 @@ use crate::world::PLAYER_LIFE_MAX;
 /// level-up path sets 200 (EF:44012), the change-spell toast 20
 /// (EF:37926).
 const NOTIFY_TICKS_LEVELUP: u16 = 200;
-const NOTIFY_TICKS_SELECT: u16 = 20;
 
 /// A/B toggle for the Fool's-Mana retaliation AIM PHASE (`sub_36770`
 /// EF:26683-86 / `sub_36850` EF:26717-25 aim BEFORE the muzzle lift,
@@ -2761,17 +2760,12 @@ impl World {
             e.site_z = pz;
         }
         self.g.snd_player(hx, 14);
-        // The change-spell toast (EF:37925): the chosen TIER's own name
-        // ("Possession" / "Mana Magnet" / "Thunderstorm"), so a level-N
-        // pick reads as its distinct spell, not a generic label.
+        // The change-spell toast (EF:37925), the shared all-games law
+        // (`World::spell_select_toast`): MC2 supplies the chosen TIER's
+        // own name ("Possession" / "Mana Magnet" / "Thunderstorm"), so
+        // a level-N pick reads as its distinct spell.
         let name = self.mc2_spell_name(s, t as usize);
-        self.set_seat_notification_tagged(
-            hx,
-            crate::engine::world::NotifyTag::SpellSelect,
-            name,
-            NOTIFY_TICKS_SELECT,
-            NOTIFY_RED,
-        );
+        self.spell_select_toast(hx, &[(hand != 0, name)]);
     }
 
     /// Retail cmd 0x26 (SHIFT+click fast-bind, EF:37950-53): a raw

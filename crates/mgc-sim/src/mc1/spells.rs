@@ -27,8 +27,20 @@ pub struct SpellId(pub u8);
 pub const SPELL_COUNT: usize = 24;
 
 impl SpellId {
+    /// The base-MC1 manual name. Use [`Self::name_in`] wherever the
+    /// game is known — Hidden Worlds renames one spell.
     pub fn name(self) -> &'static str {
         NAMES[self.0 as usize]
+    }
+
+    /// The spell's name in `game`: Hidden Worlds' 20 is the HOMING
+    /// METEOR (its one diverging row, [`SPELLS_HW`]), base MC1's Wall
+    /// of Fire; everything else is shared.
+    pub fn name_in(self, game: crate::ids::GameId) -> &'static str {
+        match (game, self.0) {
+            (crate::ids::GameId::Mc1Hw, 20) => "Homing Meteor",
+            _ => self.name(),
+        }
     }
 }
 
@@ -228,6 +240,22 @@ pub const TOGGLE_PAIR: (SpellId, SpellId) = (SpellId(2), SpellId(21));
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Hidden Worlds renames exactly its one diverging spell row.
+    #[test]
+    fn hidden_worlds_names_spell_20_the_homing_meteor() {
+        use crate::ids::GameId;
+        for i in 0..SPELL_COUNT as u8 {
+            let id = SpellId(i);
+            assert_eq!(id.name_in(GameId::Mc1), id.name());
+            if i == 20 {
+                assert_eq!(id.name_in(GameId::Mc1), "Wall of Fire");
+                assert_eq!(id.name_in(GameId::Mc1Hw), "Homing Meteor");
+            } else {
+                assert_eq!(id.name_in(GameId::Mc1Hw), id.name());
+            }
+        }
+    }
 
     #[test]
     fn display_order_is_a_permutation() {

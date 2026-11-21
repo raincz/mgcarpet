@@ -1975,10 +1975,11 @@ fn mc2_spell_select_raises_notification_toast() {
     assert!(w.notification().is_none(), "no toast at level start");
 
     w.mc2_select_spell(Hx::FIRST, 1, 1, 0); // Possession tier 1
-    let want = w.mc2_spell_name(1, 1).to_string();
-    assert!(!want.is_empty(), "the tier-1 name resolves from L1.TXT");
+    let name = w.mc2_spell_name(1, 1).to_string();
+    assert!(!name.is_empty(), "the tier-1 name resolves from L1.TXT");
+    let want = format!("Left: {name}");
     let (text, color) = w.notification().expect("select raises a toast");
-    assert_eq!(text, want, "the toast is the chosen tier's spell name");
+    assert_eq!(text, want, "the toast is the hand + the chosen tier's spell name");
     assert_eq!(color, [255, 0, 0], "plain toasts are red");
 
     // The 20-frame select life decays on the app-driven wall-clock

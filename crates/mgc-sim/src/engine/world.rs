@@ -1619,6 +1619,10 @@ struct Mc2EndSeq {
 /// player count, 8. Past it, the oldest line gives way.
 pub const NOTIFY_MAX: usize = 8;
 
+/// The change-spell toast's life, retail frames — MC2's select toast
+/// (EF:37925), shared by every game ([`World::spell_select_toast`]).
+const SPELL_SELECT_TOAST_TICKS: u16 = 20;
+
 /// What a replacing notification line is (see [`Notification::tag`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NotifyTag {
@@ -19903,26 +19907,54 @@ impl World {
                 self.dev_mint_mc1(hx, s.0 as usize);
             }
         }
-        let mut took = false;
+        let mut took: Vec<(bool, &'static str)> = Vec::new();
         if let Some(s) = left
             && (s.0 as usize) < SPELL_COUNT
             && self.players[hx].owned[s.0 as usize] != 0
         {
             self.players[hx].left = Some(s);
-            took = true;
+            took.push((false, s.name_in(self.game)));
         }
         if let Some(s) = right
             && (s.0 as usize) < SPELL_COUNT
             && self.players[hx].owned[s.0 as usize] != 0
         {
             self.players[hx].right = Some(s);
-            took = true;
+            took.push((true, s.name_in(self.game)));
         }
         // The equip chime (:48721/:48729 — sound 14 per accepted
         // equip command).
-        if took {
+        if !took.is_empty() {
             self.g.snd_player(hx, 14);
+            // MC1/HW's names are the manuals' (`SpellId::name_in`); MC2
+            // equips through `mc2_select_spell`, which raises the
+            // same toast with its tier names.
+            if !matches!(self.game, GameId::Mc2) {
+                self.spell_select_toast(hx, &took);
+            }
         }
+    }
+
+    /// THE CHANGE-SPELL TOAST, one law for all three games (player ask
+    /// 2026-11-21): retail MC2 named the picked spell (EF:37925,
+    /// 20 frames, red); retail MC1 had no toast at all. Now every game
+    /// raises it, prefixed with the hand it went to — "Left: Fireball"
+    /// — both hands of one command on one line. `picks` = (right hand?,
+    /// display name). A replacing line (`NotifyTag::SpellSelect`), for
+    /// the picker's seat only; presentation (hash-excluded, not saved).
+    pub(crate) fn spell_select_toast(&mut self, hx: Hx, picks: &[(bool, &str)]) {
+        let text = picks
+            .iter()
+            .map(|&(right, name)| format!("{}: {name}", if right { "Right" } else { "Left" }))
+            .collect::<Vec<_>>()
+            .join("  ");
+        self.set_seat_notification_tagged(
+            hx,
+            NotifyTag::SpellSelect,
+            text,
+            SPELL_SELECT_TOAST_TICKS,
+            [255, 0, 0],
+        );
     }
 
     /// Cycle-ring membership store (retail cmd 0x26, EF:37950-53 — a
@@ -60101,6 +60133,30 @@ mod tests {
         assert_eq!(l[0], "event 2");
         w.age_notification(100);
         assert_eq!(w.notifications().count(), 0);
+    }
+
+    /// THE CHANGE-SPELL TOAST is one law for every game: MC1 (which
+    /// had none in retail) gets it too, all prefixed with the hand;
+    /// an unowned spell takes no hand and raises nothing.
+    #[test]
+    fn spell_select_toasts_name_the_hand_in_every_game() {
+        let red = [255, 0, 0];
+        let mut w = flat_world();
+        assert!(!matches!(w.game, GameId::Mc2));
+        w.grant_spell(Hx::FIRST, SpellId(7));
+        w.grant_spell(Hx::FIRST, SpellId(15));
+        w.equip_hands(Hx::FIRST, Some(SpellId(9)), None);
+        assert!(w.notification().is_none(), "an unowned spell takes no hand");
+        w.equip_hands(Hx::FIRST, Some(SpellId(7)), None);
+        assert_eq!(w.notification(), Some(("Left: Meteor", red)));
+        w.equip_hands(Hx::FIRST, None, Some(SpellId(15)));
+        assert_eq!(w.notification(), Some(("Right: Lightning Bolt", red)));
+        assert_eq!(w.notifications().count(), 1, "a select replaces the last");
+        w.equip_hands(Hx::FIRST, Some(SpellId(15)), Some(SpellId(7)));
+        assert_eq!(
+            w.notification(),
+            Some(("Left: Lightning Bolt  Right: Meteor", red))
+        );
     }
 
     /// The message LOG feed: each raised line is handed out once, to
