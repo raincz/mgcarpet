@@ -1528,6 +1528,27 @@ pub fn melt_band(fog: f32) -> (f32, f32) {
     (start, end)
 }
 
+/// THE SPRITE FADE (enhancement, player idea 2026-11-21): past the
+/// fog wall a sprite does not only take the background's colour, it
+/// also turns TRANSLUCENT — opacity ramps 1 → 0 from the fog wall
+/// (0.95·D, the end of the retail fog band) to the end of the melt
+/// band, where it stops being drawn at all. A flat fog-coloured
+/// silhouette against the sky read as a maximum-contrast cutout, so a
+/// creature beyond the fog stood out MORE than one inside it; fading
+/// the sprite out lets the backdrop show through and the entity sink
+/// into the landscape with it. Fog off: the melt band alone.
+/// `billboard.wgsl::fs_main` evaluates the same law per fragment (from
+/// `camera.w` and the melt band); this is the CPU half that decides
+/// which instances must ride the blend pipeline.
+pub fn sprite_fade_band(fog: f32) -> (f32, f32) {
+    let melt = melt_band(fog);
+    let start = if fog > 0.0 { SPRITE_FADE_FROM * fog } else { melt.0 };
+    (start, melt.1)
+}
+/// The fade's start as a fraction of the fog distance — the fog
+/// wall, where the retail band saturates (`billboard.wgsl` mirrors it).
+const SPRITE_FADE_FROM: f32 = 0.95;
+
 /// THE HORIZON CULL: which terrain tiles a frame draws, and in which
 /// torus copy. Retail drew a 21×40 camera-relative grid cut at 20
 /// tiles (GRO:668/1042); the port rasterized the whole 256×256 map
@@ -5687,6 +5708,7 @@ impl Renderer {
         } else {
             Vec::new()
         };
+        let fade = sprite_fade_band(self.fog_distance);
         for (bi, b) in self.billboards.iter().enumerate() {
             // Nearest torus copy relative to the camera.
             let wrap = |p: f32, c: f32| {
@@ -5746,6 +5768,15 @@ impl Renderer {
                 }
                 alpha *= vis;
             }
+            // THE SPRITE FADE (`sprite_fade_band`): a sprite any of
+            // whose fragments could sit past the fade start must ride
+            // the blend pipeline — the opaque one ignores alpha. The
+            // quad's reach from its feet is bounded by its width plus
+            // height (anchor and roll included), so this errs only
+            // toward blending a sprite that is still fully opaque.
+            let reach = world_w + b.world_h * b.h_stretch;
+            let (dx, dy, dz) = (pos[0] - cam.x, pos[1] - cam.y, pos[2] - cam.z);
+            let fading = (dx * dx + dy * dy + dz * dz).sqrt() + reach > fade.0;
             let inst = BillboardInstance {
                 pos,
                 size: [world_w, b.world_h * b.h_stretch],
@@ -5758,7 +5789,7 @@ impl Renderer {
                 key: keys.get(bi).copied().unwrap_or(-1.0),
                 anchor,
             };
-            if alpha < 1.0 {
+            if alpha < 1.0 || fading {
                 translucent.push(inst);
             } else {
                 out.push(inst);
@@ -7961,6 +7992,8 @@ mod tests {
         for (name, src) in [
             ("layer.wgsl", include_str!("layer.wgsl")),
             ("map.wgsl", include_str!("map.wgsl")),
+            // The sprite fade (2026-11-21).
+            ("billboard.wgsl", include_str!("billboard.wgsl")),
         ] {
             let module = wgpu::naga::front::wgsl::parse_str(src)
                 .unwrap_or_else(|e| panic!("{name} parses: {e}"));
@@ -8269,6 +8302,11 @@ mod tests {
     /// meets the fixed band exactly at the 90-tile cap.
     #[test]
     fn the_melt_band_follows_the_fog() {
+        // The sprite fade runs from the fog wall to the melt's end.
+        assert_eq!(sprite_fade_band(0.0), (95.0, 125.0));
+        let (a, b) = sprite_fade_band(20.0);
+        assert!((a - 19.0).abs() < 1e-4 && b == melt_band(20.0).1);
+        assert!(sprite_fade_band(90.0).0 < melt_band(90.0).0);
         assert_eq!(melt_band(0.0), (95.0, 125.0));
         assert_eq!(melt_band(90.0), (95.0, 125.0));
         let (s20, e20) = melt_band(20.0);

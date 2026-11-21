@@ -269,8 +269,19 @@ fn fs_main(in: VsOut) -> FsOut {
     if ext > 0.0 {
         rgb = mix(rgb, sky_backdrop(in.world), ext);
     }
+    // THE SPRITE FADE (lib.rs `sprite_fade_band`, enhancement):
+    // past the fog wall the sprite also turns translucent, opacity
+    // 1 → 0 from 0.95·D (fog off: the melt start) to the melt's end,
+    // so the backdrop shows through instead of a full-contrast
+    // fog-coloured cutout. Only the blend pipeline honours it; the
+    // renderer routes every sprite reaching past the start there.
+    var fade_start = globals.bb_right.w;
+    if d > 0.0 {
+        fade_start = 0.95 * d;
+    }
+    let opacity = 1.0 - smoothstep(fade_start, globals.bb_up.w, dist);
     var out: FsOut;
-    out.color = vec4<f32>(rgb, in.alpha);
+    out.color = vec4<f32>(rgb, in.alpha * opacity);
     // The anchor tile's painter depth, unless this fragment's OWN plan
     // distance is nearer. The quad spans sideways along the camera's
     // right axis, so a sprite off to one side reaches back across the
