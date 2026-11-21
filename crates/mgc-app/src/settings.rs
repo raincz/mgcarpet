@@ -384,6 +384,7 @@ pub const VISUALS_PRESET: PresetGroup = PresetGroup {
         "render.enhancement.smooth_motion",
         "render.enhancement.smooth_textures",
         "render.enhancement.segment_order",
+        "render.enhancement.hotbar",
         "render.enhancement.fire",
         "render.enhancement.lightning",
         "render.enhancement.map_owned_buildings",
@@ -412,6 +413,7 @@ pub const VISUALS_PRESET: PresetGroup = PresetGroup {
         enh.smooth_motion = true;
         enh.smooth_textures = enhanced;
         enh.segment_order = enhanced;
+        enh.hotbar = enhanced;
         enh.fire = if enhanced {
             FireEffects::Enhanced
         } else {
@@ -1437,6 +1439,29 @@ pub fn registry() -> Vec<Spec> {
                 descs: [
                     "Retail's tile order — side-on bodies flicker.",
                     "Head-first segment order, no flicker.",
+                ],
+            },
+        },
+        Spec {
+            domain: Render,
+            group: "render · enhancement",
+            label: "hotbar",
+            class: Enhancement,
+            key: None,
+            cli: Some("--hotbar"),
+            cfg_path: "render.enhancement.hotbar",
+            read: toggle!(c => render.enhancement.hotbar),
+            desc: "The quick keys 1-0 as a bar of spell boxes at the bottom \
+                   of the screen, with each spell's mana meter and its \
+                   active highlight. With the spell selector (CTRL) open, \
+                   double-click a spell to put it on the bar, drag keys to \
+                   swap them, drag one off the bar to clear it. The keys \
+                   work either way.",
+            ctl: Ctl::Toggle {
+                set: |c, v| c.render.enhancement.hotbar = v,
+                descs: [
+                    "No bar — the quick keys stay invisible.",
+                    "The quick-key bar is shown.",
                 ],
             },
         },

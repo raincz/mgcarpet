@@ -2712,12 +2712,13 @@ pub const MC2_SPELL_NAMES: [&str; 26] = [
 
 /// MC2 grid order = identity over `spell_t` (`spellIndex_D94FF`,
 /// trace §0/§3): row 0 = 0..12, row 1 = 13..25.
-const MC2_GRID_ORDER: [u8; 26] = [
+pub const MC2_GRID_ORDER: [u8; 26] = [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25,
 ];
 
 /// The pane's per-game shape: grid dimensions, slot→spell order,
 /// level depth, and which art set draws it.
+#[derive(Clone)]
 pub struct SelectorPane {
     /// Draw with the MC2 sprite set (87..256) vs the MC1 book set.
     mc2_art: bool,
@@ -2804,6 +2805,12 @@ pub struct SelectorView<'a> {
     /// The blink bank's index-[1] phase (Turn & 1); false = the
     /// skip frame for expiring cells.
     pub blink: bool,
+    /// The spell's cast is LIVE — the hand panels' held-frame law
+    /// (MC1: the burst/duration countdown runs; MC2: the book's armed
+    /// window): shields, rebound, speed… stay lit while they last.
+    /// Only the hotbar draws it (the hand panels' HELD frame); the
+    /// pane keeps retail's look.
+    pub active: &'a [bool],
     /// Per-tier `xpos1` thresholds (single-player ladder), same bar.
     pub xpos: &'a [[i32; 3]],
 }
@@ -2984,6 +2991,424 @@ fn ring(quads: &mut Vec<UiQuad>, f: [f32; 4], t: [f32; 4]) {
     quads.push(solid([f[0] + f[2] - 2.0, f[1], 2.0, f[3]], t));
 }
 
+/// One spell box of the selector pane, drawn into `cell` (screen px):
+/// the state tile (castable / hovered / ghost / empty / known relief),
+/// the hovered shot meter and the hand / cycle-ring corner tags. The
+/// pane grid and the quick-key HOTBAR both draw their cells through
+/// here, so a spell reads the same in either.
+#[allow(clippy::too_many_arguments)]
+fn pane_cell(
+    quads: &mut Vec<UiQuad>,
+    assets: &UiAssets,
+    mc2_art: bool,
+    g: &PaneGeom,
+    view: &SelectorView,
+    spell: usize,
+    cell: [f32; 4],
+    hovered: bool,
+) {
+    let owned = view.owned[spell];
+    let castable = owned && view.castable[spell];
+    // THE EXPIRY BLINK on the pane cell (EF:22493-99 — the same
+    // flag-4 + last-window gate as the hand panel skips the whole
+    // cell body on odd turns). The hit-test above stays live:
+    // retail never keys input to the draw phase.
+    if owned && view.expiring.get(spell).copied().unwrap_or(false) && !view.blink {
+        return;
+    }
+
+    if mc2_art {
+        // One pre-composited tile per box state (EF:22468-22544):
+        // castable(89+icon), hovered shot-meter(87+icon),
+        // owned-unaffordable ghost(91+blended icon). The bake made
+        // the treatment choice; the draw is a single quad.
+        //
+        // NOT POSSESSED = the plain empty box (EF:22557:
+        // SPELL_ICON_PANEL only) — unless the spell is KNOWN
+        // (`array_0x3E9`), when retail colourizes its icon into
+        // the box with 0xA6: the baked relief tile, variant 3.
+        if !owned {
+            let relief = view
+                .known
+                .get(spell)
+                .copied()
+                .unwrap_or(false)
+                .then(|| assets.pane_tile(spell, 3))
+                .flatten();
+            match relief {
+                Some(uv) => quads.push(UiQuad {
+                    rect: snap(cell),
+                    uv,
+                    tint: WHITE,
+                }),
+                None => push_opt(
+                    quads,
+                    assets.sprite_quad_rect_tint(MC2_SPR_BOX, cell, WHITE),
+                ),
+            }
+            return;
+        }
+        let variant = if !castable {
+            2
+        } else if hovered {
+            1
+        } else {
+            0
+        };
+        if let Some(uv) = assets.pane_tile(spell, variant) {
+            quads.push(UiQuad {
+                rect: snap(cell),
+                uv,
+                tint: WHITE,
+            });
+        }
+        // Shot meter on the hovered castable box, verbatim
+        // geometry (EF:22516-22529): fill line at (+6,+28),
+        // 36 px ruler, 4 tall; one 2×2 dot per whole affordable
+        // cast packed column-major (2 rows), max 36.
+        if hovered && castable {
+            let cost = view.cost[spell].max(1);
+            let frac = (view.mana % cost) as f32 / cost as f32;
+            let (mx, my) = (cell[0] + 6.0 * g.sx, cell[1] + 28.0 * g.sy);
+            quads.push(solid(
+                [mx, my, 36.0 * g.sx * frac, 4.0 * g.sy],
+                meter_of(MANA_WHITE),
+            ));
+            let casts = ((view.mana / cost) as usize).min(36);
+            for d in 0..casts {
+                let (col, row) = ((d / 2) as f32, (d % 2) as f32);
+                quads.push(solid(
+                    [
+                        mx + col * 2.0 * g.sx,
+                        my + row * 2.0 * g.sy,
+                        2.0 * g.sx,
+                        2.0 * g.sy,
+                    ],
+                    MANA_WHITE,
+                ));
+            }
+        }
+        // L/R mouse-binding corner tags, as transparent blits
+        // (EF:22546-22553); right tag at +boxW−tagLeftW
+        // (EF:22452). The alpha tint stands in for the blend.
+        // Keyed on CYCLE-RING membership (`array_0x3B5`,
+        // EF:22547) plus the equipped hand, and drawn on EVERY
+        // box, not only the hovered one — the queued sets must
+        // read at a glance (player-ruled; the decompile's
+        // `spellOnCursor_50` hover gate notwithstanding — see
+        // DEVIATIONS).
+        {
+            let ring = view.ring.get(spell).copied().unwrap_or(0);
+            let tag_tint = [1.0, 1.0, 1.0, 0.75];
+            let su = g.sx;
+            if ring == 1 || view.bound[0] == Some(spell as u8) {
+                push_opt(
+                    quads,
+                    assets.sprite_quad_tint(MC2_SPR_TAG_LEFT, cell[0], cell[1], su, tag_tint),
+                );
+            }
+            if ring == 2 || view.bound[1] == Some(spell as u8) {
+                let tag_w = assets
+                    .sprite_dims(MC2_SPR_TAG_LEFT)
+                    .map_or(14.0, |(w, _)| w);
+                push_opt(
+                    quads,
+                    assets.sprite_quad_tint(
+                        MC2_SPR_TAG_RIGHT,
+                        cell[0] + (g.box_w - tag_w) * g.sx,
+                        cell[1],
+                        su,
+                        tag_tint,
+                    ),
+                );
+            }
+        }
+    } else {
+        // MC1 art: the book's slab + icon idiom in pane cells.
+        push_opt(
+            quads,
+            assets.sprite_quad_rect_tint(SPR_SLOT_BG as usize, cell, SLAB_DIM),
+        );
+        let icon = SPR_SPELL_ICON + spell;
+        let irect = [
+            cell[0],
+            cell[1],
+            cell[2] * (ICON_W / 64.0),
+            cell[3] * (ICON_H / 37.0),
+        ];
+        push_opt(
+            quads,
+            if owned {
+                assets.sprite_quad_rect_tint(icon, irect, WHITE)
+            } else {
+                assets.sprite_quad_rect_mask(icon, irect, UNOWNED_MASK)
+            },
+        );
+        if owned && !castable {
+            quads.push(solid(cell, LOCKED_WASH));
+        }
+        // Bound-hand corner marks (translucent white triangles
+        // pointing into their corner — the MC1-art stand-in for
+        // MC2's corner-tag sprites, player-tuned). Cycle-ring
+        // members wear the same notch dimmed — the queued set
+        // reads at a glance, the equipped spell stays brighter.
+        let tab = [1.0, 1.0, 1.0, 0.5];
+        let dim = [1.0, 1.0, 1.0, 0.25];
+        let member = view.ring.get(spell).copied().unwrap_or(0);
+        if view.bound[0] == Some(spell as u8) || member == 1 {
+            let t = if view.bound[0] == Some(spell as u8) {
+                tab
+            } else {
+                dim
+            };
+            corner_tri(quads, cell[0], cell[1], g.sx, g.sy, false, t);
+        }
+        if view.bound[1] == Some(spell as u8) || member == 2 {
+            let t = if view.bound[1] == Some(spell as u8) {
+                tab
+            } else {
+                dim
+            };
+            corner_tri(
+                quads,
+                cell[0] + cell[2] - 6.0 * g.sx,
+                cell[1],
+                g.sx,
+                g.sy,
+                true,
+                t,
+            );
+        }
+        if hovered {
+            ring(quads, cell, [0.9, 0.85, 0.5, 0.9]);
+        }
+        // Shot meter on the hovered castable box (book meter
+        // idiom).
+        if hovered && castable {
+            let cost = view.cost[spell].max(1);
+            let frac = (view.mana % cost) as f32 / cost as f32;
+            // The hand panel's meter (sub_23D40): the partial-cast
+            // gauge, one dot per whole affordable cast over it.
+            let my = cell[1] + cell[3] - 7.0 * g.sy;
+            let mx = cell[0] + 4.0 * g.sx;
+            let span = cell[2] - 8.0 * g.sx;
+            quads.push(solid([mx, my, span * frac, 4.0 * g.sy], meter_of(MANA_WHITE)));
+            let max = ((span / (2.0 * g.sx)) as usize) * 2;
+            meter_dots(
+                quads,
+                mx,
+                my,
+                g.sx,
+                g.sy,
+                ((view.mana / cost) as usize).min(max),
+                MANA_WHITE,
+            );
+        }
+    }
+}
+
+/// THE QUICK-KEY HOTBAR (enhancement, player design 2026-11-21): the
+/// ten digit keys as a visible bar — slot i = key i+1 (the tenth is
+/// 0) — each cell the pane's own spell box (`pane_cell`) plus its
+/// digit and how many casts the current mana buys. Bottom-centre in
+/// flight; while the CTRL pane is up it rises above the pane (and
+/// MC2's tier row), where promotion (double-click a pane spell) and
+/// reordering (drag between slots, off the bar to clear) happen.
+pub const HOTBAR_SLOTS: usize = 10;
+
+/// One hotbar key's spell, drawn as a MINIATURE HAND PANEL (player
+/// ruling 2026-11-21: the bar should read like the hands): the hand
+/// frame — IDLE [1], or HELD [2] while the cast is live (MC2's held
+/// frame is the blue glow; MC1's the lit slab) — stretched to the
+/// cell, with its black meter recess; the hand panel's spell icon,
+/// uniformly scaled; the availability meter (partial-cast gauge + one
+/// dot per affordable cast, team ink) in the recess; the locked wash
+/// when the castle prerequisite is unmet; the L/R hand tags. A key
+/// bound to a spell not owned right now (a withheld, stolen or not yet
+/// found spell) shows the icon's silhouette — the key is RESERVED and
+/// works again the moment the spell is back.
+#[allow(clippy::too_many_arguments)]
+fn hotbar_cell(
+    quads: &mut Vec<UiQuad>,
+    assets: &UiAssets,
+    mc2: bool,
+    view: &SelectorView,
+    spell: usize,
+    r: [f32; 4],
+    mana_c: [f32; 4],
+    hovered: bool,
+) {
+    let owned = view.owned[spell];
+    if owned && view.expiring.get(spell).copied().unwrap_or(false) && !view.blink {
+        return;
+    }
+    let active = owned && view.active.get(spell).copied().unwrap_or(false);
+    // Frame space: the hand panel's 64×44, stretched to the cell for
+    // the frame + recess; uniform (the smaller factor) for the icon.
+    let (fx, fy) = (r[2] / 64.0, r[3] / 44.0);
+    let k = fx.min(fy);
+    let frame = if active { SPR_SLOT_HELD } else { SPR_SLOT_IDLE };
+    push_opt(quads, assets.sprite_quad_rect_tint(frame, r, WHITE));
+    let icon = if mc2 { 123 + spell } else { SPR_SPELL_ICON + spell };
+    let (iw, ih) = assets.sprite_dims(icon).unwrap_or((ICON_W, ICON_H));
+    let irect = [r[0] + (r[2] - 64.0 * k) / 2.0, r[1], iw * k, ih * k];
+    if !owned {
+        push_opt(quads, assets.sprite_quad_rect_mask(icon, irect, UNOWNED_MASK));
+    } else {
+        push_opt(quads, assets.sprite_quad_rect_tint(icon, irect, WHITE));
+        let castable = view.castable[spell];
+        if castable {
+            let cost = view.cost[spell].max(1);
+            let (mx, my) = (r[0] + 4.0 * fx, r[1] + 36.0 * fy);
+            let partial = 56.0 * (view.mana % cost) as f32 / cost as f32;
+            quads.push(solid([mx, my, partial * fx, 4.0 * fy], meter_of(mana_c)));
+            meter_dots(quads, mx, my, fx, fy, (view.mana / cost).min(54) as usize, mana_c);
+        } else {
+            quads.push(solid(r, LOCKED_WASH));
+        }
+    }
+    // The hand tags (bound / cycle ring), as on the pane.
+    let ring = view.ring.get(spell).copied().unwrap_or(0);
+    let (left, right) = (
+        view.bound[0] == Some(spell as u8) || ring == 1,
+        view.bound[1] == Some(spell as u8) || ring == 2,
+    );
+    if mc2 {
+        let tint = [1.0, 1.0, 1.0, 0.75];
+        if left {
+            push_opt(quads, assets.sprite_quad_tint(MC2_SPR_TAG_LEFT, r[0], r[1], k, tint));
+        }
+        if right {
+            let tw = assets.sprite_dims(MC2_SPR_TAG_RIGHT).map_or(14.0, |(w, _)| w);
+            push_opt(
+                quads,
+                assets.sprite_quad_tint(MC2_SPR_TAG_RIGHT, r[0] + r[2] - tw * k, r[1], k, tint),
+            );
+        }
+    } else {
+        let t = [1.0, 1.0, 1.0, 0.5];
+        if left {
+            corner_tri(quads, r[0], r[1], k, k, false, t);
+        }
+        if right {
+            corner_tri(quads, r[0] + r[2] - 6.0 * k, r[1], k, k, true, t);
+        }
+    }
+    if hovered {
+        if mc2 {
+            push_opt(quads, assets.sprite_quad_rect_tint(MC2_SPR_BOX_FRAME, r, WHITE));
+        } else {
+            ring_outline(quads, r);
+        }
+    }
+}
+
+/// The MC1-art hover ring, for the hotbar.
+fn ring_outline(quads: &mut Vec<UiQuad>, r: [f32; 4]) {
+    ring(quads, r, [0.9, 0.85, 0.5, 0.9]);
+}
+
+/// The hotbar's ten cell rects (screen px). `raised` = the CTRL pane
+/// is open: the bar sits above the pane's grid and its tier row.
+pub fn hotbar_rects(
+    assets: &UiAssets,
+    pane: &SelectorPane,
+    w: f32,
+    h: f32,
+    raised: bool,
+) -> [[f32; 4]; HOTBAR_SLOTS] {
+    let g = PaneGeom::new(assets, pane, w, h);
+    const GAP: f32 = 4.0;
+    let y = if raised {
+        let tier_row = if pane.levels > 1 { g.sub_h } else { 0.0 };
+        g.grid_top() - tier_row - g.box_h - GAP
+    } else {
+        480.0 - g.box_h - GAP
+    };
+    let x0 = 320.0 - HOTBAR_SLOTS as f32 * g.box_w / 2.0;
+    std::array::from_fn(|i| {
+        [
+            g.f.cx(x0 + i as f32 * g.box_w),
+            g.f.by(y),
+            g.f.len(g.box_w),
+            g.f.len(g.box_h),
+        ]
+    })
+}
+
+/// The hotbar's bounding rect (screen px) — the pointer capture
+/// widens to it while the pane is up.
+pub fn hotbar_bounds(assets: &UiAssets, pane: &SelectorPane, w: f32, h: f32, raised: bool) -> [f32; 4] {
+    let r = hotbar_rects(assets, pane, w, h, raised);
+    let (a, b) = (r[0], r[HOTBAR_SLOTS - 1]);
+    [a[0], a[1], b[0] + b[2] - a[0], b[1] + b[3] - a[1]]
+}
+
+/// Draw the hotbar and hit-test it. `binds[i]` = the pane spell id on
+/// key i+1. `drag` = the slot being dragged (drawn lifted under the
+/// cursor, its home cell left empty). Returns the quads and the slot
+/// under the cursor (only meaningful while the pointer is free).
+#[allow(clippy::too_many_arguments)]
+pub fn hotbar_quads(
+    assets: &UiAssets,
+    pane: &SelectorPane,
+    view: &SelectorView,
+    binds: &[Option<u8>; HOTBAR_SLOTS],
+    w: f32,
+    h: f32,
+    cursor: Option<(f32, f32)>,
+    raised: bool,
+    drag: Option<usize>,
+    team: Option<([f32; 4], [f32; 4])>,
+) -> (Vec<UiQuad>, Option<usize>) {
+    let g = PaneGeom::new(assets, pane, w, h);
+    let mana_c = team.map_or(MANA_WHITE, |t| hud_pip(t.0));
+    let rects = hotbar_rects(assets, pane, w, h, raised);
+    let mut quads = Vec::new();
+    let hover = cursor.and_then(|c| rects.iter().position(|&r| rect_hit(r, c)));
+    let fs = g.f.s.max(1.0);
+    let label = |quads: &mut Vec<UiQuad>, text: &str, x: f32, y: f32, ink: [f32; 4]| {
+        // A 1-px drop shadow keeps the glyphs legible on any box.
+        quads.extend(assets.text_quads(text, x + fs, y + fs, [0.0, 0.0, 0.0, 0.9], fs));
+        quads.extend(assets.text_quads(text, x, y, ink, fs));
+    };
+    let draw = |quads: &mut Vec<UiQuad>, i: usize, r: [f32; 4], lifted: bool| {
+        let spell = binds[i].filter(|_| !(drag == Some(i) && !lifted));
+        match spell {
+            Some(s) if (s as usize) < view.owned.len() => {
+                let s = s as usize;
+                hotbar_cell(quads, assets, pane.mc2_art, view, s, r, mana_c, hover == Some(i) || lifted);
+            }
+            _ => {
+                // An empty key: a dark backing (legible over bright
+                // scenery), the bare box dimmed over it.
+                quads.push(solid(r, [0.0, 0.0, 0.0, 0.45]));
+                if pane.mc2_art {
+                    push_opt(quads, assets.sprite_quad_rect_tint(MC2_SPR_BOX, r, [1.0, 1.0, 1.0, 0.5]));
+                } else {
+                    push_opt(
+                        quads,
+                        assets.sprite_quad_rect_tint(SPR_SLOT_BG as usize, r, [SLAB_DIM[0], SLAB_DIM[1], SLAB_DIM[2], 0.5]),
+                    );
+                }
+            }
+        }
+        // The key's digit, top-centre — between the hand tags, clear
+        // of the meter along the bottom.
+        let digit = ((i + 1) % 10).to_string();
+        let dw = assets.text_width(&digit) * fs;
+        label(quads, &digit, r[0] + (r[2] - dw) / 2.0, r[1] + 2.0 * fs, [1.0, 0.85, 0.4, 1.0]);
+    };
+    for (i, &r) in rects.iter().enumerate() {
+        draw(&mut quads, i, r, false);
+    }
+    if let (Some(i), Some(c)) = (drag, cursor) {
+        let r = rects[i];
+        draw(&mut quads, i, [c.0 - r[2] / 2.0, c.1 - r[3] / 2.0, r[2], r[3]], true);
+    }
+    (quads, hover)
+}
+
 /// Draw the selector pane + hit-test the cursor. `drag_slot` = the
 /// grid slot anchored by a held click (the flyout live-tracks the
 /// cursor and the anchor stays put, trace §1.3); None = plain hover.
@@ -3019,201 +3444,17 @@ pub fn selector_quads(
 
     // --- The 2×13 (or 2×12) grid ---
     for slot in 0..n {
-        let spell = pane.order[slot] as usize;
-        let cell = g.cell(slot, pane.cols);
-        let owned = view.owned[spell];
-        let castable = owned && view.castable[spell];
         let hovered = hover.slot == Some(slot) || drag_slot == Some(slot);
-        // THE EXPIRY BLINK on the pane cell (EF:22493-99 — the same
-        // flag-4 + last-window gate as the hand panel skips the whole
-        // cell body on odd turns). The hit-test above stays live:
-        // retail never keys input to the draw phase.
-        if owned && view.expiring.get(spell).copied().unwrap_or(false) && !view.blink {
-            continue;
-        }
-
-        if pane.mc2_art {
-            // One pre-composited tile per box state (EF:22468-22544):
-            // castable(89+icon), hovered shot-meter(87+icon),
-            // owned-unaffordable ghost(91+blended icon). The bake made
-            // the treatment choice; the draw is a single quad.
-            //
-            // NOT POSSESSED = the plain empty box (EF:22557:
-            // SPELL_ICON_PANEL only) — unless the spell is KNOWN
-            // (`array_0x3E9`), when retail colourizes its icon into
-            // the box with 0xA6: the baked relief tile, variant 3.
-            if !owned {
-                let relief = view
-                    .known
-                    .get(spell)
-                    .copied()
-                    .unwrap_or(false)
-                    .then(|| assets.pane_tile(spell, 3))
-                    .flatten();
-                match relief {
-                    Some(uv) => quads.push(UiQuad {
-                        rect: snap(cell),
-                        uv,
-                        tint: WHITE,
-                    }),
-                    None => push_opt(
-                        &mut quads,
-                        assets.sprite_quad_rect_tint(MC2_SPR_BOX, cell, WHITE),
-                    ),
-                }
-                continue;
-            }
-            let variant = if !castable {
-                2
-            } else if hovered {
-                1
-            } else {
-                0
-            };
-            if let Some(uv) = assets.pane_tile(spell, variant) {
-                quads.push(UiQuad {
-                    rect: snap(cell),
-                    uv,
-                    tint: WHITE,
-                });
-            }
-            // Shot meter on the hovered castable box, verbatim
-            // geometry (EF:22516-22529): fill line at (+6,+28),
-            // 36 px ruler, 4 tall; one 2×2 dot per whole affordable
-            // cast packed column-major (2 rows), max 36.
-            if hovered && castable {
-                let cost = view.cost[spell].max(1);
-                let frac = (view.mana % cost) as f32 / cost as f32;
-                let (mx, my) = (cell[0] + 6.0 * g.sx, cell[1] + 28.0 * g.sy);
-                quads.push(solid(
-                    [mx, my, 36.0 * g.sx * frac, 4.0 * g.sy],
-                    meter_of(MANA_WHITE),
-                ));
-                let casts = ((view.mana / cost) as usize).min(36);
-                for d in 0..casts {
-                    let (col, row) = ((d / 2) as f32, (d % 2) as f32);
-                    quads.push(solid(
-                        [
-                            mx + col * 2.0 * g.sx,
-                            my + row * 2.0 * g.sy,
-                            2.0 * g.sx,
-                            2.0 * g.sy,
-                        ],
-                        MANA_WHITE,
-                    ));
-                }
-            }
-            // L/R mouse-binding corner tags, as transparent blits
-            // (EF:22546-22553); right tag at +boxW−tagLeftW
-            // (EF:22452). The alpha tint stands in for the blend.
-            // Keyed on CYCLE-RING membership (`array_0x3B5`,
-            // EF:22547) plus the equipped hand, and drawn on EVERY
-            // box, not only the hovered one — the queued sets must
-            // read at a glance (player-ruled; the decompile's
-            // `spellOnCursor_50` hover gate notwithstanding — see
-            // DEVIATIONS).
-            {
-                let ring = view.ring.get(spell).copied().unwrap_or(0);
-                let tag_tint = [1.0, 1.0, 1.0, 0.75];
-                let su = g.sx;
-                if ring == 1 || view.bound[0] == Some(spell as u8) {
-                    push_opt(
-                        &mut quads,
-                        assets.sprite_quad_tint(MC2_SPR_TAG_LEFT, cell[0], cell[1], su, tag_tint),
-                    );
-                }
-                if ring == 2 || view.bound[1] == Some(spell as u8) {
-                    let tag_w = assets
-                        .sprite_dims(MC2_SPR_TAG_LEFT)
-                        .map_or(14.0, |(w, _)| w);
-                    push_opt(
-                        &mut quads,
-                        assets.sprite_quad_tint(
-                            MC2_SPR_TAG_RIGHT,
-                            cell[0] + (g.box_w - tag_w) * g.sx,
-                            cell[1],
-                            su,
-                            tag_tint,
-                        ),
-                    );
-                }
-            }
-        } else {
-            // MC1 art: the book's slab + icon idiom in pane cells.
-            push_opt(
-                &mut quads,
-                assets.sprite_quad_rect_tint(SPR_SLOT_BG as usize, cell, SLAB_DIM),
-            );
-            let icon = SPR_SPELL_ICON + spell;
-            let irect = [
-                cell[0],
-                cell[1],
-                cell[2] * (ICON_W / 64.0),
-                cell[3] * (ICON_H / 37.0),
-            ];
-            push_opt(
-                &mut quads,
-                if owned {
-                    assets.sprite_quad_rect_tint(icon, irect, WHITE)
-                } else {
-                    assets.sprite_quad_rect_mask(icon, irect, UNOWNED_MASK)
-                },
-            );
-            if owned && !castable {
-                quads.push(solid(cell, LOCKED_WASH));
-            }
-            // Bound-hand corner marks (translucent white triangles
-            // pointing into their corner — the MC1-art stand-in for
-            // MC2's corner-tag sprites, player-tuned). Cycle-ring
-            // members wear the same notch dimmed — the queued set
-            // reads at a glance, the equipped spell stays brighter.
-            let tab = [1.0, 1.0, 1.0, 0.5];
-            let dim = [1.0, 1.0, 1.0, 0.25];
-            let member = view.ring.get(spell).copied().unwrap_or(0);
-            if view.bound[0] == Some(spell as u8) || member == 1 {
-                let t = if view.bound[0] == Some(spell as u8) {
-                    tab
-                } else {
-                    dim
-                };
-                corner_tri(&mut quads, cell[0], cell[1], g.sx, g.sy, false, t);
-            }
-            if view.bound[1] == Some(spell as u8) || member == 2 {
-                let t = if view.bound[1] == Some(spell as u8) {
-                    tab
-                } else {
-                    dim
-                };
-                corner_tri(
-                    &mut quads,
-                    cell[0] + cell[2] - 6.0 * g.sx,
-                    cell[1],
-                    g.sx,
-                    g.sy,
-                    true,
-                    t,
-                );
-            }
-            if hovered {
-                ring(&mut quads, cell, [0.9, 0.85, 0.5, 0.9]);
-            }
-            // Shot meter on the hovered castable box (book meter
-            // idiom).
-            if hovered && castable {
-                let cost = view.cost[spell].max(1);
-                let frac = (view.mana % cost) as f32 / cost as f32;
-                let my = cell[1] + cell[3] - 5.0 * g.sy;
-                quads.push(solid(
-                    [
-                        cell[0] + 3.0 * g.sx,
-                        my,
-                        (cell[2] - 6.0 * g.sx) * frac,
-                        2.0 * g.sy,
-                    ],
-                    meter_of(MANA_WHITE),
-                ));
-            }
-        }
+        pane_cell(
+            &mut quads,
+            assets,
+            pane.mc2_art,
+            &g,
+            view,
+            pane.order[slot] as usize,
+            g.cell(slot, pane.cols),
+            hovered,
+        );
     }
 
     // --- Pane end frames + hovered-slot highlight (MC2 art) ---

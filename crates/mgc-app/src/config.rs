@@ -568,6 +568,13 @@ pub struct RenderEnhancement {
     /// segment_depth_keys`). Presentation only. DEFAULTS ON with the
     /// Visuals preset (player design 2026-10-05); Classic = off.
     pub segment_order: bool,
+    /// The quick-key HOTBAR: the ten digit keys as a visible bar of
+    /// spell boxes (pane art, hand-panel mana meter, active
+    /// highlight), bottom-centre in flight, raised over the CTRL pane
+    /// where spells are promoted (double-click) and reordered (drag).
+    /// No retail analogue. DEFAULTS ON with the Visuals preset (player
+    /// design 2026-11-21); Classic = off.
+    pub hotbar: bool,
     /// The view and the entities render interpolated between the last
     /// two sim ticks, so movement is frame-smooth at any fps instead
     /// of stepping at tick rate (rapid-fire streams stop looking
@@ -670,6 +677,7 @@ impl Default for RenderEnhancement {
             smooth_shading: true,
             smooth_textures: true,
             segment_order: true,
+            hotbar: true,
             smooth_motion: true,
             hud_transparency: HudTransparency::default(),
             map_owned_buildings: true,

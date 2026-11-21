@@ -130,12 +130,13 @@ pub struct SaveHeader {
     /// MC2 slots and on pre-ring saves.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mc1_spell_ring: Option<[u8; 24]>,
-    /// MC1/HW quick keys 1..9,0 → spell id (`null` = unbound) — the
-    /// same native-only campaign carry as the ring (player ask
-    /// 2026-10-17: rebinding the digits every level was a chore).
-    /// `None` on MC2 slots, on saves from before the carry, and when
-    /// nothing is bound — such a campaign seeds its keys from scratch
-    /// at level start, exactly as retail does.
+    /// Quick keys 1..9,0 → spell id (`null` = unbound) — the same
+    /// native-only campaign carry as the ring (player ask 2026-10-17:
+    /// rebinding the digits every level was a chore). MC1/HW ids; MC2
+    /// ids on MC2 slots since the hotbar (2026-11-21 — the name is
+    /// historical; a save is one game's, so ids never mix). `None` on
+    /// saves from before the carry and when nothing is bound — such a
+    /// campaign seeds its keys from scratch at level start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mc1_quick_keys: Option<[Option<u8>; 10]>,
     /// MC2: the stats tables the map still owes, oldest first — a

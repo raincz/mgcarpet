@@ -88,6 +88,7 @@
       "autocontrasting_markers": true,
       "expose_jar_spells": false,
       "fire": "enhanced",
+      "hotbar": true,
       "hud_transparency": "off",
       "lightning": "enhanced",
       "map_beyond_sight_areas": true,

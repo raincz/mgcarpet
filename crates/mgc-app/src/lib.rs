@@ -265,8 +265,10 @@ struct CampaignRun {
     /// Installed into each fresh world, refreshed at the won edge.
     /// All-zero on MC2 runs.
     mc1_ring: [u8; 24],
-    /// MC1/HW quick-key carry (native-only sidecar, like the ring;
-    /// `SaveHeader::mc1_quick_keys`). `None` = no assignment carried —
+    /// Quick-key carry, EVERY game since the hotbar (2026-11-21; the
+    /// field keeps its historical name — a save is one game's, so the
+    /// spell ids are never ambiguous). Native-only sidecar, like the
+    /// ring; `SaveHeader::mc1_quick_keys`. `None` = no assignment carried —
     /// a new campaign or a save from before the carry — and the level
     /// seeds its keys from scratch like retail (:49216-59); `Some` =
     /// the player's binds, installed at level entry and refreshed at
@@ -531,7 +533,10 @@ impl CampaignRun {
                     save: CampaignSave::Mc2(save),
                     next: None,
                     mc1_ring: [0; 24],
-                    mc1_quick_keys: None,
+                    // The quick keys load for MC2 too (the hotbar) —
+                    // this arm hard-dropped them while the carry was
+                    // MC1-only (player report 2026-11-22).
+                    mc1_quick_keys,
                     map_stats,
                 })
             }
@@ -593,10 +598,10 @@ impl CampaignRun {
         if self.id != campaign::CampaignId::Mc2 && self.mc1_ring != [0; 24] {
             header.mc1_spell_ring = Some(self.mc1_ring);
         }
-        // The MC1 quick keys likewise (omitted while unbound).
-        if self.id != campaign::CampaignId::Mc2 {
-            header.mc1_quick_keys = self.mc1_quick_keys;
-        }
+        // The quick keys likewise (omitted while unbound) — MC2's too
+        // since the hotbar: a save is one game's, so the spell ids in
+        // the shared field are never ambiguous.
+        header.mc1_quick_keys = self.mc1_quick_keys;
         // MC2: tables still owed (a secret level's parent, saved from
         // inside the secret level).
         header.mc2_map_stats = self.map_stats.clone();
@@ -2627,7 +2632,23 @@ struct App {
     /// Last tick's owned-spell set — the acquisition edge detector
     /// feeding the retail quickselect auto-assign (app-side only,
     /// never part of the sim hash).
-    prev_owned: [bool; 24],
+    prev_owned: [bool; 26],
+    /// The quick-key HOTBAR slot under the pointer (pane open only).
+    hotbar_hover: Option<usize>,
+    /// A hotbar slot held by a mouse button: (slot, hand, press
+    /// position). Release = equip (no movement), swap (over another
+    /// slot) or clear (off the bar).
+    hotbar_drag: Option<(usize, u8, (f32, f32))>,
+    /// The last pane press (slot, when) — a second press on the same
+    /// slot inside [`DOUBLE_CLICK`] promotes the spell to the hotbar.
+    pane_last_press: Option<(usize, std::time::Instant)>,
+    /// The quick-key auto-assign's FIRST pass of the level is pending:
+    /// `Some(true)` = seed from scratch (no carried keys — retail's
+    /// level-init pre-seed), `Some(false)` = the campaign carries keys,
+    /// so the spells the level STARTS with are not assigned (the
+    /// player's bar, cleared slots included, stands); only spells
+    /// gained in play fill free keys.
+    quick_first_pass: Option<bool>,
     /// Equip requests to feed the next sim tick (LMB hand, RMB hand).
     pending_equip: (Option<u8>, Option<u8>),
     /// Pending MC2 pane commit: (spell, tier, hand) — the sim's
@@ -2986,7 +3007,11 @@ impl App {
             cursor: (0.0, 0.0),
             hovered: None,
             quick_binds: [None; 10],
-            prev_owned: [false; 24],
+            prev_owned: [false; 26],
+            hotbar_hover: None,
+            hotbar_drag: None,
+            pane_last_press: None,
+            quick_first_pass: None,
             pending_equip: (None, None),
             pending_mc2_select: None,
             pending_ring: None,
@@ -4438,7 +4463,8 @@ impl App {
             if !keep_quick_keys {
                 self.quick_binds = [None; 10];
             }
-            self.prev_owned = [false; 24];
+            self.quick_first_pass = Some(!keep_quick_keys);
+            self.prev_owned = [false; 26];
             // A restart is a level entry — the situational sim speed
             // resets with the rest (mirrors `install_level`).
             self.cfg.sim.options.game_speed = config::GameSpeed::Normal;
@@ -4709,10 +4735,10 @@ impl App {
             {
                 let ring = w.loadout(local_hx()).ring;
                 package.header.mc1_spell_ring = (ring != [0; 24]).then_some(ring);
-                // The live quick keys likewise (the run's carry only
-                // refreshes at the won edge).
-                package.header.mc1_quick_keys = quick_keys_carry(&self.quick_binds);
             }
+            // The live quick keys (the run's carry only refreshes at
+            // the won edge) — every game, since the hotbar.
+            package.header.mc1_quick_keys = quick_keys_carry(&self.quick_binds);
             package.snapshot = Some(sess.sim.snapshot());
             package.header.resume = Some(mgc_formats::mgcs::InLevel {
                 bundle: level.bundle_variant.clone(),
@@ -5005,8 +5031,12 @@ impl App {
         // the per-level UI state.
         self.pool_dropped_total = 0;
         self.misfits_reported = 0;
-        self.quick_binds = self.carried_quick_keys().unwrap_or([None; 10]);
-        self.prev_owned = [false; 24];
+        let carried = self.carried_quick_keys();
+        self.quick_first_pass = Some(carried.is_none());
+        self.quick_binds = carried.unwrap_or([None; 10]);
+        self.prev_owned = [false; 26];
+        self.hotbar_drag = None;
+        self.pane_last_press = None;
         self.castle_pos = None;
         self.subtitle = None;
         self.jar_markers = Vec::new();
@@ -5910,7 +5940,6 @@ impl App {
         self.campaign
             .as_ref()
             .or(self.net_campaign.as_ref())
-            .filter(|run| run.id != campaign::CampaignId::Mc2)
             .and_then(|run| run.mc1_quick_keys)
     }
 
@@ -6006,6 +6035,72 @@ impl App {
     /// Commit a pane selection: persist the spell's chosen level (the
     /// original's `array_0x437[spell] = level`, every route reuses
     /// it) and bind the spell to the clicked hand.
+    /// Equip `spell` (the pane's id: MC1 spell / MC2 spell) to `hand`
+    /// (0 left, 1 right) — the quick keys' and the hotbar's route. MC2
+    /// selects at the spell's stored tier through the sim's book.
+    fn equip_spell(&mut self, spell: u8, hand: u8) {
+        if self.is_mc2() {
+            let tier = self.spell_levels[spell as usize];
+            self.pending_mc2_select = Some((spell, tier, hand));
+        } else if hand == 0 {
+            self.pending_equip.0 = Some(spell);
+        } else {
+            self.pending_equip.1 = Some(spell);
+        }
+        self.flush_equip_if_paused();
+    }
+
+    /// The quick keys changed by the player: the campaign carry takes
+    /// them at once (a rebind is a preference, not progress — every
+    /// save and the next MP game see it without a level won first).
+    fn quick_keys_changed(&mut self) {
+        if let Some(run) = &mut self.campaign {
+            run.mc1_quick_keys = quick_keys_carry(&self.quick_binds);
+        }
+    }
+
+    /// Promote a pane spell onto the hotbar: the first free key; a
+    /// spell already on a key stays put; a full bar says so.
+    fn hotbar_promote(&mut self, spell: u8) {
+        let name = self.pane_spell_name(spell);
+        if let Some(i) = self.quick_binds.iter().position(|b| *b == Some(spell)) {
+            self.mini_toast(format!("{name} is on key {}", (i + 1) % 10));
+            return;
+        }
+        match self.quick_binds.iter().position(Option::is_none) {
+            Some(i) => {
+                self.quick_binds[i] = Some(spell);
+                self.quick_keys_changed();
+                self.mini_toast(format!("Key {}: {name}", (i + 1) % 10));
+            }
+            None => self.mini_toast("Hotbar full - drag a key off the bar to free one"),
+        }
+    }
+
+    /// A hotbar button released: no movement = equip the slot's spell
+    /// to that hand; over another slot = swap the two; off the bar =
+    /// clear the key.
+    fn hotbar_release(&mut self, slot: usize, hand: u8, origin: (f32, f32)) {
+        let moved = (self.cursor.0 - origin.0).hypot(self.cursor.1 - origin.1) > 6.0;
+        if !moved {
+            if let Some(spell) = self.quick_binds[slot] {
+                self.equip_spell(spell, hand);
+            }
+            return;
+        }
+        match self.hotbar_hover {
+            Some(j) if j == slot => {}
+            Some(j) => {
+                self.quick_binds.swap(slot, j);
+                self.quick_keys_changed();
+            }
+            None => {
+                self.quick_binds[slot] = None;
+                self.quick_keys_changed();
+            }
+        }
+    }
+
     fn pane_commit(&mut self, slot: usize, hand: u8, level: u8) {
         let Some(pane) = &self.pane else { return };
         let spell = pane.order[slot];
@@ -6145,13 +6240,21 @@ impl App {
         };
         let Some(pane) = &self.pane else { return };
         let size = self.view_size();
-        let r = ui::selector_bounds(
+        let mut r = ui::selector_bounds(
             assets,
             pane,
             size.0,
             size.1,
             self.selector_drag.map(|(s, _)| s),
         );
+        // Outside a tier pick the HOTBAR (raised above the pane) is
+        // part of the capture: promote, reorder and clear happen there.
+        if self.selector_drag.is_none() && self.cfg.render.enhancement.hotbar {
+            let b = ui::hotbar_bounds(assets, pane, size.0, size.1, true);
+            let (x0, y0) = (r[0].min(b[0]), r[1].min(b[1]));
+            let (x1, y1) = ((r[0] + r[2]).max(b[0] + b[2]), (r[1] + r[3]).max(b[1] + b[3]));
+            r = [x0, y0, x1 - x0, y1 - y0];
+        }
         // WHOLE-PIXEL bounds inside the rect: the OS pointer lives on
         // integer physical pixels, so a fractional clamp edge (the
         // HUD scale is not integral — the tier row's edges never
@@ -7911,9 +8014,24 @@ impl App {
             // at level start every owned spell diffs in at
             // once, in that order. MC1-key schemes only —
             // MC2 controls have no quickselect bank.
-            if self.selector.map_book {
-                let owned = w.loadout(local_hx()).owned;
-                for &s in &SPELL_CANON {
+            //
+            // The HOTBAR extends the auto-assign to MC2 (its own grid
+            // order) and to every MC1 control scheme — the bar shows
+            // the keys, so they should fill themselves.
+            {
+                let (owned, order): ([bool; 26], &[u8]) = if matches!(w.game(), mgc_sim::ids::GameId::Mc2) {
+                    (w.mc2_book_view(local_hx()).owned, &ui::MC2_GRID_ORDER)
+                } else {
+                    let mut o = [false; 26];
+                    o[..24].copy_from_slice(&w.loadout(local_hx()).owned);
+                    (o, &SPELL_CANON)
+                };
+                // A carried bar is the player's: the level's STARTING
+                // spells only seed the diff baseline, never a key.
+                if self.quick_first_pass.take() == Some(false) {
+                    self.prev_owned = owned;
+                }
+                for &s in order {
                     let s = s as usize;
                     if owned[s] && !self.prev_owned[s] && !self.quick_binds.contains(&Some(s as u8))
                     {
@@ -8203,8 +8321,22 @@ impl App {
             // The CTRL selector pane, over flight or the map
             // screen alike (the original draws the same pane
             // in both states, remc2 EF:21788/EF:21959).
-            if self.pane_open() {
-                if let Some(pane) = &self.pane {
+            // The quick-key HOTBAR: in flight (bottom-centre) and over
+            // the CTRL pane (raised); not on the map screen's log band
+            // unless the pane is up, never while down.
+            let hotbar_on = self.cfg.render.enhancement.hotbar
+                && !self.player_down()
+                && (self.pane_open() || !self.book_open());
+            if self.pane_open() || hotbar_on {
+                let pane_owned = self.pane.clone().unwrap_or_else(|| {
+                    if is_mc2 {
+                        ui::SelectorPane::mc2()
+                    } else {
+                        ui::SelectorPane::mc1()
+                    }
+                });
+                {
+                    let pane = &pane_owned;
                     let n = pane.spell_count();
                     let mc2 = is_mc2;
                     let mut owned = [false; 26];
@@ -8219,6 +8351,7 @@ impl App {
                     let mut ring = [0u8; 26];
                     let mut expiring = [false; 26];
                     let mut known = [false; 26];
+                    let mut active = [false; 26];
                     let mut bound = [loadout.left, loadout.right];
                     if mc2 {
                         // The campaign carry IS retail's known list
@@ -8279,6 +8412,7 @@ impl App {
                                 xpos[s] = bv.xpos[s];
                                 ring[s] = bv.ring[s];
                                 expiring[s] = bv.expiring[s];
+                                active[s] = bv.armed[s];
                             }
                             bound = [u8::try_from(bv.left).ok(), u8::try_from(bv.right).ok()];
                             // `spell_levels` is NOT mirrored here
@@ -8294,12 +8428,16 @@ impl App {
                             owned[s] = loadout.owned[s] || self.cfg.gameplay.cheat.dev_spells;
                             castable[s] = loadout.bindable[s];
                             castable_tier[s] = [loadout.bindable[s]; 3];
-                            cost[s] = mgc_sim::mc1::spells::SPELLS[s].possess_mana;
+                            // The LIVE per-cast cost (`World::spell_cast_cost`,
+                            // the hand panel's divisor) — Castle scales with
+                            // the own castle's level; the static table did not.
+                            cost[s] = loadout.cost[s];
                             cost_tier[s] = [cost[s]; 3];
                             max_level[s] = pane.levels - 1;
                             sel[s] = self.spell_levels[s];
                             ring[s] = loadout.ring[s];
                             expiring[s] = loadout.expiring[s];
+                            active[s] = loadout.cooldown[s] > 0.0;
                         }
                     }
                     let view = ui::SelectorView {
@@ -8318,18 +8456,40 @@ impl App {
                         expiring: &expiring[..n],
                         known: &known[..n],
                         blink: alert_blink,
+                        active: &active[..n],
                     };
-                    let (pq, hover) = ui::selector_quads(
-                        assets,
-                        pane,
-                        &view,
-                        size.0,
-                        size.1,
-                        self.cursor,
-                        self.selector_drag.map(|(s, _)| s),
-                    );
-                    quads.extend(pq);
-                    self.selector_hover = hover;
+                    if self.pane_open() {
+                        let (pq, hover) = ui::selector_quads(
+                            assets,
+                            pane,
+                            &view,
+                            size.0,
+                            size.1,
+                            self.cursor,
+                            self.selector_drag.map(|(s, _)| s),
+                        );
+                        quads.extend(pq);
+                        self.selector_hover = hover;
+                    }
+                    if hotbar_on {
+                        let open = self.pane_open();
+                        let (hq, hh) = ui::hotbar_quads(
+                            assets,
+                            pane,
+                            &view,
+                            &self.quick_binds,
+                            size.0,
+                            size.1,
+                            open.then_some(self.cursor),
+                            open,
+                            self.hotbar_drag.map(|d| d.0),
+                            hud_team_colors(w.human_wizard_seat(local_hx()), &sess.level),
+                        );
+                        quads.extend(hq);
+                        self.hotbar_hover = hh;
+                    } else {
+                        self.hotbar_hover = None;
+                    }
                 }
             }
             // The map-screen wizard scoreboard: name + census
@@ -8922,11 +9082,9 @@ impl App {
                 }
                 if let Some(run) = &mut self.campaign {
                     campaign_complete(run, sess.level.level_number, sess.sim.tick, w);
-                    // MC1/HW quick-key carry (app-side, so not in
+                    // Quick-key carry (app-side, so not in
                     // `campaign_complete`, which sees only the world).
-                    if run.id != campaign::CampaignId::Mc2 {
-                        run.mc1_quick_keys = quick_keys_carry(&self.quick_binds);
-                    }
+                    run.mc1_quick_keys = quick_keys_carry(&self.quick_binds);
                     // MC2 only: the map, or a secret level first.
                     if run.id == campaign::CampaignId::Mc2
                         && matches!(
@@ -9535,7 +9693,17 @@ impl ApplicationHandler for App {
                         MouseButton::Right => 1u8,
                         _ => return,
                     };
-                    if down {
+                    if down && let Some(i) = self.hotbar_hover {
+                        // A hotbar key: held for equip / swap / clear
+                        // on release (`hotbar_release`).
+                        if self.quick_binds[i].is_some() && self.hotbar_drag.is_none() {
+                            self.hotbar_drag = Some((i, hand, self.cursor));
+                        }
+                    } else if !down && self.hotbar_drag.is_some_and(|d| d.1 == hand) {
+                        if let Some((i, h, origin)) = self.hotbar_drag.take() {
+                            self.hotbar_release(i, h, origin);
+                        }
+                    } else if down {
                         if let Some(slot) = self.selector_hover.slot {
                             let spell = self.pane.as_ref().map(|p| p.order[slot]);
                             // Selectable = native-book ownership
@@ -9560,7 +9728,25 @@ impl ApplicationHandler for App {
                                         })
                                     })
                                     .unwrap_or(false);
-                            if owned {
+                            // DOUBLE-CLICK = promote to the hotbar —
+                            // ANY spell, owned or not: a key can be
+                            // RESERVED for a spell not held right now
+                            // (withheld, stolen, not yet found) and
+                            // works the moment it is back. The first
+                            // click already equipped (harmless).
+                            let dbl = !self.shift_held && {
+                                let now = std::time::Instant::now();
+                                let dbl = self.pane_last_press.is_some_and(|(s, t)| {
+                                    s == slot && now.duration_since(t) < DOUBLE_CLICK
+                                });
+                                self.pane_last_press = (!dbl).then_some((slot, now));
+                                dbl
+                            };
+                            if dbl {
+                                if let Some(spell) = spell {
+                                    self.hotbar_promote(spell);
+                                }
+                            } else if owned {
                                 if self.shift_held {
                                     // Retail's ring-edit truth table
                                     // (PI:856-878): same-button click
@@ -10284,6 +10470,7 @@ impl ApplicationHandler for App {
                     } else if !down && self.ctrl_held {
                         self.ctrl_held = false;
                         self.selector_drag = None;
+                        self.hotbar_drag = None;
                         self.selector_hover = ui::SelectorHover::default();
                         // Re-grab unless the BOOK map holds the cursor
                         // (the bookless map keeps controls live, so
@@ -10364,19 +10551,10 @@ impl ApplicationHandler for App {
                                     // first. (In MP the campaign is
                                     // parked — a rebind there stays in
                                     // that game.)
-                                    if let Some(run) = &mut self.campaign
-                                        && run.id != campaign::CampaignId::Mc2
-                                    {
-                                        run.mc1_quick_keys = quick_keys_carry(&self.quick_binds);
-                                    }
+                                    self.quick_keys_changed();
                                 }
                             } else if let Some(spell) = self.quick_binds[d] {
-                                if self.ctrl_mod {
-                                    self.pending_equip.1 = Some(spell);
-                                } else {
-                                    self.pending_equip.0 = Some(spell);
-                                }
-                                self.flush_equip_if_paused();
+                                self.equip_spell(spell, u8::from(self.ctrl_mod));
                             }
                             return;
                         }
@@ -10611,6 +10789,8 @@ struct Args {
     smooth_textures: Option<bool>,
     /// CLI override of `render.enhancement.segment_order`.
     segment_order: Option<bool>,
+    /// CLI override of `render.enhancement.hotbar`.
+    hotbar: Option<bool>,
     /// CLI override of `render.debug.map_trigger_areas`.
     map_triggers: Option<bool>,
     /// CLI override of `render.debug.health_bars`.
@@ -10770,6 +10950,7 @@ fn parse_args() -> Result<Args, String> {
     let mut smooth_shading = None;
     let mut smooth_textures = None;
     let mut segment_order = None;
+    let mut hotbar = None;
     let mut map_triggers = None;
     let mut health_bars = None;
     let mut crosshair = None;
@@ -11007,6 +11188,8 @@ fn parse_args() -> Result<Args, String> {
             "--no-smooth-textures" => smooth_textures = Some(false),
             "--segment-order" => segment_order = Some(true),
             "--no-segment-order" => segment_order = Some(false),
+            "--hotbar" => hotbar = Some(true),
+            "--no-hotbar" => hotbar = Some(false),
             "--map-triggers" => map_triggers = Some(true),
             "--no-map-triggers" => map_triggers = Some(false),
             "--health-bars" => health_bars = Some(true),
@@ -11226,7 +11409,7 @@ fn parse_args() -> Result<Args, String> {
                      [--tileset 0|1] [--config <path>] \
                      [--smooth-shading|--no-smooth-shading] \
                      [--smooth-textures|--no-smooth-textures] \
-                     [--segment-order|--no-segment-order] \
+                     [--segment-order|--no-segment-order] [--hotbar|--no-hotbar] \
                      [--map-triggers|--no-map-triggers] \
                      [--crosshair|--no-crosshair] [--coords|--no-coords] \
                      [--health-bars|--no-health-bars] \
@@ -11309,6 +11492,7 @@ fn parse_args() -> Result<Args, String> {
         smooth_shading,
         smooth_textures,
         segment_order,
+        hotbar,
         map_triggers,
         health_bars,
         crosshair,
@@ -12131,8 +12315,11 @@ fn window_monitor(window: &Window) -> Option<winit::monitor::MonitorHandle> {
         .or_else(|| window.current_monitor())
 }
 
+/// The quick keys as the campaign carry: ALWAYS a value once the
+/// player has keys — an emptied bar is a choice to keep, not "no
+/// carry" (which would re-seed every starting spell next level).
 fn quick_keys_carry(binds: &[Option<u8>; 10]) -> Option<[Option<u8>; 10]> {
-    binds.iter().any(Option::is_some).then_some(*binds)
+    Some(*binds)
 }
 
 fn death_greyscale(state: mgc_sim::engine::world::LifeState, tick: u64) -> f32 {
@@ -12831,6 +13018,9 @@ pub fn game_main(event_loop: Option<EventLoop<()>>) -> std::process::ExitCode {
     }
     if let Some(v) = args.segment_order {
         en.segment_order = v;
+    }
+    if let Some(v) = args.hotbar {
+        en.hotbar = v;
     }
     if let Some(v) = args.expose_jar_spells {
         en.expose_jar_spells = v;
@@ -13627,6 +13817,9 @@ fn net_seat_models(
 
 /// A lobby game's given player names over the humans' table names
 /// (tags, map reveals, the roster).
+/// The pane's double-click window (promote a spell to the hotbar).
+const DOUBLE_CLICK: std::time::Duration = std::time::Duration::from_millis(400);
+
 /// The most lines the map screen's message log keeps: what its band
 /// can show, no more — there is no scrolling back. The band and the
 /// font both scale with the HUD (`HudFrame::s`), so the count is
