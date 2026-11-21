@@ -9231,7 +9231,8 @@ impl ApplicationHandler for App {
                 if self.exit_confirm {
                     if down && button == MouseButton::Left {
                         let size = self.view_size();
-                        let (ok, cancel) = ui::exit_confirm_rects(size.0, size.1);
+                        let (ok, cancel) =
+                            ui::exit_confirm_rects(ui_assets!(self), size.0, size.1);
                         if ui::rect_hit(ok, self.cursor) {
                             self.confirm_exit(event_loop);
                         } else if ui::rect_hit(cancel, self.cursor) {

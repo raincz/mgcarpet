@@ -2263,9 +2263,22 @@ const CANCEL_SPRITE: usize = 258;
 /// 4578): a contiguous horizontal pair centered on screen, each half
 /// 50×32 native (the sprite size). One geometry shared by the draw
 /// and the click hit test.
-pub fn exit_confirm_rects(w: f32, h: f32) -> ([f32; 4], [f32; 4]) {
+pub fn exit_confirm_rects(assets: Option<&UiAssets>, w: f32, h: f32) -> ([f32; 4], [f32; 4]) {
     let s = HudFrame::new(w, h).s.max(1.0);
-    let (bw, bh) = (50.0 * s, 32.0 * s);
+    let (mut bw, bh) = (50.0 * s, 32.0 * s);
+    // MC1 has no OK/Cancel art, so its labeled slabs are sized to the
+    // text instead: both buttons as wide as the wider label plus a
+    // line-height of margin a side — symmetrical, OK just gets more
+    // room. The 50-px art width overflowed "Cancel" into OK and past
+    // the far edge (player report 2026-11-21).
+    if let Some(a) = assets.filter(|a| a.map_stamp(OK_SPRITE).is_none() && a.has_font()) {
+        let fs = w / 320.0;
+        let label = ["OK", "Cancel"]
+            .iter()
+            .map(|l| a.text_width(l))
+            .fold(0.0, f32::max);
+        bw = bw.max((label + 2.0 * a.font_line_height()) * fs);
+    }
     let ok = [w / 2.0 - bw, h / 2.0 - bh / 2.0, bw, bh];
     let cancel = [w / 2.0, h / 2.0 - bh / 2.0, bw, bh];
     (ok, cancel)
@@ -2389,7 +2402,7 @@ pub fn exit_confirm_quads(
     const EDGE: [f32; 4] = [0.75, 0.75, 0.75, 0.35];
     const HOVER: [f32; 4] = [1.0, 1.0, 1.0, 0.10];
     let fs = w / 320.0;
-    let (ok, cancel) = exit_confirm_rects(w, h);
+    let (ok, cancel) = exit_confirm_rects(Some(assets), w, h);
     let mut quads = Vec::new();
     // The prompt, centered above the button pair, on a soft slab for
     // readability over bright terrain (jar-marker idiom; retail's
@@ -3279,6 +3292,40 @@ mod marker_halo_tests {
 
 #[cfg(test)]
 mod tests {
+    /// MC1 has no OK/Cancel art: its labeled slabs must hold their
+    /// labels at any window size (player report 2026-11-21 — "Cancel"
+    /// overflowed the 50-px art width). Skips without a baked bundle.
+    #[test]
+    fn mc1_exit_confirm_buttons_fit_their_labels() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../baked/assets");
+        let Ok(b) = mgc_formats::bundle::Bundle::load(&root.join("mc1-temperate")) else {
+            eprintln!("no mc1-temperate bundle; skipped");
+            return;
+        };
+        let Some((idx, px)) = b.ui_sprites.as_ref() else {
+            return;
+        };
+        let a = UiAssets::build(
+            idx.clone(),
+            px,
+            &b.palette,
+            b.blend_lut.as_deref(),
+            true,
+            b.font.as_ref().map(|(i, p)| (i, p.as_slice())),
+            b.web_sprites.as_ref().map(|(i, p)| (i, p.as_slice())),
+        );
+        assert!(a.map_stamp(OK_SPRITE).is_none() && a.has_font());
+        for (w, h) in [(640.0, 480.0), (1280.0, 960.0), (1920.0, 1080.0), (800.0, 600.0)] {
+            let (ok, cancel) = exit_confirm_rects(Some(&a), w, h);
+            assert_eq!(ok[2], cancel[2], "symmetrical");
+            assert_eq!(ok[0] + ok[2], cancel[0], "adjacent");
+            assert!((ok[0] + cancel[0] + cancel[2] - w).abs() < 1e-3, "centred");
+            let lw = a.text_width("Cancel") * w / 320.0;
+            assert!(lw < cancel[2], "{w}x{h}: Cancel {lw} in {}", cancel[2]);
+            assert!(cancel[0] + cancel[2] <= w);
+        }
+    }
+
     use super::{MANA_WHITE, METER_TONE, PIP_FLOOR, hud_pip, meter_of};
 
     /// A near-black team colour is lifted to the pip floor with its hue
