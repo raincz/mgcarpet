@@ -1491,13 +1491,21 @@ fn sky_texel(srgb: [f32; 3]) -> [u8; 4] {
 /// 0.75·D..0.95·D). Most monster sight radii are 15-20 tiles, so the
 /// retail distance is exactly what hides acquisition pop-in.
 const DEFAULT_FOG_TILES: f32 = 20.0;
-/// Fog view-distance cap, tiles. At the cap the melt band
-/// ([`melt_band`]) is exactly the fog-off 95..125, ending short of
-/// the ~128-tile torus-copy pop; the melt starts at 1.5·D so the fog
-/// band (full at 0.95·D) and the melt never overlap (player-ruled
-/// 2026-08-08, round 2 — kept by construction in round 3). 0 stays
-/// "fog off". config::FOG_STOPS' top stop matches this.
-pub const MAX_FOG_TILES: f32 = 90.0;
+/// Fog view-distance cap, tiles: the EXTREME stop (player-ruled
+/// 2026-11-21). Up to [`LOOP_SAFE_FOG`] the melt band ([`melt_band`])
+/// is capped at the fog-off 95..125, ending short of the ~128-tile
+/// torus-copy pop; above it the band runs uncapped, so at 120 the
+/// fog is full at 114 and the melt runs 144..184 — the far field
+/// past the map's half-side is drawn, and LOOPS, inside the fogged
+/// silhouette zone (the player's call: "the part that loops will be
+/// the foggy one"). The melt always starts at `MELT_GAP`·D, past the
+/// fog wall at 0.95·D, so the fog band and the melt never overlap
+/// (player-ruled 2026-08-08). 0 stays "fog off". config::FOG_STOPS'
+/// top stop matches this.
+pub const MAX_FOG_TILES: f32 = 120.0;
+/// The highest fog distance whose melt band is still capped short of
+/// the torus wrap (the "max" stop); only EXTREME passes it.
+const LOOP_SAFE_FOG: f32 = 90.0;
 
 /// The silhouette melt band when fog is OFF: the historical fixed
 /// 95..125 tiles, ending short of the ~128-tile half-map distance
@@ -1507,10 +1515,12 @@ const MELT_OFF: (f32, f32) = (95.0, 125.0);
 /// at `MELT_GAP` × the fog distance — past the fog wall (0.95·D), so
 /// the two bands never overlap (the standing round-2 ruling) — and
 /// runs for `max(D / 3, MELT_WIDTH_MIN)` tiles, both capped at the
-/// fog-off band. Retail's 20 tiles therefore melts over 30..37 and
-/// the horizon cull below cuts right behind it; at the 90-tile cap
-/// the band is exactly the old 95..125.
-const MELT_GAP: f32 = 1.5;
+/// fog-off band up to [`LOOP_SAFE_FOG`]. Retail's 20 tiles therefore
+/// melts over 24..30.7 and the horizon cull below cuts right behind
+/// it; at 90 the band is exactly the old 95..125. The gap was 1.5
+/// until 2026-11-21 (player: the silhouettes lingered too long even
+/// at the short settings).
+const MELT_GAP: f32 = 1.2;
 const MELT_WIDTH_MIN: f32 = 6.0;
 /// Horizon cull margin past the melt's end, in tiles: the last tile
 /// whose fragments could still be anything but the discarded sky.
@@ -1523,9 +1533,17 @@ pub fn melt_band(fog: f32) -> (f32, f32) {
     if fog <= 0.0 {
         return MELT_OFF;
     }
-    let start = (fog * MELT_GAP).min(MELT_OFF.0);
-    let end = (start + (fog / 3.0).max(MELT_WIDTH_MIN)).min(MELT_OFF.1);
-    (start, end)
+    let start = fog * MELT_GAP;
+    let end = start + (fog / 3.0).max(MELT_WIDTH_MIN);
+    if fog > LOOP_SAFE_FOG {
+        // EXTREME: uncapped, the wrap falls in the fogged zone.
+        return (start, end);
+    }
+    let start = start.min(MELT_OFF.0);
+    (
+        start,
+        (start + (fog / 3.0).max(MELT_WIDTH_MIN)).min(MELT_OFF.1),
+    )
 }
 
 /// THE SPRITE FADE (enhancement, player idea 2026-11-21): past the
@@ -1542,7 +1560,11 @@ pub fn melt_band(fog: f32) -> (f32, f32) {
 /// which instances must ride the blend pipeline.
 pub fn sprite_fade_band(fog: f32) -> (f32, f32) {
     let melt = melt_band(fog);
-    let start = if fog > 0.0 { SPRITE_FADE_FROM * fog } else { melt.0 };
+    let start = if fog > 0.0 {
+        SPRITE_FADE_FROM * fog
+    } else {
+        melt.0
+    };
     (start, melt.1)
 }
 /// The fade's start as a fraction of the fog distance — the fog
@@ -1565,6 +1587,11 @@ const SPRITE_FADE_FROM: f32 = 0.95;
 /// of the far edge, so the ±128 tie goes to the −side) — it can never
 /// visit one tile twice, and a visited tile's copy is simply which
 /// side of the map edge its unwrapped coordinate fell on.
+///
+/// A radius PAST the half-side (only the EXTREME fog stop) lifts the
+/// once-only rule: the window spans beyond the map and each tile is
+/// emitted in every copy whose box lies within the radius, so the
+/// wrapped far field draws as one continuous landscape.
 pub fn horizon_cull_indices(
     n: usize,
     cam_tile: (i32, i32),
@@ -1573,8 +1600,22 @@ pub fn horizon_cull_indices(
 ) -> [(u32, u32); 9] {
     out.clear();
     let side = n as i32;
-    let r = (radius.ceil() as i32 + 1).min(side / 2);
-    let span = (2 * r + 1).min(side);
+    // Past the half-side (EXTREME's melt runs to ~184) the window
+    // grows beyond the map and a tile is drawn in EVERY copy within
+    // the radius: the far field becomes the continuous wrapped
+    // landscape instead of each tile flipping between its front and
+    // back copy at the seam — whole far faces vanished in discrete
+    // steps as the camera crossed tiles (player report 2026-11-21).
+    // ±1 copy suffices: the camera tile plus a 256-tile reach stays
+    // inside the 3×3 instances.
+    let wraps = radius > (side / 2) as f32;
+    let (r, span) = if wraps {
+        let r = (radius.ceil() as i32 + 1).min(side);
+        (r, 2 * r + 1)
+    } else {
+        let r = (radius.ceil() as i32 + 1).min(side / 2);
+        (r, (2 * r + 1).min(side))
+    };
     let (tx, tz) = cam_tile;
     let (cx, cz) = (tx as f32 + 0.5, tz as f32 + 0.5);
     let r2 = radius * radius;
@@ -4072,6 +4113,19 @@ impl Renderer {
             return;
         }
         self.cull_ranges = horizon_cull_indices(n, (key.0, key.1), radius, &mut self.cull_indices);
+        // EXTREME's wrapped far field draws tiles in more than one
+        // copy, so the list can outgrow the every-tile-once buffer
+        // (overflowing it was a wgpu write_buffer panic, 2026-11-21):
+        // grow it to fit.
+        let need = (self.cull_indices.len() * std::mem::size_of::<u32>()) as u64;
+        if self.cull_index_buf.as_ref().is_some_and(|b| b.size() < need) {
+            self.cull_index_buf = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("terrain cull indices"),
+                size: need,
+                usage: wgpu::BufferUsages::INDEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            }));
+        }
         if let Some(buf) = &self.cull_index_buf {
             self.queue
                 .write_buffer(buf, 0, bytemuck::cast_slice(&self.cull_indices));
@@ -4555,8 +4609,9 @@ impl Renderer {
                 }),
         );
         self.index_count = indices.len() as u32;
-        // The horizon cull's index buffer: worst case = every tile
-        // once (the full list's size), written per camera-tile step.
+        // The horizon cull's index buffer: every tile once (the full
+        // list's size), written per camera-tile step; EXTREME's
+        // wrapped field grows it (`refresh_horizon_cull`).
         self.cull_index_buf = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("terrain cull indices"),
             size: (indices.len() * std::mem::size_of::<u32>()) as u64,
@@ -5721,78 +5776,99 @@ impl Renderer {
                 }
                 c + d
             };
-            let pos = [wrap(b.x, cam.x), b.y, wrap(b.z, cam.z)];
-            if retail_sprite_near_culled(pos, cam) {
-                continue;
-            }
-            // The camera's elevation seen from the entity (picks the
-            // pitch ring; retail packs have one).
-            let elevation = (cam.y - pos[1])
-                .atan2((pos[0] - cam.x).hypot(pos[2] - cam.z))
-                .to_degrees();
-            let key = ModelKey {
-                sprite_base: b.sprite_base,
-                draw_type: b.draw_type,
-            };
-            // Unknown families and missing/corrupt cells draw nothing.
-            let Some(view) = pack.view(
-                key,
-                b.frame,
-                b.yaw - cam.yaw,
-                elevation,
-                b.flc_frame,
-                self.anim_turn as usize,
-            ) else {
-                continue;
-            };
-            let im = view.image;
-            let (w, h) = (im.w as f32, im.h as f32);
-            let world_w = b.world_h * w / h;
-            let anchor = if view.mirror {
-                [1.0 - im.anchor[0], im.anchor[1]]
-            } else {
-                im.anchor
-            };
-            let mut alpha = match b.blend {
-                2 => 1.0 / 3.0,
-                3 => 2.0 / 3.0,
-                // The instrument alpha — see `Billboard::blend`.
-                4 => 1.0 / 6.0,
-                _ => 1.0,
-            };
-            if b.conceal {
-                let (dx, dy, dz) = (pos[0] - cam.x, pos[1] - cam.y, pos[2] - cam.z);
-                let vis = Self::conceal_visibility(dx * dx + dy * dy + dz * dz);
-                if vis <= 0.0 {
+            let near = [wrap(b.x, cam.x), b.y, wrap(b.z, cam.z)];
+            // EXTREME fog: the fade reaches past the half-map, so the
+            // sprite also draws in every further torus copy still
+            // inside it — like the terrain (`horizon_cull_indices`),
+            // the far field wraps continuously instead of a sprite
+            // flipping between its front and back copy at the seam.
+            // Below EXTREME the fade ends short of 128 and only the
+            // nearest copy ever qualifies.
+            for (ci, pos) in (0..9)
+                .map(|c| {
+                    let (ox, oz) = ((c % 3) as f32 - 1.0, (c / 3) as f32 - 1.0);
+                    (c, [near[0] + ox * full, near[1], near[2] + oz * full])
+                })
+                .filter(|&(c, p)| c == 4 || (p[0] - cam.x).hypot(p[2] - cam.z) < fade.1)
+            {
+                if retail_sprite_near_culled(pos, cam) {
                     continue;
                 }
-                alpha *= vis;
-            }
-            // THE SPRITE FADE (`sprite_fade_band`): a sprite any of
-            // whose fragments could sit past the fade start must ride
-            // the blend pipeline — the opaque one ignores alpha. The
-            // quad's reach from its feet is bounded by its width plus
-            // height (anchor and roll included), so this errs only
-            // toward blending a sprite that is still fully opaque.
-            let reach = world_w + b.world_h * b.h_stretch;
-            let (dx, dy, dz) = (pos[0] - cam.x, pos[1] - cam.y, pos[2] - cam.z);
-            let fading = (dx * dx + dy * dy + dz * dz).sqrt() + reach > fade.0;
-            let inst = BillboardInstance {
-                pos,
-                size: [world_w, b.world_h * b.h_stretch],
-                uv_pos: [im.x as f32, im.y as f32],
-                uv_size: [w, h],
-                flags: [view.mirror as u32, 32],
-                alpha,
-                chain: b.chain_depth,
-                roll: b.roll,
-                key: keys.get(bi).copied().unwrap_or(-1.0),
-                anchor,
-            };
-            if alpha < 1.0 || fading {
-                translucent.push(inst);
-            } else {
-                out.push(inst);
+                // The camera's elevation seen from the entity (picks the
+                // pitch ring; retail packs have one).
+                let elevation = (cam.y - pos[1])
+                    .atan2((pos[0] - cam.x).hypot(pos[2] - cam.z))
+                    .to_degrees();
+                let key = ModelKey {
+                    sprite_base: b.sprite_base,
+                    draw_type: b.draw_type,
+                };
+                // Unknown families and missing/corrupt cells draw nothing.
+                let Some(view) = pack.view(
+                    key,
+                    b.frame,
+                    b.yaw - cam.yaw,
+                    elevation,
+                    b.flc_frame,
+                    self.anim_turn as usize,
+                ) else {
+                    continue;
+                };
+                let im = view.image;
+                let (w, h) = (im.w as f32, im.h as f32);
+                let world_w = b.world_h * w / h;
+                let anchor = if view.mirror {
+                    [1.0 - im.anchor[0], im.anchor[1]]
+                } else {
+                    im.anchor
+                };
+                let mut alpha = match b.blend {
+                    2 => 1.0 / 3.0,
+                    3 => 2.0 / 3.0,
+                    // The instrument alpha — see `Billboard::blend`.
+                    4 => 1.0 / 6.0,
+                    _ => 1.0,
+                };
+                if b.conceal {
+                    let (dx, dy, dz) = (pos[0] - cam.x, pos[1] - cam.y, pos[2] - cam.z);
+                    let vis = Self::conceal_visibility(dx * dx + dy * dy + dz * dz);
+                    if vis <= 0.0 {
+                        continue;
+                    }
+                    alpha *= vis;
+                }
+                // THE SPRITE FADE (`sprite_fade_band`): a sprite any of
+                // whose fragments could sit past the fade start must ride
+                // the blend pipeline — the opaque one ignores alpha. The
+                // quad's reach from its feet is bounded by its width plus
+                // height (anchor and roll included), so this errs only
+                // toward blending a sprite that is still fully opaque.
+                let reach = world_w + b.world_h * b.h_stretch;
+                let (dx, dy, dz) = (pos[0] - cam.x, pos[1] - cam.y, pos[2] - cam.z);
+                let fading = (dx * dx + dy * dy + dz * dz).sqrt() + reach > fade.0;
+                let inst = BillboardInstance {
+                    pos,
+                    size: [world_w, b.world_h * b.h_stretch],
+                    uv_pos: [im.x as f32, im.y as f32],
+                    uv_size: [w, h],
+                    flags: [view.mirror as u32, 32],
+                    alpha,
+                    chain: b.chain_depth,
+                    roll: b.roll,
+                    // A segment key is the nearest copy's plan distance;
+                    // a far copy falls back to its own anchor tile.
+                    key: if ci == 4 {
+                        keys.get(bi).copied().unwrap_or(-1.0)
+                    } else {
+                        -1.0
+                    },
+                    anchor,
+                };
+                if alpha < 1.0 || fading {
+                    translucent.push(inst);
+                } else {
+                    out.push(inst);
+                }
             }
         }
         let opaque = out.len() as u32;
@@ -8311,14 +8387,21 @@ mod tests {
         assert_eq!(melt_band(90.0), (95.0, 125.0));
         let (s20, e20) = melt_band(20.0);
         assert!(
-            (s20 - 30.0).abs() < 1e-4 && (e20 - 36.6667).abs() < 1e-3,
+            (s20 - 24.0).abs() < 1e-4 && (e20 - 30.6667).abs() < 1e-3,
             "{s20}..{e20}"
         );
         let (s50, e50) = melt_band(50.0);
         assert!(
-            (s50 - 75.0).abs() < 1e-4 && e50 > 91.0 && e50 < 92.0,
+            (s50 - 60.0).abs() < 1e-4 && (e50 - 76.6667).abs() < 1e-3,
             "{s50}..{e50}"
         );
+        // EXTREME: uncapped past the wrap, still clear of the fog wall.
+        let (sx, ex) = melt_band(MAX_FOG_TILES);
+        assert!(
+            (sx - 144.0).abs() < 1e-4 && (ex - 184.0).abs() < 1e-3,
+            "{sx}..{ex}"
+        );
+        assert!(sprite_fade_band(MAX_FOG_TILES).0 < sx);
         let mut prev = (0.0f32, 0.0f32);
         for d in 1..=90 {
             let (s, e) = melt_band(d as f32);
@@ -8343,8 +8426,11 @@ mod tests {
     fn a_wide_horizon_cull_emits_every_tile_once() {
         let n = MAP_TILES as usize;
         let mut out = Vec::new();
-        let ranges = horizon_cull_indices(n, (100, 40), 1000.0, &mut out);
-        assert_eq!(out.len(), n * n * 6, "every tile, two triangles");
+        // The widest once-only radius: the half-side (any farther
+        // wraps — see the next test); the window's corners lie past
+        // it, so this grades the dedup, not full coverage.
+        let ranges = horizon_cull_indices(n, (100, 40), 128.0, &mut out);
+        assert!(out.len() > n * n * 6 * 3 / 4, "most of the map");
         let mut seen = vec![false; n * n];
         for tri in out.chunks(6) {
             let (x, z) = tile_of(tri[0]);
@@ -8354,7 +8440,6 @@ mod tests {
             );
             seen[(z as usize) * n + x as usize] = true;
         }
-        assert!(seen.iter().all(|&s| s));
         let total: u32 = ranges.iter().map(|r| r.1).sum();
         assert_eq!(total as usize, out.len());
         // Contiguous, in order.
@@ -8363,6 +8448,38 @@ mod tests {
             assert_eq!(start, acc);
             acc += count;
         }
+    }
+
+    /// EXTREME: a radius past the half-side draws tiles in more than
+    /// one copy — every (tile, copy) pair at most once, every emitted
+    /// copy inside the radius, and the whole map covered.
+    #[test]
+    fn an_extreme_horizon_cull_draws_the_wrapped_far_field() {
+        let n = MAP_TILES as usize;
+        let mut out = Vec::new();
+        let (cam, radius) = ((100i32, 40i32), 185.0f32);
+        let ranges = horizon_cull_indices(n, cam, radius, &mut out);
+        let mut seen = std::collections::HashSet::new();
+        let mut covered = vec![false; n * n];
+        let mut repeats = 0;
+        for (c, &(start, count)) in ranges.iter().enumerate() {
+            let (ox, oz) = ((c % 3) as i32 - 1, (c / 3) as i32 - 1);
+            for tri in out[start as usize..(start + count) as usize].chunks(6) {
+                let (x, z) = tile_of(tri[0]);
+                assert!(seen.insert((x, z, c)), "({x},{z}) twice in copy {c}");
+                if covered[z as usize * n + x as usize] {
+                    repeats += 1;
+                }
+                covered[z as usize * n + x as usize] = true;
+                let (ux, uz) = (x + ox * n as i32, z + oz * n as i32);
+                let px = (cam.0 as f32 + 0.5).clamp(ux as f32, ux as f32 + 1.0);
+                let pz = (cam.1 as f32 + 0.5).clamp(uz as f32, uz as f32 + 1.0);
+                let d = (px - cam.0 as f32 - 0.5).hypot(pz - cam.1 as f32 - 0.5);
+                assert!(d <= radius, "({x},{z}) copy {c} at {d}");
+            }
+        }
+        assert!(covered.iter().all(|&s| s), "the whole map");
+        assert!(repeats > 0, "the far field wraps into a second copy");
     }
 
     /// A short radius keeps only the disc around the camera tile, all

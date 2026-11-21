@@ -849,9 +849,11 @@ pub fn registry() -> Vec<Spec> {
                    tuned so pop-in hides in that fog — long distances reveal \
                    creatures acting before you could faithfully see them. \
                    The horizon silhouettes beyond the fog melt into the sky \
-                   across a band that follows this distance (1.5x .. +1/3), \
+                   across a band that follows this distance (1.2x .. +1/3), \
                    and the horizon cull stops drawing behind it, so shorter \
-                   is also faster. Capped at 90.",
+                   is also faster. Up to 90 nothing past the map's edge is \
+                   drawn; extreme (120) reaches past it, where the world \
+                   wraps around inside the fogged zone.",
             ctl: Ctl::Stops {
                 get: |c| c.render.preference.fog_distance,
                 set: |c, v| c.render.preference.fog_distance = v,

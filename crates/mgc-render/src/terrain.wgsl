@@ -588,12 +588,13 @@ fn fog_amount(dist: f32) -> f32 {
 // This second, far ramp melts those silhouettes into the actual sky
 // pixel across the band `bb_right.w .. bb_up.w` (tiles), which the
 // renderer derives from the fog distance (lib.rs `melt_band`,
-// player-ruled 2026-09-23: the melt FOLLOWS the fog — 1.5·D wide of
-// the fog wall, so the two bands never overlap, the standing round-2
-// ruling — and the horizon cull stops rasterizing right behind it;
-// fog off keeps the historical fixed 95..125, short of the ~128-tile
-// half-map distance where a peak's nearest torus copy switches sides
-// and would pop). Applies in every arm — in the MIRROR the fog
+// player-ruled 2026-09-23: the melt FOLLOWS the fog — from 1.2·D,
+// past the 0.95·D fog wall, so the two bands never overlap, the
+// standing round-2 ruling — and the horizon cull stops rasterizing
+// right behind it; fog off and every stop up to 90 end by 125, short
+// of the ~128-tile half-map distance where a peak's nearest torus
+// copy switches sides and would pop; only EXTREME (120) runs past it,
+// the wrap then falling in the fogged zone). Applies in every arm — in the MIRROR the fog
 // discard usually preempts it, but a fog-off view melts its
 // reflection at the same band as the world above. Billboard.wgsl
 // reads the same two slots.

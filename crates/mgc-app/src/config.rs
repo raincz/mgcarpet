@@ -267,17 +267,19 @@ pub struct RenderPreference {
     /// creatures acting before you can see them. Beyond the wall the
     /// terrain lingers as flat horizon silhouettes that melt into the
     /// sky across a band that FOLLOWS the fog (mgc-render
-    /// `melt_band`: 1.5·D .. +max(D/3, 6), capped at the fog-off
-    /// 95..125 — player-ruled 2026-09-23), never overlapping the fog
+    /// `melt_band`: 1.2·D .. +max(D/3, 6), capped at the fog-off
+    /// 95..125 up to 90 — player-ruled 2026-09-23, gap 1.5 → 1.2 on
+    /// 2026-11-21), never overlapping the fog
     /// band (the 2026-08-08 ruling stands), and the horizon cull
     /// stops drawing right behind the melt — so retail's 20 tiles is
     /// also the cheapest frame. Values clamp to [`MAX_FOG_TILES`] =
-    /// 90 at load, CLI and in the renderer (the old 255 whole-torus
-    /// stop is retired). 0 = fog off (the fixed melt still runs).
-    /// DEFAULT 90, the maximum and the Visuals preset's Enhanced value
+    /// 120 (EXTREME, 2026-11-21: uncapped melt, the torus wrap falls
+    /// inside the fogged zone) at load, CLI and in the renderer (the
+    /// old 255 whole-torus stop is retired). 0 = fog off (the fixed melt still runs).
+    /// DEFAULT 90, the "max" stop and the Visuals preset's Enhanced value
     /// (player ruling 2026-09-25; retail's 20 was performance-only, and
     /// the Classic preset's); the menu offers the stops 20 (faithful) /
-    /// 50 / 70 / 90 (max, default).
+    /// 50 / 70 / 90 (max, default) / 120 (extreme).
     pub fog_distance: u32,
     /// Vertical sync (on by default — off has no visual upside, only
     /// tearing). Off releases the frame rate from the display's
@@ -387,17 +389,19 @@ impl AntiAliasing {
     }
 }
 
-/// Fog view-distance cap, tiles (mgc_render::MAX_FOG_TILES twin):
-/// keeps the whole fog band (full occlusion at 0.95·D) short of the
-/// 95..125-tile silhouette melt band, which runs unconditionally and
-/// hides the world's torus wrap. Applied at config load and to the
+/// Fog view-distance cap, tiles (mgc_render::MAX_FOG_TILES twin): the
+/// EXTREME stop, whose melt band runs past the torus wrap so the wrap
+/// shows only in the fogged silhouette zone; every stop up to 90 keeps
+/// its melt short of it. The fog band (full at 0.95·D) never reaches
+/// the melt (1.2·D). Applied at config load and to the
 /// CLI override; 0 stays "fog off".
-pub const MAX_FOG_TILES: u32 = 90;
+pub const MAX_FOG_TILES: u32 = 120;
 
 /// The fog-distance menu stops: (tiles, tag). Top stop =
 /// [`MAX_FOG_TILES`]; the old 255 whole-torus stop is retired
 /// (player-ruled 2026-08-08: the fog must never reach the melt band).
-pub const FOG_STOPS: [(u32, &str); 4] = [(20, "faithful"), (50, "mid"), (70, "high"), (90, "max")];
+pub const FOG_STOPS: [(u32, &str); 5] =
+    [(20, "faithful"), (50, "mid"), (70, "high"), (90, "max"), (120, "extreme")];
 
 impl Default for RenderPreference {
     fn default() -> Self {
@@ -1906,6 +1910,7 @@ mod tests {
         // The stops table brackets the default and the faithful value.
         assert!(FOG_STOPS.iter().any(|&(v, _)| v == 20));
         assert!(FOG_STOPS.iter().any(|&(v, _)| v == 90));
+        assert_eq!(FOG_STOPS.last().unwrap().0, MAX_FOG_TILES);
     }
 
     #[test]
