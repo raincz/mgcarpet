@@ -2539,6 +2539,10 @@ struct App {
     /// A held pane click: (grid slot, hand 0=L/1=R). The flyout
     /// live-tracks the hovered level until release commits it.
     selector_drag: Option<(usize, u8)>,
+    /// Where the pointer stood on the grid when the held-click tier
+    /// pick began — restored on release, so the cursor returns to the
+    /// spell it launched from, not to whichever tier was picked.
+    selector_drag_origin: Option<(f32, f32)>,
     /// Pane spell id last bound to each hand (the pane's corner
     /// tags; MC2 only — MC1 reads the loadout directly).
     pane_bound: [Option<u8>; 2],
@@ -2955,6 +2959,7 @@ impl App {
             pane,
             selector_hover: ui::SelectorHover::default(),
             selector_drag: None,
+            selector_drag_origin: None,
             pane_bound: [None; 2],
             spell_levels: [0; 26],
             last_map_tick: None,
@@ -6125,6 +6130,66 @@ impl App {
     /// edge contact scrolls the map). The flight grab is released —
     /// map mouse input is absolute, not relative. Hidden cursor: the
     /// screen draws the retail cursor sprite itself.
+    /// THE SELECTOR POINTER CAPTURE (retail law, player report
+    /// 2026-11-21): while the CTRL pane is up the cursor lives inside
+    /// it — the spell grid, or the MC2 tier row during a held-click
+    /// tier pick ([`ui::selector_bounds`]). `jump` places it fresh
+    /// (`Some(p)`) before clamping; every pointer move re-clamps, and
+    /// the OS cursor is warped to match.
+    fn confine_selector_pointer(&mut self, jump: Option<(f32, f32)>) {
+        if !self.pane_open() {
+            return;
+        }
+        let Some(assets) = self.session.as_deref().and_then(|s| s.level.ui.as_ref()) else {
+            return;
+        };
+        let Some(pane) = &self.pane else { return };
+        let size = self.view_size();
+        let r = ui::selector_bounds(
+            assets,
+            pane,
+            size.0,
+            size.1,
+            self.selector_drag.map(|(s, _)| s),
+        );
+        // WHOLE-PIXEL bounds inside the rect: the OS pointer lives on
+        // integer physical pixels, so a fractional clamp edge (the
+        // HUD scale is not integral — the tier row's edges never
+        // are) warped to x.4, the OS reported x+1, outside again, and
+        // the clamp/warp/CursorMoved loop flooded the event queue —
+        // the frame froze until the button let go (player report
+        // 2026-11-21).
+        let (x0, x1) = (r[0].ceil(), (r[0] + r[2]).floor() - 1.0);
+        let (y0, y1) = (r[1].ceil(), (r[1] + r[3]).floor() - 1.0);
+        // An in-bounds position is left exactly as reported (no warp).
+        let p = jump.unwrap_or(self.cursor);
+        let axis = |v: f32, lo: f32, hi: f32| {
+            if v >= lo && v <= hi {
+                v
+            } else {
+                v.round().clamp(lo, hi.max(lo))
+            }
+        };
+        let cl = (axis(p.0, x0, x1), axis(p.1, y0, y1));
+        if cl != self.cursor || jump.is_some() {
+            self.cursor = cl;
+            if let Some(w) = &self.window {
+                let _ = w.set_cursor_position(winit::dpi::PhysicalPosition::new(
+                    cl.0 as f64,
+                    cl.1 as f64,
+                ));
+            }
+        }
+    }
+
+    /// The pane's centre — where opening the selector puts the cursor.
+    fn selector_center(&self) -> Option<(f32, f32)> {
+        let assets = self.session.as_deref()?.level.ui.as_ref()?;
+        let size = self.view_size();
+        let r = ui::selector_bounds(assets, self.pane.as_ref()?, size.0, size.1, None);
+        Some((r[0] + r[2] / 2.0, r[1] + r[3] / 2.0))
+    }
+
     fn confine_map_pointer(&mut self) {
         self.grabbed = false;
         // Never from the background (an X11 confinement is global —
@@ -9508,10 +9573,47 @@ impl ApplicationHandler for App {
                                     let val = if cur == side { 0 } else { side };
                                     self.pending_ring = Some((spell, val));
                                     self.flush_equip_if_paused();
+                                } else if self.pane.as_ref().is_some_and(|p| p.levels == 1) {
+                                    // MC1/HW: no tiers, nothing to drag
+                                    // for — the press IS the pick, a
+                                    // plain click (player ruling
+                                    // 2026-11-21: the MC2 press/drag/
+                                    // release ritual only confused, a
+                                    // second hover frame tracking the
+                                    // drag and the release snapping the
+                                    // cursor back).
+                                    let spell = self.pane.as_ref().map_or(0, |p| p.order[slot]);
+                                    self.pane_commit(slot, hand, self.spell_levels[spell as usize]);
                                 } else if self.selector_drag.is_none() {
                                     // A second button joining mid-drag
                                     // must not steal the live drag.
                                     self.selector_drag = Some((slot, hand));
+                                    self.selector_drag_origin = Some(self.cursor);
+                                    // A multi-tier pick captures the
+                                    // pointer to the tier row, landing
+                                    // on the stored tier.
+                                    let size = self.view_size();
+                                    let tier = self
+                                        .pane
+                                        .as_ref()
+                                        .filter(|p| p.levels > 1)
+                                        .zip(
+                                            self.session
+                                                .as_deref()
+                                                .and_then(|s| s.level.ui.as_ref()),
+                                        )
+                                        .map(|(p, a)| {
+                                            let spell = p.order[slot] as usize;
+                                            ui::selector_tier_center(
+                                                a,
+                                                p,
+                                                size.0,
+                                                size.1,
+                                                slot,
+                                                self.spell_levels[spell],
+                                            )
+                                        });
+                                    self.confine_selector_pointer(tier);
                                 }
                             }
                         }
@@ -9524,6 +9626,10 @@ impl ApplicationHandler for App {
                                 .unwrap_or(self.spell_levels[spell as usize]);
                             self.pane_commit(slot, hand, level);
                             self.selector_drag = None;
+                            // Back from the tier row to the very spot
+                            // on the grid the pick launched from.
+                            let origin = self.selector_drag_origin.take();
+                            self.confine_selector_pointer(origin);
                         }
                     }
                     self.fire_held = false;
@@ -9689,6 +9795,7 @@ impl ApplicationHandler for App {
                         }
                     }
                 }
+                self.confine_selector_pointer(None);
                 self.pointer_drag_follow();
             }
             WindowEvent::Focused(false) => {
@@ -10170,6 +10277,9 @@ impl ApplicationHandler for App {
                             self.set_grab(false);
                             self.fire_held = false;
                             self.fire_right_held = false;
+                            // Retail puts the cursor ON the pane.
+                            let c = self.selector_center();
+                            self.confine_selector_pointer(c);
                         }
                     } else if !down && self.ctrl_held {
                         self.ctrl_held = false;
@@ -10383,6 +10493,7 @@ impl ApplicationHandler for App {
                 let size = self.view_size();
                 self.cursor.0 = (self.cursor.0 + dx as f32).clamp(0.0, size.0 - 1.0);
                 self.cursor.1 = (self.cursor.1 + dy as f32).clamp(0.0, size.1 - 1.0);
+                self.confine_selector_pointer(None);
                 self.pointer_drag_follow();
             }
             return;

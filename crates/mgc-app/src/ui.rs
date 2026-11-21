@@ -2914,6 +2914,49 @@ impl PaneGeom {
     }
 }
 
+/// Where the pointer is held while the selector pane is up (screen
+/// px rect) — retail captures the cursor to the pane: the whole spell
+/// grid, or, while a held click picks an MC2 tier (`drag_slot`), the
+/// tier flyout row alone (player report 2026-11-21: the hidden flight
+/// cursor sat wherever mouse-look left it, and nothing kept it on the
+/// pane).
+pub fn selector_bounds(
+    assets: &UiAssets,
+    pane: &SelectorPane,
+    w: f32,
+    h: f32,
+    drag_slot: Option<usize>,
+) -> [f32; 4] {
+    let g = PaneGeom::new(assets, pane, w, h);
+    let (a, b) = match drag_slot.filter(|_| pane.levels > 1) {
+        Some(s) => (
+            g.sub_cell(s, pane.cols, pane.levels as f32, 0),
+            g.sub_cell(s, pane.cols, pane.levels as f32, pane.levels - 1),
+        ),
+        None => (
+            g.cell(0, pane.cols),
+            g.cell(pane.spell_count() - 1, pane.cols),
+        ),
+    };
+    [a[0], a[1], b[0] + b[2] - a[0], b[1] + b[3] - a[1]]
+}
+
+/// The centre of tier `level`'s flyout box for an anchored slot —
+/// where a tier pick puts the pointer (on the stored selection, so a
+/// release without moving keeps it).
+pub fn selector_tier_center(
+    assets: &UiAssets,
+    pane: &SelectorPane,
+    w: f32,
+    h: f32,
+    slot: usize,
+    level: u8,
+) -> (f32, f32) {
+    let g = PaneGeom::new(assets, pane, w, h);
+    let c = g.sub_cell(slot, pane.cols, pane.levels as f32, level.min(pane.levels - 1));
+    (c[0] + c[2] / 2.0, c[1] + c[3] / 2.0)
+}
+
 pub fn rect_hit(r: [f32; 4], c: (f32, f32)) -> bool {
     c.0 >= r[0] && c.0 < r[0] + r[2] && c.1 >= r[1] && c.1 < r[1] + r[3]
 }
@@ -3337,6 +3380,53 @@ mod marker_halo_tests {
 
 #[cfg(test)]
 mod tests {
+    /// The selector's pointer capture: the grid rect spans every cell
+    /// (and nothing above it); an MC2 tier pick's rect is exactly the
+    /// three-box flyout row, directly above the grid. Skips without a
+    /// baked bundle.
+    #[test]
+    fn selector_bounds_cover_the_grid_and_the_tier_row() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../baked/assets");
+        for (variant, pane) in [("mc2-night", SelectorPane::mc2()), ("mc1-temperate", SelectorPane::mc1())] {
+            let Ok(b) = mgc_formats::bundle::Bundle::load(&root.join(variant)) else {
+                eprintln!("no {variant} bundle; skipped");
+                continue;
+            };
+            let Some((idx, px)) = b.ui_sprites.as_ref() else {
+                continue;
+            };
+            let a = UiAssets::build(
+                idx.clone(),
+                px,
+                &b.palette,
+                b.blend_lut.as_deref(),
+                !pane.mc2_art,
+                b.font.as_ref().map(|(i, p)| (i, p.as_slice())),
+                b.web_sprites.as_ref().map(|(i, p)| (i, p.as_slice())),
+            );
+            let (w, h) = (1280.0, 960.0);
+            let g = PaneGeom::new(&a, &pane, w, h);
+            let grid = selector_bounds(&a, &pane, w, h, None);
+            for slot in 0..pane.spell_count() {
+                let c = g.cell(slot, pane.cols);
+                let mid = (c[0] + c[2] / 2.0, c[1] + c[3] / 2.0);
+                assert!(rect_hit(grid, mid), "{variant}: slot {slot} inside the grid capture");
+            }
+            assert!((grid[1] + grid[3] - h).abs() < 1.0, "{variant}: the grid sits on the bottom");
+            let slot = 5;
+            let tier = selector_bounds(&a, &pane, w, h, Some(slot));
+            if pane.levels > 1 {
+                assert!((tier[2] - 3.0 * g.f.len(g.sub_w)).abs() < 0.5, "three boxes wide");
+                assert!((tier[1] + tier[3] - grid[1]).abs() < 0.5, "right above the grid");
+                for l in 0..3 {
+                    assert!(rect_hit(tier, selector_tier_center(&a, &pane, w, h, slot, l)));
+                }
+            } else {
+                assert_eq!(tier, grid, "{variant}: no tiers, the grid holds");
+            }
+        }
+    }
+
     /// MC1 has no OK/Cancel art: its labeled slabs must hold their
     /// labels at any window size (player report 2026-11-21 — "Cancel"
     /// overflowed the 50-px art width). Skips without a baked bundle.
