@@ -2647,6 +2647,13 @@ struct App {
     /// ages the message line per rendered frame, not per game turn
     /// (see the tick loop).
     toast_accumulator: f32,
+    /// The MESSAGE LOG: every toast the local player saw this level,
+    /// oldest first, at most [`MESSAGE_LOG_MAX`] — the toasts expire,
+    /// this does not. Drawn as a scrolling history in the black band
+    /// under the map screen, where the live toasts are not shown
+    /// (player idea 2026-11-21; retail MC2 kept a message area below
+    /// its map). Cleared at level start, never saved.
+    message_log: std::collections::VecDeque<LogLine>,
     /// PROTOTYPE fire effect: wall-clock seconds, drives flame
     /// turbulence/shimmer (advances even while paused).
     effect_time: f32,
@@ -2977,6 +2984,7 @@ impl App {
             last_frame: std::time::Instant::now(),
             accumulator: 0.0,
             toast_accumulator: 0.0,
+            message_log: std::collections::VecDeque::new(),
             // MGC_FIRE_T0 (seconds): pre-seed the prototype fire
             // clock. This is how the sticky "corrupt fire" was
             // confirmed live (T0=36000 → corrupt from launch: the
@@ -4991,6 +4999,7 @@ impl App {
         self.exit_confirm = false;
         self.accumulator = 0.0;
         self.toast_accumulator = 0.0;
+        self.message_log.clear();
         // Sim speed is a situational control (waiting out balloon
         // runs at 4x), not a standing preference — every level opens
         // at the authentic pace. Session-only by the same token: the
@@ -7574,6 +7583,33 @@ impl App {
             }
         }
 
+        // Collect the toasts raised since the last frame into the
+        // map screen's message log. A replacing line (spell select,
+        // option echo) overwrites its own predecessor when that is
+        // the newest entry, so cycling spells or speeds does not
+        // flood the history.
+        let sim = &mut sess!(self).sim;
+        // The line's stamp: LEVEL time on the game clock (sim turns,
+        // so it runs with the speed setting, like the stats screen's
+        // Time Taken), whole seconds.
+        let secs = (sim.tick / u64::from(mgc_sim::TICK_RATE_HZ)) as u32;
+        if let Some(w) = sim.world.as_mut() {
+            for (text, color, tag) in w.take_fresh_notifications(local_hx()) {
+                if tag.is_some() && self.message_log.back().is_some_and(|l| l.tag == tag) {
+                    self.message_log.pop_back();
+                }
+                if self.message_log.len() >= MESSAGE_LOG_MAX {
+                    self.message_log.pop_front();
+                }
+                self.message_log.push_back(LogLine {
+                    text,
+                    color,
+                    tag,
+                    secs,
+                });
+            }
+        }
+
         // The toast line decays on WALL time at the authentic
         // 24Hz — retail decrements the message life once per
         // rendered frame, not per game turn, so the speed
@@ -8622,6 +8658,32 @@ impl App {
             // draws at gameUiScale, so its glyphs scale by w/320.
             // The white masks are tinted the ink colour (DrawText's
             // `color`, red for plain toasts).
+            // THE MESSAGE LOG on the map screen (player idea
+            // 2026-11-21): the live toasts are not drawn over the
+            // map, so the black band under it (MC2 400..480, MC1
+            // book 416..480 native) carries the level's history —
+            // the newest lines that fit, newest at the bottom,
+            // scrolling up as lines arrive, each in its toast ink.
+            // Same font and scale as the toasts (`ui::message_log_
+            // quads`); yields the band to the CTRL selector pane.
+            if self.book_open() && !self.pane_open() {
+                let lines: Vec<(String, String, [u8; 3])> = self
+                    .message_log
+                    .iter()
+                    .map(|l| (l.stamp(), net_named(&self.net_names, &l.text, is_mc2), l.color))
+                    .collect();
+                quads.extend(ui::message_log_quads(
+                    assets,
+                    &lines,
+                    if self.selector.map_book {
+                        mgc_render::BOOK_MAP_H
+                    } else {
+                        mgc_render::MC2_MAP_VIEW_H
+                    },
+                    size.0,
+                    size.1,
+                ));
+            }
             if !self.book_open() && assets.has_font() {
                 // The toast STACK, oldest on top, one line each in its
                 // own ink (retail MC1 draws every wizard's live slot
@@ -8637,17 +8699,7 @@ impl App {
                     let font_s = 2.0 * hud_s;
                     let lh = assets.font_line_height() * font_s;
                     for (msg, color) in w.notifications_for(local_hx()) {
-                        // A network game's given names over the table
-                        // names ("ZANZAMAR has been banished…").
-                        let mut msg = msg.to_string();
-                        for &(seat, ref name) in &self.net_names {
-                            let table = if is_mc2 {
-                                mgc_sim::mc2::rivals::MC2_RIVAL_NAMES[usize::from(seat.min(7))]
-                            } else {
-                                mgc_sim::mc1::rivals::RIVAL_NAMES[usize::from(seat.min(7))]
-                            };
-                            msg = msg.replace(table, name);
-                        }
+                        let msg = net_named(&self.net_names, msg, is_mc2);
                         let msg = msg.as_str();
                         let tint = [
                             color[0] as f32 / 255.0,
@@ -13444,6 +13496,48 @@ fn net_seat_models(
 
 /// A lobby game's given player names over the humans' table names
 /// (tags, map reveals, the roster).
+/// The most lines the map screen's message log keeps: what its band
+/// can show, no more — there is no scrolling back. The band and the
+/// font both scale with the HUD (`HudFrame::s`), so the count is
+/// fixed: MC2's 80-native band fits 5, MC1's 64-native book band 4.
+const MESSAGE_LOG_MAX: usize = 5;
+
+/// One entry of the map screen's message log (`App::message_log`).
+struct LogLine {
+    text: String,
+    color: [u8; 3],
+    tag: Option<mgc_sim::engine::world::NotifyTag>,
+    /// Level time when it arrived, whole game-clock seconds.
+    secs: u32,
+}
+
+impl LogLine {
+    /// The map screen's stamp: `m:ss`, `h:mm:ss` past the hour.
+    fn stamp(&self) -> String {
+        let t = self.secs;
+        if t >= 3600 {
+            format!("{}:{:02}:{:02}", t / 3600, t % 3600 / 60, t % 60)
+        } else {
+            format!("{}:{:02}", t / 60, t % 60)
+        }
+    }
+}
+
+/// A toast with a network game's given names put over the table
+/// names ("ZANZAMAR has been banished…").
+fn net_named(names: &[(u8, String)], msg: &str, is_mc2: bool) -> String {
+    let mut msg = msg.to_string();
+    for &(seat, ref name) in names {
+        let table = if is_mc2 {
+            mgc_sim::mc2::rivals::MC2_RIVAL_NAMES[usize::from(seat.min(7))]
+        } else {
+            mgc_sim::mc1::rivals::RIVAL_NAMES[usize::from(seat.min(7))]
+        };
+        msg = msg.replace(table, name);
+    }
+    msg
+}
+
 fn name_humans(names: &[(u8, String)], views: &mut [mgc_sim::engine::world::RivalView]) {
     for v in views {
         if let Some((_, n)) = names.iter().find(|(s, _)| *s == v.slot) {

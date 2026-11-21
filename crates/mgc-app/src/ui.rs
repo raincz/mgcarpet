@@ -2390,6 +2390,51 @@ pub fn objective_box_quads(assets: &UiAssets, lines: &[String], w: f32, h: f32) 
     quads
 }
 
+/// The map screen's MESSAGE LOG (`App::message_log`, player idea
+/// 2026-11-21): the newest `lines` (stamp, text, ink) that fit the
+/// black band from native y `band_top` to the screen bottom, newest at
+/// the bottom — the level-time stamp in grey, then the text in its
+/// toast ink, the toast font at the toast scale, inset from the left
+/// edge. The stamps sit in a column as wide as the widest one shown.
+pub fn message_log_quads(
+    assets: &UiAssets,
+    lines: &[(String, String, [u8; 3])],
+    band_top: f32,
+    w: f32,
+    h: f32,
+) -> Vec<UiQuad> {
+    let mut quads = Vec::new();
+    if !assets.has_font() {
+        return quads;
+    }
+    let hud = HudFrame::new(w, h);
+    let font_s = 2.0 * hud.s;
+    let lh = assets.font_line_height() * font_s;
+    let top = hud.by(band_top) + 0.25 * lh;
+    let bottom = h - 0.25 * lh;
+    let fit = ((bottom - top) / lh).floor().max(0.0) as usize;
+    let shown = &lines[lines.len() - lines.len().min(fit)..];
+    const STAMP_INK: [f32; 4] = [0.6, 0.6, 0.6, 1.0];
+    let x = hud.lx(6.0);
+    let col = shown
+        .iter()
+        .map(|(st, _, _)| assets.text_width(st) * font_s)
+        .fold(0.0, f32::max)
+        + 0.6 * lh;
+    for (i, (stamp, text, c)) in shown.iter().enumerate() {
+        let tint = [
+            c[0] as f32 / 255.0,
+            c[1] as f32 / 255.0,
+            c[2] as f32 / 255.0,
+            1.0,
+        ];
+        let y = bottom - (shown.len() - i) as f32 * lh;
+        quads.extend(assets.text_quads(stamp, x, y, STAMP_INK, font_s));
+        quads.extend(assets.text_quads(text, x + col, y, tint, font_s));
+    }
+    quads
+}
+
 pub fn exit_confirm_quads(
     assets: &UiAssets,
     text: &str,

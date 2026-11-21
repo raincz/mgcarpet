@@ -1653,6 +1653,10 @@ pub struct Notification {
     /// player: a spell pick or a level-up is its own player's news);
     /// `None` = everyone (deaths, eliminations).
     pub seat: Option<Hx>,
+    /// Not yet collected into the app's message LOG (the map screen's
+    /// scrolling history, [`World::take_fresh_notifications`]). A
+    /// refresh is a new line and is fresh again.
+    pub fresh: bool,
 }
 
 /// A posed entity's place in a multipart body: segments link toward
@@ -25769,7 +25773,23 @@ impl World {
             color,
             tag,
             seat,
+            fresh: true,
         });
+    }
+
+    /// The lines raised since the last call that seat `hx`'s player
+    /// sees (text, ink RGB, tag), oldest first — the app appends them
+    /// to its message LOG (the map screen's scrolling history; the
+    /// toasts themselves still expire). Clears the fresh mark on every
+    /// line, the other seats' included (they are not this screen's).
+    pub fn take_fresh_notifications(&mut self, hx: Hx) -> Vec<(String, [u8; 3], Option<NotifyTag>)> {
+        let mut out = Vec::new();
+        for n in &mut self.notifications {
+            if std::mem::take(&mut n.fresh) && n.seat.is_none_or(|s| s == hx) {
+                out.push((n.text.clone(), n.color, n.tag));
+            }
+        }
+        out
     }
 
     /// App-side OPTION toast (game speed cycling, the live F-key /
@@ -60081,6 +60101,23 @@ mod tests {
         assert_eq!(l[0], "event 2");
         w.age_notification(100);
         assert_eq!(w.notifications().count(), 0);
+    }
+
+    /// The message LOG feed: each raised line is handed out once, to
+    /// the seat it is for (a refresh counts again).
+    #[test]
+    fn fresh_notifications_feed_the_log_once_per_line() {
+        let mut w = mc2_flat_world();
+        let red = [0xFF, 0, 0];
+        w.set_notification("Ash has died.", 100, red);
+        w.set_seat_notification(Hx(1), "Not yours", 100, red);
+        w.set_notification_tagged(NotifyTag::SpellSelect, "Heal", 20, red);
+        let got: Vec<_> = w.take_fresh_notifications(Hx(0)).into_iter().map(|l| l.0).collect();
+        assert_eq!(got, ["Ash has died.", "Heal"]);
+        assert!(w.take_fresh_notifications(Hx(0)).is_empty(), "taken once");
+        assert!(w.take_fresh_notifications(Hx(1)).is_empty(), "the other seat's line is not this screen's");
+        w.set_notification("Ash has died.", 100, red);
+        assert_eq!(w.take_fresh_notifications(Hx(0)).len(), 1, "a refresh is a new line");
     }
 
     /// THE HIDDEN-REALM NARRATION (player report 2026-09-26: mc2:04's
