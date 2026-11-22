@@ -508,7 +508,10 @@ mod tests {
             .map(|(i, _)| i)
             .collect();
         assert_eq!(metas, vec![23]);
-        assert_eq!(&smf[22..30], &[0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20, 0x00]);
+        assert_eq!(
+            &smf[22..30],
+            &[0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20, 0x00]
+        );
     }
 
     #[test]

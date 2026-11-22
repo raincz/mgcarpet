@@ -11149,7 +11149,10 @@ mod human_seat_tests {
         w.mc2_select_spell(hx, s as u8, t as u8, 0);
         assert_eq!(w.mc2_book[hx].sel[s] as usize, t);
         w.set_dev_spells(hx, false);
-        assert_eq!(w.mc2_book[hx].sel[s], earned, "the cheat's tier is not kept");
+        assert_eq!(
+            w.mc2_book[hx].sel[s], earned,
+            "the cheat's tier is not kept"
+        );
         let m = w.mc2_book[hx].ent[s] as usize;
         assert_eq!(w.g.ent[m].f71, earned, "and the manifestation follows");
     }
@@ -11174,14 +11177,12 @@ mod human_seat_tests {
             w.mc2_rivals[ri].per = 255;
             let i = w.mc2_rivals[ri].ent as usize;
             let (x, y, z) = (w.g.ent[i].x, w.g.ent[i].y, w.g.ent[i].z);
-            let fool = w
-                .g
-                .mc2_spawn_mana_sphere(57, x.wrapping_add(4 << 8), y, z)
-                .expect("fool's sphere");
-            let ball = w
-                .g
-                .spawn_mana_ball(x.wrapping_add(8 << 8), y, z)
-                .expect("mana ball");
+            let fool =
+                w.g.mc2_spawn_mana_sphere(57, x.wrapping_add(4 << 8), y, z)
+                    .expect("fool's sphere");
+            let ball =
+                w.g.spawn_mana_ball(x.wrapping_add(8 << 8), y, z)
+                    .expect("mana ball");
             assert_eq!(w.g.ent[fool].model65, 57);
             // Chain order is the test: the decoy first.
             w.g.ball_chain.list = vec![fool as u16, ball as u16];

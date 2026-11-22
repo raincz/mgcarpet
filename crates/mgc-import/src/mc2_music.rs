@@ -81,7 +81,9 @@ pub fn parse_bank(data: &[u8], bank: usize, driver: usize) -> Result<Vec<SubSong
     // A corrupt/negative count must not wrap huge through the usize
     // cast.
     if banks < 0 || bank >= banks as usize {
-        return Err(format!("driver {driver} section has {banks} banks, wanted {bank}"));
+        return Err(format!(
+            "driver {driver} section has {banks} banks, wanted {bank}"
+        ));
     }
     let rec = datapos + 8 + bank * 64 + driver * 16;
     let hdr_off = le_u32(data, rec)? as usize;

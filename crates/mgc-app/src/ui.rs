@@ -393,8 +393,7 @@ impl UiAssets {
                     };
                     for (variant, (bg, ink)) in variants[..3].iter().enumerate() {
                         let t = (spell * 3 + level) * 3 + variant;
-                        let (tx, ty) =
-                            ((t % grid_per_row) * gw, tier_y0 + (t / grid_per_row) * gh);
+                        let (tx, ty) = ((t % grid_per_row) * gw, tier_y0 + (t / grid_per_row) * gh);
                         tier[variant] = [tx as f32, ty as f32, gw as f32, gh as f32];
                         let mut tile = vec![0u8; gw * gh];
                         if let Some(b) = bg.as_ref() {
@@ -692,7 +691,11 @@ impl UiAssets {
     /// (`variant` 0..=2); None past the table (MC1 atlases).
     fn pane_tier_tile(&self, spell: usize, tier: usize, variant: usize) -> Option<[f32; 4]> {
         (variant < 3)
-            .then(|| self.pane_tier_uv.get(spell).map(|t| t[tier.min(2)][variant]))
+            .then(|| {
+                self.pane_tier_uv
+                    .get(spell)
+                    .map(|t| t[tier.min(2)][variant])
+            })
             .flatten()
     }
 
@@ -3025,7 +3028,12 @@ pub fn selector_tier_center(
     level: u8,
 ) -> (f32, f32) {
     let g = PaneGeom::new(assets, pane, w, h);
-    let c = g.sub_cell(slot, pane.cols, pane.levels as f32, level.min(pane.levels - 1));
+    let c = g.sub_cell(
+        slot,
+        pane.cols,
+        pane.levels as f32,
+        level.min(pane.levels - 1),
+    );
     (c[0] + c[2] / 2.0, c[1] + c[3] / 2.0)
 }
 
@@ -3266,7 +3274,10 @@ fn pane_cell(
             let my = cell[1] + cell[3] - 7.0 * g.sy;
             let mx = cell[0] + 4.0 * g.sx;
             let span = cell[2] - 8.0 * g.sx;
-            quads.push(solid([mx, my, span * frac, 4.0 * g.sy], meter_of(MANA_WHITE)));
+            quads.push(solid(
+                [mx, my, span * frac, 4.0 * g.sy],
+                meter_of(MANA_WHITE),
+            ));
             let max = ((span / (2.0 * g.sx)) as usize) * 2;
             meter_dots(
                 quads,
@@ -3336,14 +3347,20 @@ fn hotbar_cell(
         };
         let (iw, ih) = assets.sprite_dims(id).unwrap_or((40.0, 22.0));
         let u = r[2] / 48.0;
-        (id, [r[0] + (r[2] - iw * u) / 2.0, r[1] + 3.0 * u, iw * u, ih * u])
+        (
+            id,
+            [r[0] + (r[2] - iw * u) / 2.0, r[1] + 3.0 * u, iw * u, ih * u],
+        )
     } else {
         let id = SPR_SPELL_ICON + spell;
         let (iw, ih) = assets.sprite_dims(id).unwrap_or((ICON_W, ICON_H));
         (id, [r[0] + (r[2] - 64.0 * k) / 2.0, r[1], iw * k, ih * k])
     };
     if !owned {
-        push_opt(quads, assets.sprite_quad_rect_mask(icon, irect, UNOWNED_MASK));
+        push_opt(
+            quads,
+            assets.sprite_quad_rect_mask(icon, irect, UNOWNED_MASK),
+        );
     } else {
         push_opt(quads, assets.sprite_quad_rect_tint(icon, irect, WHITE));
         let castable = view.castable[spell];
@@ -3352,7 +3369,15 @@ fn hotbar_cell(
             let (mx, my) = (r[0] + 4.0 * fx, r[1] + 36.0 * fy);
             let partial = 56.0 * (view.mana % cost) as f32 / cost as f32;
             quads.push(solid([mx, my, partial * fx, 4.0 * fy], meter_of(mana_c)));
-            meter_dots(quads, mx, my, fx, fy, (view.mana / cost).min(54) as usize, mana_c);
+            meter_dots(
+                quads,
+                mx,
+                my,
+                fx,
+                fy,
+                (view.mana / cost).min(54) as usize,
+                mana_c,
+            );
         } else {
             quads.push(solid(r, LOCKED_WASH));
         }
@@ -3366,10 +3391,15 @@ fn hotbar_cell(
     if mc2 {
         let tint = [1.0, 1.0, 1.0, 0.75];
         if left {
-            push_opt(quads, assets.sprite_quad_tint(MC2_SPR_TAG_LEFT, r[0], r[1], k, tint));
+            push_opt(
+                quads,
+                assets.sprite_quad_tint(MC2_SPR_TAG_LEFT, r[0], r[1], k, tint),
+            );
         }
         if right {
-            let tw = assets.sprite_dims(MC2_SPR_TAG_RIGHT).map_or(14.0, |(w, _)| w);
+            let tw = assets
+                .sprite_dims(MC2_SPR_TAG_RIGHT)
+                .map_or(14.0, |(w, _)| w);
             push_opt(
                 quads,
                 assets.sprite_quad_tint(MC2_SPR_TAG_RIGHT, r[0] + r[2] - tw * k, r[1], k, tint),
@@ -3386,7 +3416,10 @@ fn hotbar_cell(
     }
     if hovered {
         if mc2 {
-            push_opt(quads, assets.sprite_quad_rect_tint(MC2_SPR_BOX_FRAME, r, WHITE));
+            push_opt(
+                quads,
+                assets.sprite_quad_rect_tint(MC2_SPR_BOX_FRAME, r, WHITE),
+            );
         } else {
             ring_outline(quads, r);
         }
@@ -3428,7 +3461,13 @@ pub fn hotbar_rects(
 
 /// The hotbar's bounding rect (screen px) — the pointer capture
 /// widens to it while the pane is up.
-pub fn hotbar_bounds(assets: &UiAssets, pane: &SelectorPane, w: f32, h: f32, raised: bool) -> [f32; 4] {
+pub fn hotbar_bounds(
+    assets: &UiAssets,
+    pane: &SelectorPane,
+    w: f32,
+    h: f32,
+    raised: bool,
+) -> [f32; 4] {
     let r = hotbar_rects(assets, pane, w, h, raised);
     let (a, b) = (r[0], r[HOTBAR_SLOTS - 1]);
     [a[0], a[1], b[0] + b[2] - a[0], b[1] + b[3] - a[1]]
@@ -3467,18 +3506,34 @@ pub fn hotbar_quads(
         match spell {
             Some(s) if (s as usize) < view.owned.len() => {
                 let s = s as usize;
-                hotbar_cell(quads, assets, pane.mc2_art, view, s, r, mana_c, hover == Some(i) || lifted);
+                hotbar_cell(
+                    quads,
+                    assets,
+                    pane.mc2_art,
+                    view,
+                    s,
+                    r,
+                    mana_c,
+                    hover == Some(i) || lifted,
+                );
             }
             _ => {
                 // An empty key: a dark backing (legible over bright
                 // scenery), the bare box dimmed over it.
                 quads.push(solid(r, [0.0, 0.0, 0.0, 0.45]));
                 if pane.mc2_art {
-                    push_opt(quads, assets.sprite_quad_rect_tint(MC2_SPR_BOX, r, [1.0, 1.0, 1.0, 0.5]));
+                    push_opt(
+                        quads,
+                        assets.sprite_quad_rect_tint(MC2_SPR_BOX, r, [1.0, 1.0, 1.0, 0.5]),
+                    );
                 } else {
                     push_opt(
                         quads,
-                        assets.sprite_quad_rect_tint(SPR_SLOT_BG as usize, r, [SLAB_DIM[0], SLAB_DIM[1], SLAB_DIM[2], 0.5]),
+                        assets.sprite_quad_rect_tint(
+                            SPR_SLOT_BG as usize,
+                            r,
+                            [SLAB_DIM[0], SLAB_DIM[1], SLAB_DIM[2], 0.5],
+                        ),
                     );
                 }
             }
@@ -3487,14 +3542,25 @@ pub fn hotbar_quads(
         // of the meter along the bottom.
         let digit = ((i + 1) % 10).to_string();
         let dw = assets.text_width(&digit) * fs;
-        label(quads, &digit, r[0] + (r[2] - dw) / 2.0, r[1] + 2.0 * fs, [1.0, 0.85, 0.4, 1.0]);
+        label(
+            quads,
+            &digit,
+            r[0] + (r[2] - dw) / 2.0,
+            r[1] + 2.0 * fs,
+            [1.0, 0.85, 0.4, 1.0],
+        );
     };
     for (i, &r) in rects.iter().enumerate() {
         draw(&mut quads, i, r, false);
     }
     if let (Some(i), Some(c)) = (drag, cursor) {
         let r = rects[i];
-        draw(&mut quads, i, [c.0 - r[2] / 2.0, c.1 - r[3] / 2.0, r[2], r[3]], true);
+        draw(
+            &mut quads,
+            i,
+            [c.0 - r[2] / 2.0, c.1 - r[3] / 2.0, r[2], r[3]],
+            true,
+        );
     }
     (quads, hover)
 }
@@ -3718,7 +3784,10 @@ mod tests {
     #[test]
     fn selector_bounds_cover_the_grid_and_the_tier_row() {
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../baked/assets");
-        for (variant, pane) in [("mc2-night", SelectorPane::mc2()), ("mc1-temperate", SelectorPane::mc1())] {
+        for (variant, pane) in [
+            ("mc2-night", SelectorPane::mc2()),
+            ("mc1-temperate", SelectorPane::mc1()),
+        ] {
             let Ok(b) = mgc_formats::bundle::Bundle::load(&root.join(variant)) else {
                 eprintln!("no {variant} bundle; skipped");
                 continue;
@@ -3741,16 +3810,31 @@ mod tests {
             for slot in 0..pane.spell_count() {
                 let c = g.cell(slot, pane.cols);
                 let mid = (c[0] + c[2] / 2.0, c[1] + c[3] / 2.0);
-                assert!(rect_hit(grid, mid), "{variant}: slot {slot} inside the grid capture");
+                assert!(
+                    rect_hit(grid, mid),
+                    "{variant}: slot {slot} inside the grid capture"
+                );
             }
-            assert!((grid[1] + grid[3] - h).abs() < 1.0, "{variant}: the grid sits on the bottom");
+            assert!(
+                (grid[1] + grid[3] - h).abs() < 1.0,
+                "{variant}: the grid sits on the bottom"
+            );
             let slot = 5;
             let tier = selector_bounds(&a, &pane, w, h, Some(slot));
             if pane.levels > 1 {
-                assert!((tier[2] - 3.0 * g.f.len(g.sub_w)).abs() < 0.5, "three boxes wide");
-                assert!((tier[1] + tier[3] - grid[1]).abs() < 0.5, "right above the grid");
+                assert!(
+                    (tier[2] - 3.0 * g.f.len(g.sub_w)).abs() < 0.5,
+                    "three boxes wide"
+                );
+                assert!(
+                    (tier[1] + tier[3] - grid[1]).abs() < 0.5,
+                    "right above the grid"
+                );
                 for l in 0..3 {
-                    assert!(rect_hit(tier, selector_tier_center(&a, &pane, w, h, slot, l)));
+                    assert!(rect_hit(
+                        tier,
+                        selector_tier_center(&a, &pane, w, h, slot, l)
+                    ));
                 }
             } else {
                 assert_eq!(tier, grid, "{variant}: no tiers, the grid holds");
@@ -3781,7 +3865,12 @@ mod tests {
             b.web_sprites.as_ref().map(|(i, p)| (i, p.as_slice())),
         );
         assert!(a.map_stamp(OK_SPRITE).is_none() && a.has_font());
-        for (w, h) in [(640.0, 480.0), (1280.0, 960.0), (1920.0, 1080.0), (800.0, 600.0)] {
+        for (w, h) in [
+            (640.0, 480.0),
+            (1280.0, 960.0),
+            (1920.0, 1080.0),
+            (800.0, 600.0),
+        ] {
             let (ok, cancel) = exit_confirm_rects(Some(&a), w, h);
             assert_eq!(ok[2], cancel[2], "symmetrical");
             assert_eq!(ok[0] + ok[2], cancel[0], "adjacent");

@@ -25839,7 +25839,10 @@ impl World {
     /// to its message LOG (the map screen's scrolling history; the
     /// toasts themselves still expire). Clears the fresh mark on every
     /// line, the other seats' included (they are not this screen's).
-    pub fn take_fresh_notifications(&mut self, hx: Hx) -> Vec<(String, [u8; 3], Option<NotifyTag>)> {
+    pub fn take_fresh_notifications(
+        &mut self,
+        hx: Hx,
+    ) -> Vec<(String, [u8; 3], Option<NotifyTag>)> {
         let mut out = Vec::new();
         for n in &mut self.notifications {
             if std::mem::take(&mut n.fresh) && n.seat.is_none_or(|s| s == hx) {
@@ -60193,12 +60196,23 @@ mod tests {
         w.set_notification("Ash has died.", 100, red);
         w.set_seat_notification(Hx(1), "Not yours", 100, red);
         w.set_notification_tagged(NotifyTag::SpellSelect, "Heal", 20, red);
-        let got: Vec<_> = w.take_fresh_notifications(Hx(0)).into_iter().map(|l| l.0).collect();
+        let got: Vec<_> = w
+            .take_fresh_notifications(Hx(0))
+            .into_iter()
+            .map(|l| l.0)
+            .collect();
         assert_eq!(got, ["Ash has died.", "Heal"]);
         assert!(w.take_fresh_notifications(Hx(0)).is_empty(), "taken once");
-        assert!(w.take_fresh_notifications(Hx(1)).is_empty(), "the other seat's line is not this screen's");
+        assert!(
+            w.take_fresh_notifications(Hx(1)).is_empty(),
+            "the other seat's line is not this screen's"
+        );
         w.set_notification("Ash has died.", 100, red);
-        assert_eq!(w.take_fresh_notifications(Hx(0)).len(), 1, "a refresh is a new line");
+        assert_eq!(
+            w.take_fresh_notifications(Hx(0)).len(),
+            1,
+            "a refresh is a new line"
+        );
     }
 
     /// THE HIDDEN-REALM NARRATION (player report 2026-09-26: mc2:04's

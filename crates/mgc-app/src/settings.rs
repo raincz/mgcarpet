@@ -583,11 +583,9 @@ pub fn registry() -> Vec<Spec> {
                 val: c.sim.parameters.entity_pool_size.map(|n| n.to_string()),
                 faithful: "per-game default 1000",
             },
-            desc: "Entity pool capacity, default 20000. Retail caps the world at \
-                   1000 things and silently drops spawns beyond it; the larger \
-                   pool carries rosters the original would have shed. Set to \
-                   1000 for the retail limit. Set from the command line or \
-                   config file; fixed for the run.",
+            desc: "Sets how many things the world can hold at once. Retail Magic Carpet used 1000. \
+                   The default is 20000. Can only be changed on the command line or in the config \
+                   file.",
             ctl: Ctl::ReadOnly,
         },
         Spec {
@@ -608,10 +606,9 @@ pub fn registry() -> Vec<Spec> {
                 }),
                 faithful: "24 tiles (both retail engines)",
             },
-            desc: "Creature wake radius in tiles. Retail sleeps creatures beyond \
-                   24 tiles (a period CPU optimization); 0 keeps everything \
-                   awake. Set from the command line or config file; fixed for \
-                   the run.",
+            desc: "Sets how close to you creatures stay active, in tiles. Sleeping creatures skip \
+                   some behaviour, even dying when out of health. Retail uses 24. 0 keeps \
+                   everything awake. Command line or config file only.",
             ctl: Ctl::ReadOnly,
         },
         // ---- sim · options ----------------------------------------------
@@ -633,11 +630,8 @@ pub fn registry() -> Vec<Spec> {
                 faithful: 1,
                 variants: &["slow", "normal", "fast", "very-fast"],
             },
-            desc: "How fast the world runs. Retail's F3 option: the whole \
-                   simulation is paced up or down — everything moves, fights \
-                   and regenerates at the multiplied rate. A situational \
-                   control, not a preference: it resets to normal at every \
-                   level start and is never saved.",
+            desc: "Sets how fast the game runs. Everything moves, fights and recovers at this \
+                   pace. Resets to normal at the start of every level.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     c.sim.options.game_speed = match i {
@@ -648,11 +642,10 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: &[
-                    "Half speed (0.5x). Our addition — no retail equivalent.",
-                    "The authentic pace: 24 simulation ticks per second.",
-                    "Retail Fast: 4x, both games.",
-                    "Retail's top speed, game-keyed: MC1 'Very Fast' = 16x, \
-                     MC2 'Super Fast' = 8x.",
+                    "Half speed",
+                    "The normal pace",
+                    "Four times faster, retail's Fast",
+                    "Retail's top speed: 16x in Magic Carpet, 8x in Magic Carpet 2",
                 ],
             },
         },
@@ -674,10 +667,8 @@ pub fn registry() -> Vec<Spec> {
                 faithful: 1,
                 variants: &["enhanced", "classic", "custom"],
             },
-            desc: "Sets the look below as a group: fog, fire and lightning, \
-                   smooth motion, rival tags, the map markers and the rest. \
-                   Custom means they have been tuned by hand and match neither \
-                   preset; it is shown, not chosen.",
+            desc: "Sets all the visual options below at once. Custom is a placeholder if some are \
+                   changed by hand.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     if let Some(&p) = Preset::ALL.get(i) {
@@ -685,12 +676,9 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: &[
-                    "Every visual enhancement on, fog pushed back to the \
-                     90-tile maximum (default).",
-                    "How the originals look: retail fog, fire and \
-                     lightning, no crosshair, no map extras (motion \
-                     stays smooth).",
-                    "Hand-tuned: the options below match neither preset.",
+                    "All visual improvements on (default)",
+                    "The look of the original games, but with smooth motion",
+                    "The options below match neither preset",
                 ],
             },
         },
@@ -709,20 +697,11 @@ pub fn registry() -> Vec<Spec> {
                 on: c.render.preference.crosshair,
                 faithful: true,
             },
-            desc: "The aim crosshair: a cross at the TRUE aim point (the \
-                   faithful camera pitches at half the aim pitch, so aim is \
-                   never screen center). Under enhanced thrust this IS the \
-                   chase-the-pointer target \u{2014} steering is unreadable \
-                   without it. Autoaim lock markers are a separate debug \
-                   option.",
+            desc: "Shows a cross where spells will aim at. With enhanced flight controls the \
+                   carpet also steers toward it.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.preference.crosshair = v,
-                descs: [
-                    "No aim cursor (retail showed the live mouse pointer; \
-                     the classic virtual stick hides it).",
-                    "The white-edged aim cross \u{2014} and the enhanced \
-                     steering target.",
-                ],
+                descs: ["No aim crosshair", "Shows the aim crosshair"],
             },
         },
         Spec {
@@ -738,15 +717,10 @@ pub fn registry() -> Vec<Spec> {
                 on: c.render.preference.sky,
                 faithful: true,
             },
-            desc: "The textured parallax cloud sky (retail's Sky option, F6). \
-                   Caves never have one, exactly like retail.",
+            desc: "Draws the cloudy sky, unless the level is in a cave.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.preference.sky = v,
-                descs: [
-                    "Flat horizon-color fill (retail's sky-off look).",
-                    "The per-environment cloud plane, scrolled by yaw and \
-                     slid by pitch (retail default).",
-                ],
+                descs: ["A plain sky colour", "The cloudy sky"],
             },
         },
         Spec {
@@ -763,15 +737,10 @@ pub fn registry() -> Vec<Spec> {
                 on: c.render.preference.reflections,
                 faithful: true,
             },
-            desc: "Water reflections (retail's Reflections option, F5): sea \
-                   tiles mirror the landscape about the water plane, wobbling \
-                   with the wave.",
+            desc: "Water reflecting the landscape, wobbling with the waves.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.preference.reflections = v,
-                descs: [
-                    "Plain animated water.",
-                    "Terrain mirrored in the water (retail default).",
-                ],
+                descs: ["Plain water", "The landscape mirrored in the water"],
             },
         },
         Spec {
@@ -788,16 +757,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.render.preference.horizon_cull,
                 faithful: true,
             },
-            desc: "Stop drawing terrain past the horizon melt (which follows \
-                   the fog distance): each visible tile once, in its nearest \
-                   wrap copy, instead of the whole map nine times. A large \
-                   frame-rate win at every fog distance — retail's 20 tiles \
-                   becomes the cheapest view. Off = the old full draw.",
+            desc: "Skips drawing land that is hidden in the far fog anyway. This reduces the \
+                   number of distant polygons, and should only be disabled if you know what you're \
+                   doing.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.preference.horizon_cull = v,
                 descs: [
-                    "The whole map, nine times, every frame.",
-                    "Only the terrain inside the melt band (default).",
+                    "Draws the whole map every frame",
+                    "Draws only the land you can see (default)",
                 ],
             },
         },
@@ -815,16 +782,11 @@ pub fn registry() -> Vec<Spec> {
                 on: c.render.preference.light_sources,
                 faithful: true,
             },
-            desc: "Dynamic light sources (retail MC2's Dynamic Lighting): \
-                   fireballs, explosions and standing fire brighten the \
-                   terrain around them — night and cave levels only, exactly \
-                   retail's gate.",
+            desc: "Fireballs, explosions and fires light up the ground around them on night and \
+                   cave levels.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.preference.light_sources = v,
-                descs: [
-                    "No dynamic terrain lighting.",
-                    "Fire lights up the night (retail default).",
-                ],
+                descs: ["No light from fire", "Fire lights up the night"],
             },
         },
         Spec {
@@ -845,17 +807,9 @@ pub fn registry() -> Vec<Spec> {
                 // (retail band 15..19, geometry cutoff 20).
                 faithful: "20 tiles",
             },
-            desc: "How far you can see before the distance fog fully occludes, \
-                   in tiles. Retail drew 20 tiles for pure period-performance \
-                   reasons; note the monsters' sight radii (15-20 tiles) were \
-                   tuned so pop-in hides in that fog — long distances reveal \
-                   creatures acting before you could faithfully see them. \
-                   The horizon silhouettes beyond the fog melt into the sky \
-                   across a band that follows this distance (1.2x .. +1/3), \
-                   and the horizon cull stops drawing behind it, so shorter \
-                   is also faster. Up to 90 nothing past the map's edge is \
-                   drawn; extreme (120) reaches past it, where the world \
-                   wraps around inside the fogged zone.",
+            desc: "Sets how far you can see, in tiles. Retail uses 20. Farther views look better, \
+                   but reveal creatures that retail kept hidden in the fog. Shorter view also runs \
+                   faster.",
             ctl: Ctl::Stops {
                 get: |c| c.render.preference.fog_distance,
                 set: |c, v| c.render.preference.fog_distance = v,
@@ -877,15 +831,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.render.preference.vsync,
                 faithful: true,
             },
-            desc: "Vertical sync: frames wait for the display refresh. Off \
-                   trades tearing for an uncapped frame rate — only useful \
-                   together with the fps overlay (render \u{b7} debug) to \
-                   measure what the machine can actually render.",
+            desc: "Synchronizes the frame rate with the display refresh. Turn it off to see the \
+                   highest frame rate. Only disable this if you have trouble with visual tearing \
+                   or are benchmarking the performance.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.preference.vsync = v,
                 descs: [
-                    "Uncapped frame rate, may tear. For fps measurement.",
-                    "Frames sync to the display refresh (default).",
+                    "Unlimited frame rate",
+                    "Vsynced framerate, tear-free frames (default)",
                 ],
             },
         },
@@ -905,20 +858,11 @@ pub fn registry() -> Vec<Spec> {
                 on: c.render.preference.fullscreen,
                 faithful: true,
             },
-            desc: "Borderless fullscreen: the window loses its frame and covers \
-                   the monitor it sits on. No exclusive video-mode switch, so \
-                   alt-tab stays instant. At aspects wider than 4:3 the HUD \
-                   panels anchor to the screen edges (castle left, spells \
-                   right) instead of stretching; narrower than 4:3 the whole \
-                   HUD scales down to fit the width. The 3D view keeps square \
-                   pixels either way — the field of view widens or narrows \
-                   with the screen.",
+            desc: "Fills the whole screen with no window frame. On widescreen displays the side \
+                   panels move to the edges and you see more to the sides.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.preference.fullscreen = v,
-                descs: [
-                    "Windowed, 4:3 by default (resizable).",
-                    "Borderless fullscreen on the current monitor.",
-                ],
+                descs: ["A window you can resize", "Fills the whole screen"],
             },
         },
         Spec {
@@ -942,20 +886,18 @@ pub fn registry() -> Vec<Spec> {
                     "3840x2160",
                 ],
             },
-            desc: "The window's size when not fullscreen. It can still be \
-                   resized by hand; the next start opens at this size again. \
-                   A size larger than the monitor is allowed (the window \
-                   manager may clamp it).",
+            desc: "The window size when not in fullscreen mode. You can still resize the window by \
+                   hand.",
             ctl: Ctl::Choice {
                 set: |c, i| c.render.preference.window_size = crate::config::WindowSize::ALL[i],
                 descs: &[
-                    "640 × 480, the original's own frame, pixel for pixel.",
-                    "1280 × 960, twice the original 640 × 480 (default).",
-                    "1600 × 1200, two and a half times 640 × 480.",
-                    "1920 × 1440, three times 640 × 480.",
-                    "1920 × 1080, Full HD (16:9).",
-                    "2560 × 1440, QHD (16:9).",
-                    "3840 × 2160, 4K UHD (16:9).",
+                    "Retail's hires size",
+                    "2x",
+                    "2.5x",
+                    "3x",
+                    "Full HD",
+                    "QHD widescreen",
+                    "4K widescreen",
                 ],
             },
         },
@@ -980,14 +922,8 @@ pub fn registry() -> Vec<Spec> {
                 faithful: 0,
                 variants: &["off", "msaa", "1.5x", "2x"],
             },
-            desc: "Smooth the 3D view's jagged edges. MSAA is cheap but only \
-                   reaches true geometry — chiefly the landscape against the sky \
-                   — because creatures and buildings are cut out of their sprites \
-                   by a hard transparency test that multisampling cannot soften; \
-                   it also needs a restart, being built into the render \
-                   pipelines. 1.5x and 2x supersample the WHOLE frame instead, \
-                   which is the only thing that smooths those sprite outlines, at \
-                   2.25x and 4x the pixels respectively.",
+            desc: "Smooth jagged edges in the 3D view. The higher settings smooth everything but \
+                   cost performance.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     c.render.preference.anti_aliasing = match i {
@@ -998,10 +934,10 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: &[
-                    "No smoothing — the original's hard pixel edges.",
-                    "4x multisampling: cheap, landscape edges only (restart).",
-                    "Supersample at 1.5x: smooths everything, ~2.25x the pixels.",
-                    "Supersample at 2x: smoothest, 4x the pixels.",
+                    "No AA",
+                    "Cheap AA, smooths landscape edges only, needs a restart",
+                    "1.5x supersampling, smooths everything, at a moderate cost",
+                    "2x supersampling, smoothest, heavy performance cost",
                 ],
             },
         },
@@ -1020,18 +956,11 @@ pub fn registry() -> Vec<Spec> {
                 on: c.render.preference.movies,
                 faithful: c.render.preference.movies,
             },
-            desc: "Play the full-screen movies: the intro chain at launch, \
-                   Magic Carpet 2's six cutscenes between levels, and the \
-                   ending. Any key skips the rest of a chain while it plays, \
-                   so turning this off only saves the keypress. The movies \
-                   have no soundtrack of their own — the original scores them \
-                   from MIDI, because the format cannot hold audio.",
+            desc: "Play the movies and cutscenes: the intro, the Magic Carpet 2 intermission \
+                   cutscenes between levels and the ending. Any key skips a movie.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.preference.movies = v,
-                descs: [
-                    "Skip straight past intro, cutscenes and ending.",
-                    "Play them (as the original does).",
-                ],
+                descs: ["Skip all movies", "Play the movies"],
             },
         },
         Spec {
@@ -1047,14 +976,12 @@ pub fn registry() -> Vec<Spec> {
                 on: c.render.preference.stats_screen,
                 faithful: c.render.preference.stats_screen,
             },
-            desc: "Show the end-of-level stats: the performance screen after \
-                   a Magic Carpet level (it waits for a key), and the stats \
-                   table on the Magic Carpet 2 map after a win.",
+            desc: "Show result stats after each level.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.preference.stats_screen = v,
                 descs: [
-                    "Go straight on after a level.",
-                    "Show them (as the original does).",
+                    "No stats. They are still calculated and can be viewed in MC2",
+                    "Show stats after each level",
                 ],
             },
         },
@@ -1072,18 +999,10 @@ pub fn registry() -> Vec<Spec> {
                 on: c.render.preference.movie_subtitles,
                 faithful: !c.render.preference.movie_subtitles,
             },
-            desc: "Subtitle the movies' narration. The original ties this to \
-                   language, not preference: the voice track is English only, so \
-                   it subtitles every non-English build, and an English one only \
-                   when the machine has no sound card. Turning it on here forces \
-                   the strip open — which lifts the picture a little, as the \
-                   original does, to clear a band for the text.",
+            desc: "Show the movie narration as subtitles.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.preference.movie_subtitles = v,
-                descs: [
-                    "No subtitles (an English machine with sound hears the narration).",
-                    "Show the narration as text (default).",
-                ],
+                descs: ["No movie subtitles", "Narration shown as text (default)"],
             },
         },
         Spec {
@@ -1098,14 +1017,11 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--smooth-shading"),
             cfg_path: "render.enhancement.smooth_shading",
             read: toggle!(c => render.enhancement.smooth_shading),
-            desc: "Terrain shading style. Off = one shade level per tile (the \
-                   original look); on = shade interpolated across tile centers.",
+            desc: "Continuous landscape transition shading. Disabling this gives the landscape a \
+                   faceted look and a small performance bump.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.enhancement.smooth_shading = v,
-                descs: [
-                    "Per-tile shading — the faceted original look.",
-                    "Interpolated (gouraud-like) terrain shading.",
-                ],
+                descs: ["Faceted shading", "Smooth shading"],
             },
         },
         Spec {
@@ -1125,9 +1041,7 @@ pub fn registry() -> Vec<Spec> {
                 // here (MC1 is always-transparent, MC2 has the toggle).
                 faithful: false,
             },
-            desc: "HUD panel transparency. MC1 always blends the HUD over the \
-                   sky; MC2 offers the toggle (Panel Transparency). Opaque \
-                   reads best, especially the radar.",
+            desc: "Make the HUD panel transparent. Solid panels tend to be easier to view.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.render.enhancement.hud_transparency = if v {
@@ -1136,10 +1050,7 @@ pub fn registry() -> Vec<Spec> {
                         crate::config::HudTransparency::Off
                     }
                 },
-                descs: [
-                    "Solid panels and radar — best readability (default).",
-                    "The HUD blends over the world, MC1-style.",
-                ],
+                descs: ["Solid panels and radar (default)", "Transparent panels"],
             },
         },
         Spec {
@@ -1165,12 +1076,8 @@ pub fn registry() -> Vec<Spec> {
                 faithful: 0,
                 variants: &["auto", "on", "off"],
             },
-            desc: "The rival wizard tags in the 3D view: each visible rival \
-                   wears a boxed name + health bar in its team color, exactly \
-                   as MC2 draws them. Auto = MC2 only (each game's own retail \
-                   surface); on = MC1 too (an opt-in — retail MC1 never tags \
-                   its rivals); off = no tags (MC2's own Player Names \
-                   toggle, off).",
+            desc: "Show each rival wizard's name and health above them in their colour, Magic \
+                   Carpet 2 style.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     c.render.preference.rival_tags = match i {
@@ -1180,10 +1087,9 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: &[
-                    "MC2 tags its rivals, MC1 doesn't — each game as retail \
-                     shipped it (default).",
-                    "Both games tag their rivals — MC2's tag brought to MC1.",
-                    "No rival tags anywhere.",
+                    "Only show tags in Magic Carpet 2 (default)",
+                    "Show tags in both games",
+                    "No rival tags",
                 ],
             },
         },
@@ -1207,17 +1113,13 @@ pub fn registry() -> Vec<Spec> {
                 on: c.render.enhancement.smooth_motion,
                 faithful: false,
             },
-            desc: "The view and the world move frame-smooth: rendered \
-                   interpolated between the last two sim ticks, so movement \
-                   glides at any fps instead of stepping at tick rate. Off, \
-                   camera and entities alike step at tick rate. Presentation \
-                   only — the simulation is untouched; the displayed world \
-                   runs one tick (~40 ms) behind.",
+            desc: "Make the view and everything in it move smoothly at any frame rate, \
+                   interpolating sim ticks. Does not affect the gameplay as such.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.enhancement.smooth_motion = v,
                 descs: [
-                    "View and entities step at sim tick rate, as retail drew them.",
-                    "View and entities glide — per-frame interpolation (default).",
+                    "Movement in lockstep with sim",
+                    "Interpolated smooth movement (default)",
                 ],
             },
         },
@@ -1240,14 +1142,8 @@ pub fn registry() -> Vec<Spec> {
                 faithful: 0,
                 variants: &["classic", "enhanced"],
             },
-            desc: "The fire look. Classic = the retail fire and explosion \
-                   sprites, exactly as the running game draws them. Enhanced = \
-                   procedural fire: the fireball becomes a flame with a comet \
-                   trail (its core sprite hidden), the meteor blast an \
-                   expanding two-wave flame front leaving lingering smoke, \
-                   capped by a detaching shockwave ring. Presentation only — \
-                   the simulation is identical either way. Needs smooth \
-                   motion; with it off, classic draws regardless.",
+            desc: "Enhanced fire effects. Draws procedurally generated flowing flames, smoke and \
+                   shockwaves. Requires smooth motion.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     c.render.enhancement.fire = match i {
@@ -1256,8 +1152,8 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: &[
-                    "Retail fire/explosion sprites, as the original drew them.",
-                    "Procedural flame, smoke and shockwave (default).",
+                    "The original fire and explosions",
+                    "Enhanced flames, smoke and shockwaves (default)",
                 ],
             },
         },
@@ -1278,14 +1174,8 @@ pub fn registry() -> Vec<Spec> {
                 faithful: 0,
                 variants: &["classic", "enhanced"],
             },
-            desc: "The lightning look. Classic = the retail zigzag flash \
-                   sprites, exactly as the running game draws them. Enhanced = \
-                   a procedural bolt: a fractal main channel with small side \
-                   branches, each strike playing a leader / return-stroke / \
-                   decay envelope, successive strikes of a held stream \
-                   overlapping into one continuous dancing arc. Presentation \
-                   only — the simulation is identical either way. Needs \
-                   smooth motion; with it off, classic draws regardless.",
+            desc: "Enhanced lightning effects. Draws branching bolts that dance while you hold the \
+                   spell. Requires smooth motion.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     c.render.enhancement.lightning = match i {
@@ -1294,9 +1184,8 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: &[
-                    "Retail zigzag flash sprites, as the original drew them.",
-                    "Procedural fractal bolt with branches and a strike \
-                     envelope (default).",
+                    "The original lightning projectiles",
+                    "Enhanced branching bolts (default)",
                 ],
             },
         },
@@ -1309,16 +1198,13 @@ pub fn registry() -> Vec<Spec> {
             cli: None,
             cfg_path: "render.enhancement.map_owned_buildings",
             read: toggle!(c => render.enhancement.map_owned_buildings),
-            desc: "Mark dwellings on the overhead map the way MC2 does: \
-                   unclaimed pink, claimed/possessed flashing in the owner's \
-                   color — brought to MC1 as an opt-in (retail MC1 never \
-                   marks buildings).",
+            desc: "Mark houses on the map as Magic Carpet 2 does: pink when free, flashing in the \
+                   owner's colour when claimed.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.enhancement.map_owned_buildings = v,
                 descs: [
-                    "Unmarked dwellings, as retail MC1 draws them.",
-                    "MC2-style markers: unclaimed pink, owned flashing in \
-                     the owner's color.",
+                    "Houses unmarked, just like Magic Carpet",
+                    "Houses marked by owner",
                 ],
             },
         },
@@ -1337,9 +1223,8 @@ pub fn registry() -> Vec<Spec> {
                 // faithful size; 1.00x is the shipped baseline.
                 faithful: "1.00x",
             },
-            desc: "Overhead-map marker size (entity dots and icon stamps \
-                   together, on the map screen and the radar). Off 1x, \
-                   marker size stays constant as the radar zooms.",
+            desc: "Tweaks the size of the markers on the map and radar. At any size but 1x, \
+                   markers keep their size as the radar zooms.",
             ctl: Ctl::Slider {
                 get: |c| c.render.enhancement.map_marker_scale,
                 set: |c, v| c.render.enhancement.map_marker_scale = v,
@@ -1357,20 +1242,11 @@ pub fn registry() -> Vec<Spec> {
             cli: None,
             cfg_path: "render.enhancement.map_marker_icons",
             read: toggle!(c => render.enhancement.map_marker_icons),
-            desc: "Swap selected map dots for miniature pictures of the \
-                   thing itself: spell jars, dolmens/shrines, statues, \
-                   teleporters, and dead wizards' graves (the bones you \
-                   possess to reclaim their mana - a dot is lost among \
-                   the flags). \
-                   Drawn small — half the spell-stamp size — and scaled \
-                   by the marker-size slider. (The expose-jar-spells \
-                   debug option outranks this for jars.)",
+            desc: "Shows small icons instead of dots on the map for several static objects: spell \
+                   jars, shrines, statues, teleporters and dead wizard graves.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.enhancement.map_marker_icons = v,
-                descs: [
-                    "Plain dots, as retail draws them.",
-                    "Jars, dolmens, statues, teleporters and wizard graves wear miniature sprites.",
-                ],
+                descs: ["Plain dot markers", "Icon markers for important things"],
             },
         },
         Spec {
@@ -1386,19 +1262,11 @@ pub fn registry() -> Vec<Spec> {
             cli: None,
             cfg_path: "render.enhancement.autocontrasting_markers",
             read: toggle!(c => render.enhancement.autocontrasting_markers),
-            desc: "Give the hunted map markers - creatures, mana, dwelling \
-                   flags, spell jars, rival wizards and the marker \
-                   miniatures - a one-pixel halo, black under a bright \
-                   marker and white under a dark one, so they stay \
-                   readable on any ground (bones on barren, mana on \
-                   snow). Scenery, civilians and spell effects get none. \
-                   Always one pixel, whatever the marker-size slider.",
+            desc: "Highlights important map markers with a thin contrasting outline, so they stand \
+                   out on any terrain.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.enhancement.autocontrasting_markers = v,
-                descs: [
-                    "Bare markers, as retail draws them.",
-                    "Hunted markers wear a black-or-white contrast halo.",
-                ],
+                descs: ["Plain markers", "Outlined markers"],
             },
         },
         Spec {
@@ -1410,15 +1278,11 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--smooth-textures"),
             cfg_path: "render.enhancement.smooth_textures",
             read: toggle!(c => render.enhancement.smooth_textures),
-            desc: "Texture filtering of the world art. Off = retail's \
-                   chunky pixels; on = terrain textures and sprites \
-                   smoothly filtered, sprite edges included.",
+            desc: "Smooths the pixels of the landscape and creatures. Disable to keep the original \
+                   pixelated textures.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.enhancement.smooth_textures = v,
-                descs: [
-                    "Chunky pixels — the original look.",
-                    "Smoothly filtered terrain and sprites.",
-                ],
+                descs: ["Chunky pixels", "Smoothed textures"],
             },
         },
         Spec {
@@ -1430,16 +1294,11 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--segment-order"),
             cfg_path: "render.enhancement.segment_order",
             read: toggle!(c => render.enhancement.segment_order),
-            desc: "Draw order of segmented creatures (worms, dragons, \
-                   hydras). Off = retail's tile order, which flickers \
-                   overlapping segments of a creature seen side-on; on = \
-                   the segment nearer the head wins near-ties.",
+            desc: "Prevents long segmented creatures such as worms, dragons and hydras from \
+                   flickering when viewed from the side.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.enhancement.segment_order = v,
-                descs: [
-                    "Retail's tile order — side-on bodies flicker.",
-                    "Head-first segment order, no flicker.",
-                ],
+                descs: ["Bodies may flicker", "Forced segment order"],
             },
         },
         Spec {
@@ -1451,17 +1310,14 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--hotbar"),
             cfg_path: "render.enhancement.hotbar",
             read: toggle!(c => render.enhancement.hotbar),
-            desc: "The quick keys 1-0 as a bar of spell boxes at the bottom \
-                   of the screen, with each spell's mana meter and its \
-                   active highlight. With the spell selector (CTRL) open, \
-                   double-click a spell to put it on the bar, drag keys to \
-                   swap them, drag one off the bar to clear it. The keys \
-                   work either way.",
+            desc: "Display a spell bar with the quick keys 1..0. In the spell selector, \
+                   double-click a spell to add it, drag to reorder, or drag it off the bar to \
+                   remove it.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.enhancement.hotbar = v,
                 descs: [
-                    "No bar — the quick keys stay invisible.",
-                    "The quick-key bar is shown.",
+                    "No bar, the quick keys still work",
+                    "The spell bar is shown",
                 ],
             },
         },
@@ -1474,17 +1330,13 @@ pub fn registry() -> Vec<Spec> {
             cli: None,
             cfg_path: "render.enhancement.map_extent_fog",
             read: toggle!(c => render.enhancement.map_extent_fog),
-            desc: "Fade the fullscreen map to black beyond the world's \
-                   true extent. The world wraps, so the player-centered \
-                   map repeats entities past half a world away — retail \
-                   shows the duplicates; the fog hides them. The extent \
-                   rectangle rotates with your heading.",
+            desc: "The world wraps around the edges. This prevents the map from looping around and \
+                   fades beyond the map edges.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.enhancement.map_extent_fog = v,
                 descs: [
-                    "The map repeats past the world seam, as retail.",
-                    "Soft black fog past the true extent hides the \
-                     wrap-around duplicates.",
+                    "Things repeat on the map",
+                    "The map has soft edges centered on the player",
                 ],
             },
         },
@@ -1497,20 +1349,13 @@ pub fn registry() -> Vec<Spec> {
             cli: None,
             cfg_path: "render.enhancement.map_beyond_sight_areas",
             read: toggle!(c => render.enhancement.map_beyond_sight_areas),
-            desc: "While Beyond Sight is up, the level's trigger areas ripple \
-                   on the map and the radar like a water surface, with a \
-                   trace of tint: red where flying in springs a trap, cyan \
-                   for any other effect. Faint on purpose — look for it. \
-                   Triggers that are not a place (a mana goal, a kill \
-                   count) are not shown, and nothing appears in the world \
-                   view. Neither original reveals trigger areas.",
+            desc: "Enables the Beyond Sight spell to also show traps and some event places as \
+                   faint colored ripples on the map: red for traps, cyan for the rest.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.enhancement.map_beyond_sight_areas = v,
                 descs: [
-                    "Beyond Sight shows what retail's does: rival wizards \
-                     (and MC2's tiers).",
-                    "Beyond Sight also reveals trigger areas as faint red / \
-                     cyan ripples on the map.",
+                    "Beyond Sight original functionality",
+                    "Beyond Sight enhanced capabilities",
                 ],
             },
         },
@@ -1523,17 +1368,13 @@ pub fn registry() -> Vec<Spec> {
             cli: None,
             cfg_path: "render.enhancement.mc2_fancy_exit",
             read: toggle!(c => render.enhancement.mc2_fancy_exit),
-            desc: "MC2's level exit, filmed from behind: the view floats \
-                   out to a chase camera and watches the carpet speed \
-                   into the portal, which flashes as it vanishes. The \
-                   flight itself is retail's.",
+            desc: "Leaving a Magic Carpet 2 level plays an enhanced exit animation: a third-person \
+                   view of the carpet flying into the portal.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.enhancement.mc2_fancy_exit = v,
                 descs: [
-                    "First-person exit flight, as retail (without its \
-                     motion blur).",
-                    "Chase-camera exit: the carpet flies into the portal \
-                     and vanishes in a flash.",
+                    "Original fly into the portal",
+                    "Enhanced level exit animation",
                 ],
             },
         },
@@ -1551,16 +1392,10 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--expose-jar-spells"),
             cfg_path: "render.enhancement.expose_jar_spells",
             read: toggle!(c => render.enhancement.expose_jar_spells),
-            desc: "Tag every pickable spell jar with its granted spell's icon — \
-                   on the overhead map and floating over the jar in the main \
-                   view. The original never labels jars; you learn by flying \
-                   through.",
+            desc: "Display which spell each jar holds, on the map and above the jar.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.enhancement.expose_jar_spells = v,
-                descs: [
-                    "Anonymous jars, as retail.",
-                    "Every jar wears its spell icon.",
-                ],
+                descs: ["Plain jars", "Every jar shows its spell"],
             },
         },
         Spec {
@@ -1572,16 +1407,10 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--health-bars"),
             cfg_path: "render.debug.health_bars",
             read: toggle!(c => render.debug.health_bars),
-            desc: "Red-on-black health bars floating above everything \
-                   destroyable — monsters, dwellings and other structures. \
-                   The original never shows this life — the combat-system \
-                   debugging instrument.",
+            desc: "Display a health bar above every creature and building that can be destroyed.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.debug.health_bars = v,
-                descs: [
-                    "No life shown, as retail.",
-                    "Everything destroyable wears a life bar.",
-                ],
+                descs: ["No health bars", "Health bars on everything"],
             },
         },
         Spec {
@@ -1593,17 +1422,11 @@ pub fn registry() -> Vec<Spec> {
             cli: None,
             cfg_path: "render.debug.autoaim_hints",
             read: toggle!(c => render.debug.autoaim_hints),
-            desc: "Autoaim lock markers: blinking per-hand markers on the \
-                   target each equipped spell would acquire this instant \
-                   (left +, right \u{d7}). A projectile-behavior predictor; \
-                   the original shows no such UI. The plain aim crosshair \
-                   is its own option (render \u{b7} preference).",
+            desc: "Marks the target each hand's spell would lock onto if it fired right now: + for \
+                   the left hand, x for the right.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.debug.autoaim_hints = v,
-                descs: [
-                    "No lock markers, as retail.",
-                    "Blinking per-hand lock markers on the acquired target.",
-                ],
+                descs: ["No markers", "Target markers for both hands"],
             },
         },
         Spec {
@@ -1615,15 +1438,10 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--map-triggers"),
             cfg_path: "render.debug.map_trigger_areas",
             read: toggle!(c => render.debug.map_trigger_areas),
-            desc: "Overlay live trigger volumes / portals on the overhead map \
-                   as tinted circles. The original never reveals trigger areas \
-                   — the event-system debugging instrument.",
+            desc: "Outline the areas that set off traps and events as coloured circles on the map.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.debug.map_trigger_areas = v,
-                descs: [
-                    "No trigger overlay, as retail.",
-                    "Trigger volumes tinted on the map.",
-                ],
+                descs: ["No outlines", "Event places shown on the map"],
             },
         },
         Spec {
@@ -1635,15 +1453,11 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--grace-meter"),
             cfg_path: "render.debug.grace_meter",
             read: toggle!(c => render.debug.grace_meter),
-            desc: "A thin bottom-center strip draining with the respawn \
-                   invulnerability window. Retail shows nothing for spawn \
-                   grace.",
+            desc: "After respawn (or level start) you cannot be hurt for a short while. This \
+                   displays a countdown of this invincibility.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.debug.grace_meter = v,
-                descs: [
-                    "No grace indicator, as retail.",
-                    "The spawn-grace strip while invulnerable.",
-                ],
+                descs: ["No bar", "Shows the safe time left"],
             },
         },
         Spec {
@@ -1655,17 +1469,11 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--fps"),
             cfg_path: "render.debug.fps",
             read: toggle!(c => render.debug.fps),
-            desc: "Frame rate + frame time, bottom-right corner. The \
-                   performance instrument for weighing effect costs; with \
-                   vsync on it reads the display refresh, not the machine's \
-                   limit — turn vsync off (render \u{b7} preference) to \
-                   measure real headroom.",
+            desc: "Display the frame rate in the bottom-right corner. To properly benchmark \
+                   performance, you need to disable vsync as well.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.debug.fps = v,
-                descs: [
-                    "No frame-rate readout, as retail.",
-                    "Live fps + ms per frame, refreshed twice a second.",
-                ],
+                descs: ["No display", "Frames per second and time per frame"],
             },
         },
         Spec {
@@ -1677,17 +1485,10 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--coords"),
             cfg_path: "render.debug.coords",
             read: toggle!(c => render.debug.coords),
-            desc: "Carpet coordinates, bottom-left corner, engine units: \
-                   \"x N, y N, z N (+E)\" \u{2014} z is the altitude, (+E) \
-                   the elevation over the terrain underneath. The flight/\
-                   altitude debugging instrument (the altitude bands speak \
-                   engine units: clearance 128/256, band 1024/3072).",
+            desc: "Display the internal map-native coordinates in the bottom-left corner.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.debug.coords = v,
-                descs: [
-                    "No coordinate readout, as retail.",
-                    "Live position + elevation over terrain.",
-                ],
+                descs: ["No display", "Your position and height displayed"],
             },
         },
         Spec {
@@ -1699,18 +1500,10 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--entities"),
             cfg_path: "render.debug.entities",
             read: toggle!(c => render.debug.entities),
-            desc: "Live entity-pool usage, \"ents used/capacity\", on its \
-                   own line above the coordinate readout (bottom-left). \
-                   In-use counts every allocated slot including corpses \
-                   awaiting the reaper. The entity-pressure diagnosis \
-                   instrument \u{2014} effect leaks, pool-exhaustion \
-                   anomalies.",
+            desc: "Display the current entity table status in the bottom-left corner.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.render.debug.entities = v,
-                descs: [
-                    "No entity readout, as retail.",
-                    "Live pool usage above the coordinate line.",
-                ],
+                descs: ["No display", "Show how full the world is"],
             },
         },
         // ---- controls · preset ------------------------------------------
@@ -1731,10 +1524,8 @@ pub fn registry() -> Vec<Spec> {
                 faithful: 1,
                 variants: &["enhanced", "classic", "custom"],
             },
-            desc: "Sets the controls below as a group: key bindings, mouse turn \
-                   share, Y polarity and the thrust and altitude models. Custom \
-                   means they have been tuned by hand and match neither preset; \
-                   it is shown, not chosen.",
+            desc: "Sets all the control options below at once. Custom is a placeholder if some are \
+                   changed by hand.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     if let Some(&p) = Preset::ALL.get(i) {
@@ -1742,12 +1533,9 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: &[
-                    "WASD, full mouse turn share, mouse up climbs, the \
-                     hold-to-fly thrust model and altitude keys (default).",
-                    "How both originals fly: arrow keys, half mouse turn \
-                     share, flight-stick Y, the retail thrust and \
-                     terrain-follow altitude.",
-                    "Hand-tuned: the controls below match neither preset.",
+                    "WASD, mouse look, hold to fly, float keys (default)",
+                    "Retail controls: arrow keys, flight-stick mouse",
+                    "The options below match neither preset",
                 ],
             },
         },
@@ -1768,7 +1556,7 @@ pub fn registry() -> Vec<Spec> {
                 faithful: 0,
                 variants: &["classic", "wasd"],
             },
-            desc: "Key-binding profile for movement.",
+            desc: "Sets which keys move the carpet.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     c.controls.preferences.bindings = if i == 0 {
@@ -1778,10 +1566,8 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: &[
-                    "The original scheme: mouse aims, Up/Down arrows \
-                     accelerate/decelerate, Left/Right strafe.",
-                    "W/S thrust, A/D strafe, mouse aims (arrows keep \
-                     turn/pitch in the enhanced thrust model).",
+                    "Retail keys: arrows speed up, slow down, strafe",
+                    "W/S fly forward and back, A/D strafe",
                 ],
             },
         },
@@ -1797,7 +1583,7 @@ pub fn registry() -> Vec<Spec> {
                 text: format!("{:.1}", c.controls.preferences.mouse_sensitivity),
                 faithful: "1.0",
             },
-            desc: "Mouse-to-stick / mouse-look sensitivity multiplier.",
+            desc: "Sets how strongly the mouse turns and aims the carpet.",
             ctl: Ctl::Slider {
                 get: |c| c.controls.preferences.mouse_sensitivity,
                 set: |c, v| c.controls.preferences.mouse_sensitivity = v,
@@ -1818,9 +1604,8 @@ pub fn registry() -> Vec<Spec> {
                 text: format!("{:.0}%", c.controls.preferences.mouse_sensitivity_x * 100.0),
                 faithful: "50%",
             },
-            desc: "Horizontal (turn) share of the mouse sensitivity, \
-                   0-100%. Set by the controls preset: 100% under \
-                   Enhanced (the default), 50% under Classic.",
+            desc: "Sets the share of the mouse sensitivity used for turning left and right. The \
+                   Enhanced controls preset uses 100%, Classic 50%.",
             ctl: Ctl::Slider {
                 get: |c| c.controls.preferences.mouse_sensitivity_x,
                 set: |c, v| c.controls.preferences.mouse_sensitivity_x = v,
@@ -1841,8 +1626,7 @@ pub fn registry() -> Vec<Spec> {
                 text: format!("{:.0}%", c.controls.preferences.mouse_sensitivity_y * 100.0),
                 faithful: "100%",
             },
-            desc: "Vertical (aim) share of the mouse sensitivity, \
-                   0-100%.",
+            desc: "Sets the share of the mouse sensitivity used for looking up and down.",
             ctl: Ctl::Slider {
                 get: |c| c.controls.preferences.mouse_sensitivity_y,
                 set: |c, v| c.controls.preferences.mouse_sensitivity_y = v,
@@ -1864,16 +1648,13 @@ pub fn registry() -> Vec<Spec> {
                 // The flight-stick polarity both originals ship.
                 faithful: true,
             },
-            desc: "Mouse Y polarity. On = mouse up/forward dives (nose down), \
-                   like a flight stick — the polarity both originals ship. \
-                   Off = mouse up climbs (the FPS convention).",
+            desc: "Pushing the mouse forward points the carpet down, like a flight stick. Retail \
+                   uses this in both games.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.controls.preferences.invert_y = v,
                 descs: [
-                    "Mouse up = nose up (FPS convention; the Enhanced \
-                     preset and the default).",
-                    "Mouse up = nose down, flight-stick style (the \
-                     original polarity; the Classic preset).",
+                    "Mouse forward climbs (default)",
+                    "Mouse forward dives, flight-stick style",
                 ],
             },
         },
@@ -1889,10 +1670,8 @@ pub fn registry() -> Vec<Spec> {
                 on: c.controls.preferences.fly_assistant.on(),
                 faithful: false,
             },
-            desc: "The retail MC2 Flight Assistance option: leave the mouse \
-                   untouched for a couple of seconds and the steering stick \
-                   recenters itself (level flight holds). Off by default, \
-                   like retail MC2; MC1 never had it.",
+            desc: "Magic Carpet 2's Flight Assistance: an idle mouse recenters the steering, so \
+                   the carpet flies straight. Classic thrust only, retail Magic Carpet lacked it.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.controls.preferences.fly_assistant = if v {
@@ -1902,9 +1681,8 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: [
-                    "No auto-center — you trim your own drift (retail \
-                     default).",
-                    "Idle mouse recenters the steering stick.",
+                    "You trim the steering yourself",
+                    "Idle mouse recenters the steering",
                 ],
             },
         },
@@ -1920,20 +1698,13 @@ pub fn registry() -> Vec<Spec> {
                 on: c.controls.preferences.autofire,
                 faithful: false,
             },
-            desc: "Hold a fire button to keep casting a click-only projectile \
-                   spell (Fireball, Possession, Meteor, Steal Mana, Duel, \
-                   Alliance) at a gentle 4 casts a second — slower than fast \
-                   clicking, there to spare fingers and mouse. Spells that \
-                   already repeat when held, and every effect spell, are \
-                   untouched. Neither original has it.",
+            desc: "Hold a fire button to keep casting single-shot spells such as Fireball or \
+                   Meteor, about 4 times a second. Spells that already repeat are unchanged.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.controls.preferences.autofire = v,
                 descs: [
-                    "One click, one cast, as both originals play (the \
-                     Classic preset).",
-                    "A held button re-casts at 4 Hz, or as fast as the \
-                     spell and your mana allow if that is slower (the \
-                     Enhanced preset and the default).",
+                    "One click, one cast",
+                    "Holding the button keeps casting (default)",
                 ],
             },
         },
@@ -1949,15 +1720,11 @@ pub fn registry() -> Vec<Spec> {
                 on: c.controls.preferences.disable_suicide_key,
                 faithful: false,
             },
-            desc: "Disable the Shift+K suicide key, which both originals \
-                   have and which is easy to hit by accident next to \
+            desc: "Disables the Shift+K suicide key, which is easy to hit by accident next to \
                    Shift+L.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.controls.preferences.disable_suicide_key = v,
-                descs: [
-                    "Shift+K kills you, as in both originals (the default).",
-                    "Shift+K does nothing.",
-                ],
+                descs: ["Shift+K kills you (default)", "Shift+K does nothing"],
             },
         },
         Spec {
@@ -1972,14 +1739,13 @@ pub fn registry() -> Vec<Spec> {
                 on: c.controls.preferences.disable_barrel_roll,
                 faithful: false,
             },
-            desc: "Disable MC2's barrel roll (pressing both strafe keys \
-                   together tumbles the carpet). MC2 only; MC1 has no roll.",
+            desc: "Disables the Magic Carpet 2 barrel roll, done by pressing both strafe keys at \
+                   once.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.controls.preferences.disable_barrel_roll = v,
                 descs: [
-                    "Both strafe keys together roll the carpet, as in \
-                     MC2 (the default).",
-                    "Both strafe keys together just strafe; no roll.",
+                    "Both strafe keys roll the carpet (default)",
+                    "Both strafe keys just strafe",
                 ],
             },
         },
@@ -2000,9 +1766,8 @@ pub fn registry() -> Vec<Spec> {
                 faithful: 0,
                 variants: &["classic", "enhanced"],
             },
-            desc: "Thrust + steering model. Classic is the faithful law both \
-                   originals share; enhanced is the modern hold-to-fly \
-                   alternative.",
+            desc: "Sets how the carpet steers and speeds up. Classic is the retail model of both \
+                   games, enhanced is modern hold-to-fly.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     c.controls.models.thrust = if i == 0 {
@@ -2012,11 +1777,8 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: &[
-                    "The faithful model: mouse offset = turn rate (airplane \
-                     stick, recenter to fly straight); accelerate/decelerate \
-                     impulses persist until countered.",
-                    "Mouse look + hold-to-fly with automatic deceleration on \
-                     release.",
+                    "Retail: mouse steers like a stick, speed persists",
+                    "Mouse look, hold a key to fly, release to slow",
                 ],
             },
         },
@@ -2036,8 +1798,8 @@ pub fn registry() -> Vec<Spec> {
                 faithful: 0,
                 variants: &["classic", "enhanced"],
             },
-            desc: "Altitude model. Classic = terrain-follow only, as the \
-                   originals; enhanced adds explicit float keys.",
+            desc: "Sets how you control your height. Classic only follows the ground, as in \
+                   retail. Enhanced adds float keys.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     c.controls.models.altitude = if i == 0 {
@@ -2047,10 +1809,8 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: &[
-                    "Terrain-follow only: the carpet floats up along rising \
-                     ground and settles by itself; no fly-up control exists.",
-                    "Classic behavior plus E/Q float up/down, capped at the \
-                     level's highest terrain.",
+                    "Retail: the carpet follows the ground by itself",
+                    "Also float up and down with E/Q, up to the highest terrain",
                 ],
             },
         },
@@ -2067,10 +1827,10 @@ pub fn registry() -> Vec<Spec> {
                 on: c.audio.sound,
                 faithful: true,
             },
-            desc: "Sample playback (the original's F1 toggle).",
+            desc: "Toggles sound effects, like retail's F1 key.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.audio.sound = v,
-                descs: ["Silence the sound effects.", "Sound effects play."],
+                descs: ["No sound effects", "Sound effects play"],
             },
         },
         Spec {
@@ -2085,10 +1845,10 @@ pub fn registry() -> Vec<Spec> {
                 on: c.audio.music,
                 faithful: true,
             },
-            desc: "Music playback (the original's F2 toggle).",
+            desc: "Toggles music, like retail's F2 key.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.audio.music = v,
-                descs: ["No music.", "The level soundtrack plays."],
+                descs: ["No music", "The level music plays"],
             },
         },
         Spec {
@@ -2103,8 +1863,7 @@ pub fn registry() -> Vec<Spec> {
                 text: format!("{:.1}", c.audio.sfx_volume),
                 faithful: "1.0",
             },
-            desc: "Sound-effect master gain — the MC2 narration rides it too \
-                   (the original has no narration volume).",
+            desc: "Sets the volume of the sound effects. The Magic Carpet 2 narrator uses it too.",
             ctl: Ctl::Slider {
                 get: |c| c.audio.sfx_volume,
                 set: |c, v| c.audio.sfx_volume = v,
@@ -2125,7 +1884,7 @@ pub fn registry() -> Vec<Spec> {
                 text: format!("{:.1}", c.audio.music_volume),
                 faithful: "1.0",
             },
-            desc: "Music master gain.",
+            desc: "Sets the volume of the music.",
             ctl: Ctl::Slider {
                 get: |c| c.audio.music_volume,
                 set: |c, v| c.audio.music_volume = v,
@@ -2152,9 +1911,8 @@ pub fn registry() -> Vec<Spec> {
                 faithful: 0,
                 variants: &["auto", "fm", "gm", "awe32"],
             },
-            desc: "Which music arrangement plays — the games shipped one per \
-                   sound-card family, so each is authentic. AWE32 is the card \
-                   the music was tuned for. Applies at level load.",
+            desc: "Sets which music arrangement plays. Retail shipped one per sound card family. \
+                   AWE32 is the one the music was tuned for.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     c.audio.arrangement = match i {
@@ -2165,11 +1923,10 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: &[
-                    "The best-available render: AWE32, else General MIDI, \
-                     else FM.",
-                    "The AdLib FM (OPL3) render.",
-                    "The General MIDI render.",
-                    "The Sound Blaster AWE32 render.",
+                    "Best available: AWE32, GM, then FM",
+                    "AdLib FM (OPL3)",
+                    "General MIDI",
+                    "Sound Blaster AWE32",
                 ],
             },
         },
@@ -2185,16 +1942,11 @@ pub fn registry() -> Vec<Spec> {
                 on: c.audio.speech,
                 faithful: true,
             },
-            desc: "MC2 objective voiceovers (the CD speech clips) — the \
-                   original's in-game Speech option. Narration also follows \
-                   the sound toggle and the sfx volume (the original's \
-                   sound/music switches leave it playing, at one volume).",
+            desc: "Plays the narrator's spoken objectives in Magic Carpet 2. The narrator also \
+                   follows the sound toggle and effects volume.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.audio.speech = v,
-                descs: [
-                    "Objectives arrive silently.",
-                    "The narrator speaks (when sound is on, at the sfx volume).",
-                ],
+                descs: ["Objectives arrive silently", "The narrator speaks"],
             },
         },
         Spec {
@@ -2209,9 +1961,7 @@ pub fn registry() -> Vec<Spec> {
                 on: c.audio.subtitles.on(),
                 faithful: true,
             },
-            desc: "Narration subtitles: the sentence behind each objective \
-                   voiceover, drawn as a top-of-screen overtitle when the cue \
-                   fires.",
+            desc: "Shows the narrator's words as text at the top of the screen.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.audio.subtitles = if v {
@@ -2220,10 +1970,7 @@ pub fn registry() -> Vec<Spec> {
                         crate::config::Subtitles::Off
                     }
                 },
-                descs: [
-                    "No narration text.",
-                    "Every narration is subtitled (default).",
-                ],
+                descs: ["No narration text", "Narration shown as text (default)"],
             },
         },
         // ---- gameplay · enhancement -------------------------------------
@@ -2245,10 +1992,8 @@ pub fn registry() -> Vec<Spec> {
                 faithful: 0,
                 variants: &["auto", "mc1", "mc2", "mc1+mc2"],
             },
-            desc: "Which spell-selection interface is live — interface only, \
-                   the spell economy underneath is untouched. Switchable \
-                   mid-run; quick-key digit binds survive the round trip \
-                   (MC2 always uses the CTRL pane).",
+            desc: "Sets how you pick spells. Only the menu changes, not the spells, and you can \
+                   switch at any time.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     c.gameplay.enhancement.spell_selector = match i {
@@ -2259,11 +2004,10 @@ pub fn registry() -> Vec<Spec> {
                     }
                 },
                 descs: &[
-                    "Each game's own faithful surface: MC1 the map-screen \
-                     spellbook, MC2 the CTRL pane.",
-                    "Force the MC1 map-screen spellbook (MC1 only).",
-                    "Force the MC2 CTRL-hold selector pane.",
-                    "Both surfaces at once (MC1 only).",
+                    "Each game's own: map spellbook or Ctrl menu",
+                    "Always the map spellbook (Magic Carpet only)",
+                    "Always the Magic Carpet 2 Ctrl menu",
+                    "Both at once (Magic Carpet only)",
                 ],
             },
         },
@@ -2281,15 +2025,13 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.enhancement.wheel_spells,
                 faithful: false,
             },
-            desc: "Mouse-wheel spell cycling (the remc2/MC2HD idiom): the \
-                   wheel walks the left button's queued-spell ring, \
-                   SHIFT+wheel the right. The faithful SHIFT/ALT+click \
-                   rotation works either way.",
+            desc: "The mouse wheel cycles the left hand's spells, Shift+wheel the right hand's. \
+                   Same rotation as retail's Shift/Alt+click, which still works.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.gameplay.enhancement.wheel_spells = v,
                 descs: [
-                    "Wheel does nothing in flight, as retail.",
-                    "Wheel cycles the queued spells (default).",
+                    "The wheel does nothing",
+                    "The wheel cycles spells (default)",
                 ],
             },
         },
@@ -2313,16 +2055,15 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.jar_ground_snap.on(),
                 faithful: false,
             },
-            desc: "Spell jars follow the ground. Retail's terrain reshaping skips \
-                   jars, leaving them buried (Hidden Worlds ships some!) or \
-                   floating after earth-shaping spells.",
+            desc: "Retail leaves spell jars in place when the land changes shape, so they end up \
+                   buried or floating. Patched, jars follow the ground.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.jar_ground_snap = crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "Jars freeze in place through terrain edits, as retail.",
-                    "Jars stay grounded and collectable (default).",
+                    "Jars can be buried or float",
+                    "Jars stay on the ground (default)",
                 ],
             },
         },
@@ -2338,17 +2079,15 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.ball_ground_track.on(),
                 faithful: false,
             },
-            desc: "Settled mana balls follow the ground (MC1). Retail freezes a \
-                   ball wherever its settle timer ran out - mid-hop balls \
-                   hang in the air forever, and terrain edits bury grounded \
-                   ones.",
+            desc: "In retail Magic Carpet, settled mana balls can hang in mid-air or get buried \
+                   when the land changes. Patched, they rest on the ground.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.ball_ground_track = crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "Settled balls freeze mid-air or get buried, as retail.",
-                    "Settled balls land and surface (default).",
+                    "Balls can hang in the air",
+                    "Balls rest on the ground (default)",
                 ],
             },
         },
@@ -2364,17 +2103,15 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.map_wide_ball_rolling.on(),
                 faithful: false,
             },
-            desc: "Mana balls roll downhill everywhere (both games). Retail only \
-                   rolls balls within 24 tiles of you - a period perf save - so \
-                   approaching mana wakes it and it visibly runs away \
-                   downhill. Balls only; creature wake-up is untouched.",
+            desc: "Retail only rolls mana balls near you, so mana runs away downhill as you \
+                   approach. Patched, balls roll to rest everywhere.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.map_wide_ball_rolling = crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "Balls only roll near you and run away downhill, as retail.",
-                    "Every ball rolls to rest, map-wide (default).",
+                    "Balls roll only near you",
+                    "Balls roll to rest everywhere (default)",
                 ],
             },
         },
@@ -2390,23 +2127,15 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.ball_owner_recolor.on(),
                 faithful: false,
             },
-            desc: "Mana balls and MC2 mana worms show their current owner's \
-                   colour everywhere. Retail recolours a ball only when it \
-                   moves, and a settled ball only moves within 24 tiles of \
-                   you, so mana that changes hands out of range - a possessed \
-                   corpse's spheres, a rival possessing yours - keeps the old \
-                   colour until you approach it (the minimap is right at \
-                   once). Drawing only for balls. A worm possessed out of \
-                   range does not even change owner in retail until you \
-                   approach; patched, the possess lands at once (a sim \
-                   change, pinned to retail while recording or replaying).",
+            desc: "Retail recolours far-off mana balls and Magic Carpet 2 mana worms only when you \
+                   come near. Patched, they always show the owner's colour.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.ball_owner_recolor = crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "Far-off balls and worms keep the previous owner's colour, as retail.",
-                    "Every ball and mana worm wears its owner's colour (default).",
+                    "Far mana keeps its old colour",
+                    "Mana always shows its owner (default)",
                 ],
             },
         },
@@ -2422,17 +2151,15 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.possessed_footprint.on(),
                 faithful: false,
             },
-            desc: "A possessed dwelling keeps its true footprint (MC1). Retail \
-                   shrinks it to the owner-flag sprite, so villagers and \
-                   defenders spawn walled-in on the roof and their corpse \
-                   flames destroy the house you just possessed.",
+            desc: "In retail Magic Carpet, possessed villages burn down because their people spawn \
+                   stuck on the roofs. Patched, houses keep their true footprint.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.possessed_footprint = crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "Possessed villages slowly self-destruct, as retail.",
-                    "Possessed villages keep working (default).",
+                    "Possessed villages destroy themselves",
+                    "Possessed villages keep working (default)",
                 ],
             },
         },
@@ -2448,16 +2175,15 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc2_downgrade_overflow.on(),
                 faithful: false,
             },
-            desc: "MC2 castle downgrade's 10% mana haircut, computed safely. \
-                   Retail's 32-bit math overflows at the maxed level-7 rung: \
-                   the downgrade RAISES capacity and scatters nothing.",
+            desc: "In retail Magic Carpet 2, a top-level castle losing a level gains mana capacity \
+                   and spills nothing, a maths overflow. Patched, it always loses 10%.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc2_downgrade_overflow = crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "The level-7 haircut overflows backwards, as retail.",
-                    "The haircut is always 10% (default).",
+                    "A top castle gains from it",
+                    "A castle always loses 10% (default)",
                 ],
             },
         },
@@ -2473,19 +2199,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc2_dweller_invisibility.on(),
                 faithful: false,
             },
-            desc: "MC2 mana dwellers fade into view only up close, like the \
-                   zombie. Their sneaky mana stealing relied on retail's very \
-                   short view range; with the port's long view they stand \
-                   exposed to safe long-range meteors.",
+            desc: "Makes Magic Carpet 2 mana dwellers visible only up close. Their stealth relied \
+                   on retail's short view, so the long view makes them easy targets.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc2_dweller_invisibility =
                         crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "Dwellers are plainly visible at any range, as retail draws them.",
-                    "Dwellers materialize up close, restoring their stealth (default).",
-                ],
+                descs: ["Visible from afar", "They appear only up close (default)"],
             },
         },
         Spec {
@@ -2500,18 +2221,13 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.win2_movie_score.on(),
                 faithful: false,
             },
-            desc: "The second win movie plays its own score. Retail points both \
-                   win movies at one script, so levelw2 plays against the \
-                   wrong sample bank; its own orphaned table (bank 7, win2) \
-                   sits unreferenced in the binary.",
+            desc: "Retail Magic Carpet plays its second level-win movie with the first one's music \
+                   by mistake. Patched, it plays its own music.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.win2_movie_score = crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "levelw2 plays the shared win1 score, as retail.",
-                    "levelw2 plays its own win2 score (default).",
-                ],
+                descs: ["The first movie's music", "Its own music (default)"],
             },
         },
         Spec {
@@ -2526,27 +2242,17 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc2_leviathan_high_lunge.on(),
                 faithful: false,
             },
-            desc: "Two leviathan changes, neither a bug fix. AIM: retail steers \
-                   at a point a fixed 3 tiles ahead of wherever its target \
-                   faces - right for a carpet in full flight, a miss to the \
-                   side for one that hovers. Patched, the lead scales with \
-                   the target's real speed, so a hovering carpet is lunged at \
-                   directly. HEIGHT (only with the enhanced altitude model): \
-                   lunges reach a random 768 to 1200 rolled per strike, where \
-                   retail's stop at 768 and the enhanced lift parks at 1024 \
-                   out of reach; parked straight overhead, about two strikes \
-                   in five now land, and the strike is drawn as tall as it \
-                   reaches.",
+            desc: "Retail's Magic Carpet 2 leviathan aims ahead of where you face, missing a \
+                   hovering carpet. Patched, it leads by your real speed and leaps higher with \
+                   enhanced altitude.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc2_leviathan_high_lunge =
                         crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "Retail: a fixed 3-tile lead and a 768 reach - hovering, \
-                     or parking at 1024, is safe.",
-                    "Lead by the target's speed; lunges reach 768..1200 \
-                     under the enhanced lift (default).",
+                    "Hovering or flying high is safe",
+                    "Aims better, leaps higher (default)",
                 ],
             },
         },
@@ -2562,18 +2268,15 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.castle_latch_bug.on(),
                 faithful: false,
             },
-            desc: "Create Castle placement validation (MC1). Retail checks the \
-                   tile beside your casting hand - steerable by aim - and \
-                   skips the check when the ball hits terrain, so a cast \
-                   glued to the right wall corner raises a castle inside a \
-                   no-castle maze and carves its protected walls.",
+            desc: "In retail Magic Carpet, casting Castle into a wall corner can build a castle \
+                   where none is allowed. Patched, the placement check always runs.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.castle_latch_bug = crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "The skippable hand-side check - maze castles work, as retail.",
-                    "The check anchors on you and always runs (default).",
+                    "The corner trick works",
+                    "Castles only where allowed (default)",
                 ],
             },
         },
@@ -2589,18 +2292,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.no_spell_loss.on(),
                 faithful: false,
             },
-            desc: "Spells you hold stay yours for the whole level (both games). \
-                   Retail's abandoned death-scatter mechanism can silently \
-                   drop a spell when the entity pool is full, and a stale \
-                   handle (the volcano's plume) can destroy a held spell's \
-                   token while you are alive - after which no dropped jar of \
-                   that spell can be picked up again. Only MC2's undead \
-                   wraith, the one designed theft, still takes a spell.",
+            desc: "In retail, a held spell can rarely vanish for good, in a crowded level or near \
+                   a volcano. Patched, spells are permanent; only the Magic Carpet 2 wraith can \
+                   steal one.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.gameplay.patches.no_spell_loss = crate::config::PatchArm::from_on(v),
                 descs: [
-                    "Death and stale handles can eat spells, as retail.",
-                    "The spellbook is permanent; death drops cosmetic jars (default).",
+                    "Spells can rarely be lost",
+                    "Your spells are never lost (default)",
                 ],
             },
         },
@@ -2616,20 +2315,13 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc1_fix_dragon_tail.on(),
                 faithful: false,
             },
-            desc: "The MC1 dragon's tail stays in formation at any range. Retail \
-                   only keeps body segments behind their head within 24 tiles of \
-                   you; further out the tail piles onto the head and snaps back \
-                   when you approach - visible with the port's long view. This \
-                   fixes the tail without raising the awake range, which would \
-                   wake every creature on the map.",
+            desc: "In retail Magic Carpet, a far-off dragon's tail bunches up on its head and \
+                   snaps back as you come near. Patched, tails follow at any range.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc1_fix_dragon_tail = crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "Distant tails collapse onto the head, as retail.",
-                    "Tails trail their head everywhere (default).",
-                ],
+                descs: ["Far tails bunch up", "Tails always follow (default)"],
             },
         },
         Spec {
@@ -2644,20 +2336,16 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc1_pack_speed_restore.on(),
                 faithful: false,
             },
-            desc: "MC1 creatures no longer speed up for good. Retail's pack \
-                   logic flies a follower one acceleration step faster than \
-                   its leader and never slows it back down when the pack \
-                   breaks up; the next pack it leads starts from that speed, \
-                   so over a long level vultures, wyverns and worms end up \
-                   crossing the map in seconds. With this on, a creature \
-                   leaving a pack returns to its own top speed.",
+            desc: "In retail Magic Carpet, creatures in packs keep getting faster until they cross \
+                   the map in seconds. Patched, a creature leaving a pack returns to its own \
+                   speed.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc1_pack_speed_restore = crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "Pack speed carries over and compounds, as retail.",
-                    "Leaving a pack restores the creature's own top speed (default).",
+                    "Creatures keep speeding up",
+                    "Creatures keep their own speed (default)",
                 ],
             },
         },
@@ -2673,19 +2361,15 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc2_phantom_castle.on(),
                 faithful: false,
             },
-            desc: "No phantom castle at the map origin (MC2). When a village \
-                   building finishes, retail re-paints every wizard, corpse and \
-                   balloon overlapping it as if it were a castle; a dead rival \
-                   lying on a village then raises level-7 castle terrain at \
-                   (0,0), at sea level, each time a hut completes under it. \
-                   This re-paints castles only.",
+            desc: "In retail Magic Carpet 2, a dead wizard lying in a village raises stray castle \
+                   walls at map position (0,0). Patched, only castles do.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc2_phantom_castle = crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "Corpses on villages raise castle terrain at (0,0), as retail.",
-                    "Only castles are re-painted (default).",
+                    "Stray castle walls appear",
+                    "No stray castle walls (default)",
                 ],
             },
         },
@@ -2701,20 +2385,15 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.dual_wield_muzzle.on(),
                 faithful: false,
             },
-            desc: "Dual wield: every spell fires from the hand it was cast with \
-                   (both games). Retail keeps one firing-hand register per \
-                   wizard, stamped by the last successful cast and read when \
-                   the projectile is born, so with both hands casting \
-                   everything leaves the RIGHT muzzle and a stream can switch \
-                   sides mid-burst. (Casting the same spell with both hands is \
-                   a separate mechanism and is not changed.)",
+            desc: "Casting with both hands in retail, most spells leave the right hand, whichever \
+                   hand cast them. Patched, each spell leaves its own hand.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.dual_wield_muzzle = crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "Both hands share one muzzle; the last cast picks it, as retail.",
-                    "Each hand's casts keep their own muzzle (default).",
+                    "Spells may leave the wrong hand",
+                    "Each hand fires its own spells (default)",
                 ],
             },
         },
@@ -2730,23 +2409,15 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.one_castle_per_wizard.on(),
                 faithful: false,
             },
-            desc: "One castle per wizard (all three games). Retail can leave a \
-                   wizard holding TWO castles at once: the \"do I own one\" \
-                   test reads a pointer written a tick after the castle \
-                   appears (MC2), demands the castle already be transformed \
-                   (MC1 delivery), or is missing altogether (MC1 create), so \
-                   two castle balls landing far enough apart in quick \
-                   succession both build. The second takes the pointer and \
-                   the first is orphaned ALIVE — its balloons never find a \
-                   home, cycle health and bank no mana — and when either \
-                   castle falls the owner is left with none at all.",
+            desc: "In retail, two quick Castle casts can build two castles, leaving one useless. \
+                   Patched, a wizard can only ever have one castle.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.one_castle_per_wizard = crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "A second castle ball can build a second castle, as retail.",
-                    "A castle ball never builds a second castle (default).",
+                    "Two castles possible",
+                    "Never more than one castle (default)",
                 ],
             },
         },
@@ -2762,23 +2433,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc2_wyvern_alliance_brain.on(),
                 faithful: false,
             },
-            desc: "Allied wyverns keep their wits (MC2). Retail's wyvern is the \
-                   one creature whose attack state has no exit for a lost \
-                   target: cast Alliance on a wyvern that is attacking, or let \
-                   the charm run out while it fights, and it flies its last \
-                   heading for the rest of its life - never shooting, never \
-                   re-targeting, never waking, its ally tint blinking forever. \
-                   Patched, it drops to idle like every other species and the \
-                   charm resolves normally.",
+            desc: "In retail Magic Carpet 2, a wyvern charmed mid-fight can fly in a straight line \
+                   forever. Patched, it calms down like other creatures.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc2_wyvern_alliance_brain =
                         crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "A charmed wyvern that loses its target flies on forever, as retail.",
-                    "A charmed wyvern that loses its target drops to idle (default).",
-                ],
+                descs: ["It flies off forever", "It calms down (default)"],
             },
         },
         Spec {
@@ -2793,24 +2455,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc2_flyers_clear_terrain.on(),
                 faithful: false,
             },
-            desc: "Mana worms and moon dwellers pass over steep walls they are \
-                   well above (MC2). Retail stops every creature at a steep or \
-                   forbidden tile whatever its altitude, so a mana worm heading \
-                   straight for its castle can hang forever against a rampart \
-                   far below it, until a crater clears the way. Patched, a worm \
-                   or dweller that is already airborne and would pass clear over \
-                   the tile is not stopped by it. Every other creature keeps \
-                   retail's rule, so bees and wyverns still cannot follow you \
-                   over a castle wall; caves keep retail's rule too.",
+            desc: "In retail Magic Carpet 2, mana worms and moon dwellers get stuck on walls far \
+                   below them. Patched, they fly over. Other creatures are unchanged.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc2_flyers_clear_terrain =
                         crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "Worms and dwellers stall against steep tiles far below them, as retail.",
-                    "Airborne worms and dwellers pass over steep tiles below them (default).",
-                ],
+                descs: ["They can get stuck", "They fly over low walls (default)"],
             },
         },
         Spec {
@@ -2825,21 +2477,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.skeletons_convert_traders.on(),
                 faithful: false,
             },
-            desc: "Skeletons can turn traders into skeletons too. A roaming \
-                   skeleton converts the nearest civilian, hunting one kind at \
-                   a time in turn: militia, settlers, villagers. Retail never \
-                   puts the trader on that list, so traders alone are immune. \
-                   Patched, the rotation includes them. Castle guards and \
-                   animals are never converted either way.",
+            desc: "Retail skeletons turn villagers into skeletons but never traders. Patched, \
+                   traders can be turned too. Castle guards and animals stay immune.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.skeletons_convert_traders =
                         crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "Skeletons never convert traders, as retail.",
-                    "Skeletons convert traders like other civilians (default).",
-                ],
+                descs: ["Traders are safe", "Traders can be turned too (default)"],
             },
         },
         Spec {
@@ -2854,20 +2499,13 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc2_fools_mana_skip.on(),
                 faithful: false,
             },
-            desc: "Rival wizards keep collecting mana when Fool's Mana is \
-                   around. A rival looking for mana balls may see through a \
-                   Fool's Mana sphere (a Perception roll); in retail that \
-                   ends its whole search, so the most perceptive rivals all \
-                   but stop collecting mana. Patched, it just skips the \
-                   decoy and keeps looking. MC2 only.",
+            desc: "In retail Magic Carpet 2, a rival that sees through Fool's Mana stops \
+                   collecting mana altogether. Patched, it skips the decoy and keeps collecting.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc2_fools_mana_skip = crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "Spotting Fool's Mana ends a rival's mana search, as retail.",
-                    "Rivals skip Fool's Mana and keep collecting (default).",
-                ],
+                descs: ["Rivals give up", "Rivals keep collecting (default)"],
             },
         },
         Spec {
@@ -2882,23 +2520,13 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc2_orphan_balloon_reap.on(),
                 faithful: false,
             },
-            desc: "Dead mana balloons always pop (MC2). The only thing in retail \
-                   that clears a dead mana balloon is its own castle's fleet \
-                   pass, so destroy a wizard's castle before his balloon and \
-                   what is left cannot be hurt, cannot be killed and never goes \
-                   away: it keeps his colours, drifts after whatever has taken \
-                   over the dead castle's slot - a hydra, a creature, you - and \
-                   is still there when the level ends. Patched, a dead balloon \
-                   with no castle left dissolves into its mana sphere the way \
-                   the castle pass would have done.",
+            desc: "In retail Magic Carpet 2, a dead balloon whose castle is gone floats forever \
+                   and cannot be destroyed. Patched, it turns into mana.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc2_orphan_balloon_reap = crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "A castle-less dead balloon haunts the level forever, as retail.",
-                    "A castle-less dead balloon dissolves into mana (default).",
-                ],
+                descs: ["It floats forever", "It turns into mana (default)"],
             },
         },
         Spec {
@@ -2913,19 +2541,13 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc2_house_flag_color.on(),
                 faithful: false,
             },
-            desc: "Claimed houses fly their owner's castle colour (MC2). Retail \
-                   colours a claimed house's flag by the owner's raw player \
-                   slot while the castle uses the proper team colour, so for \
-                   four of the eight wizards a rival's houses and castle show \
-                   different colours. Patched, houses match the castle.",
+            desc: "In retail Magic Carpet 2, four of the eight wizards fly a different colour on \
+                   their houses than on their castle. Patched, houses match the castle.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc2_house_flag_color = crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "Houses fly the owner's raw slot colour, as retail.",
-                    "Houses fly the owner's castle colour (default).",
-                ],
+                descs: ["Some flags mismatch", "Flags match the castle (default)"],
             },
         },
         Spec {
@@ -2940,20 +2562,13 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc2_immediate_reap.on(),
                 faithful: false,
             },
-            desc: "A dying MC2 record's pool slot returns within its own \
-                   tick. Retail frees dead records in the NEXT frame's \
-                   opening sweep, so a stale index can still reach a \
-                   corpse for one more frame and the slot is re-popped by \
-                   whatever spawns first. Patched, the slot is freed at the \
-                   end of the record's own dispatch.",
+            desc: "Retail Magic Carpet 2 removes dead things at the start of the next frame, so \
+                   they linger one frame. Patched, they go at once. No visible difference.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc2_immediate_reap = crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "Dead records are freed at the next frame's top, as retail.",
-                    "Dead records are freed within their own tick (default).",
-                ],
+                descs: ["They linger a frame", "They go at once (default)"],
             },
         },
         Spec {
@@ -2968,23 +2583,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc1_recycle_victim_revalidate.on(),
                 faithful: false,
             },
-            desc: "When the MC1 entity pool runs dry, retail sacrifices the \
-                   slots it listed as expendable at the last death — without \
-                   checking what lives in them now. A slot re-used since (a \
-                   castle's ground-leveler, a projectile) is eaten, and a \
-                   castle whose leveler dies that way is parked mid-transform \
-                   for the rest of the level: immune, stuck at its level, its \
-                   dead balloon immortal, its owner unbanishable. Patched, a \
-                   listed slot that is no longer expendable is skipped.",
+            desc: "When a retail Magic Carpet level is full, it can delete a castle's helper by \
+                   mistake, leaving the castle stuck forever. Patched, only spare things go.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc1_recycle_victim_revalidate =
                         crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "The dry-pool sacrifice eats whatever the listed slot holds, as retail.",
-                    "A listed slot that is no longer expendable is skipped (default).",
-                ],
+                descs: ["Wrong things can go", "Only spare things go (default)"],
             },
         },
         Spec {
@@ -2999,22 +2605,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc1_castle_transform_watchdog.on(),
                 faithful: false,
             },
-            desc: "An MC1 castle mid-transformation waits for its painter or \
-                   ground-leveler to finish; if that worker is destroyed from \
-                   outside, retail waits forever. Patched, a castle waiting on \
-                   a worker that no longer exists takes the leveler's own abort \
-                   exit and settles next tick. Never fires while a worker \
-                   stands at the site, so healthy transformations keep their \
-                   full length.",
+            desc: "In retail Magic Carpet, a growing castle whose painter or ground-leveller is \
+                   destroyed waits forever. Patched, it settles at once.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc1_castle_transform_watchdog =
                         crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "A castle whose worker is gone waits forever, as retail.",
-                    "A castle whose worker is gone settles next tick (default).",
-                ],
+                descs: ["It can stay stuck", "It settles at once (default)"],
             },
         },
         Spec {
@@ -3029,23 +2627,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc1_crushed_site_collapse.on(),
                 faithful: false,
             },
-            desc: "An MC1 castle founded or upgraded over a dwelling still \
-                   under construction crushes it without ending the \
-                   construction: the site never finishes, its flag never \
-                   goes up, it cannot be possessed, and it keeps reshaping \
-                   its footprint the wrong way for the rest of the level \
-                   (towers at the height ceiling beside pits at the floor). \
-                   Patched, the crushed site collapses like a crushed \
-                   finished house.",
+            desc: "In retail Magic Carpet, a half-built house crushed by a castle churns the \
+                   ground forever. Patched, it collapses.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc1_crushed_site_collapse =
                         crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "A crushed construction site reshapes its ground forever, as retail.",
-                    "A crushed construction site collapses (default).",
-                ],
+                descs: ["It churns the ground", "It collapses (default)"],
             },
         },
         Spec {
@@ -3060,21 +2649,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc2_building_pad_saturate.on(),
                 faithful: false,
             },
-            desc: "An MC2 building (or castle stage) raised on ground high \
-                   enough that its pad would pass the height ceiling wraps \
-                   around instead: its tallest parts come out as deep pits \
-                   and the finished building sinks into the one under its \
-                   centre (the ridge town of level 22). Patched, the pad \
-                   tops out flat at the ceiling.",
+            desc: "In retail Magic Carpet 2, a building on very high ground sinks into deep pits. \
+                   Patched, it sits flat at the height limit.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc2_building_pad_saturate =
                         crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "An over-tall building pad wraps into pits, as retail.",
-                    "An over-tall building pad tops out flat (default).",
-                ],
+                descs: ["It sinks into pits", "It sits flat (default)"],
             },
         },
         Spec {
@@ -3089,24 +2671,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc1_building_pad_saturate.on(),
                 faithful: false,
             },
-            desc: "An MC1 dwelling built, or castle raised, on ground high \
-                   enough that its tallest part would pass the height \
-                   ceiling wraps around instead: a rising castle's towers \
-                   drop into pits (climbing back out when it settles, \
-                   unless the castle stands very high), and a dwelling \
-                   keeps its pits and sinks into the one under its centre. \
-                   Patched, a dwelling's pad tops out flat at the ceiling \
-                   and a castle is raised no higher than its tallest tower \
-                   can stand.",
+            desc: "In retail Magic Carpet, buildings on very high ground sink into deep pits. \
+                   Patched, houses sit flat at the height limit and castles lower.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc1_building_pad_saturate =
                         crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "An over-tall building or castle wraps into pits, as retail.",
-                    "An over-tall building tops out, a castle sits lower (default).",
-                ],
+                descs: ["They sink into pits", "They sit flat or lower (default)"],
             },
         },
         Spec {
@@ -3121,20 +2693,16 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.mc1_segment_chain_revalidate.on(),
                 faithful: false,
             },
-            desc: "An MC1 sea monster killed a second time while already \
-                   dying can turn a nearby fire into a mana ball that can \
-                   never be collected or possessed: it stays for the rest \
-                   of the level, soaks up the mana of balls dropped onto \
-                   it, and the map marks it magenta. Patched, the second \
-                   death leaves the fire alone.",
+            desc: "In retail Magic Carpet, a sea monster killed twice can leave a stuck mana ball \
+                   that swallows other mana. Patched, it leaves none.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.mc1_segment_chain_revalidate =
                         crate::config::PatchArm::from_on(v)
                 },
                 descs: [
-                    "A twice-killed sea monster can leave a phantom mana ball, as retail.",
-                    "A twice-killed sea monster leaves no phantom ball (default).",
+                    "A stuck mana ball can appear",
+                    "No stuck mana ball (default)",
                 ],
             },
         },
@@ -3150,25 +2718,14 @@ pub fn registry() -> Vec<Spec> {
                 on: c.gameplay.patches.volcano_register_revalidate.on(),
                 faithful: false,
             },
-            desc: "A volcano (MC1 and MC2) that starts erupting knocks the \
-                   previous volcano dormant and kills the previous lava \
-                   plume or fire column by writing into their old slots \
-                   without checking what lives there now. An MC1 castle \
-                   there jumps to level 250, and a few downgrades later \
-                   the game freezes; anything else there is killed (a \
-                   rival's spell, which can end in hovering spell jars, or \
-                   a loose mana sphere), and an MC2 fire column born in the \
-                   old one's slot kills itself. Patched, the volcano only \
-                   touches its own volcano and plume.",
+            desc: "In retail, a new volcano can destroy random mana, a spell, or a Magic Carpet \
+                   castle, which can freeze the game. Patched, it only touches the old volcano.",
             ctl: Ctl::Toggle {
                 set: |c, v| {
                     c.gameplay.patches.volcano_register_revalidate =
                         crate::config::PatchArm::from_on(v)
                 },
-                descs: [
-                    "An eruption can wreck whatever took the old volcano's slots (an MC1 castle freezes the game), as retail.",
-                    "An eruption only touches the previous volcano and plume (default).",
-                ],
+                descs: ["Things can break", "Only volcanoes are affected (default)"],
             },
         },
         // ---- gameplay · cheat -------------------------------------------
@@ -3181,15 +2738,13 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--dev-spells"),
             cfg_path: "gameplay.cheat.dev_spells",
             read: toggle!(c => gameplay.cheat.dev_spells),
-            desc: "Every spell selectable + infinite mana while on — the \
-                   spell-track playtest instrument. An overlay: jars stay \
-                   collectable, and switching it off takes back only what \
-                   the cheat lent (the original's own cheat grants for good).",
+            desc: "Gives you every spell and endless mana while on. Turning it off takes back only \
+                   what the cheat gave, unlike retail's cheat.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.gameplay.cheat.dev_spells = v,
                 descs: [
-                    "Authentic acquisition and mana.",
-                    "Every spell, bottomless mana (cheat).",
+                    "Normal spells and mana",
+                    "Every spell, endless mana (cheat)",
                 ],
             },
         },
@@ -3202,15 +2757,10 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--invincible"),
             cfg_path: "gameplay.cheat.invincible",
             read: toggle!(c => gameplay.cheat.invincible),
-            desc: "Player invincibility: damage is totaled for display but \
-                   never applied; no death. Playtest/accessibility \
-                   instrument.",
+            desc: "Nothing can hurt or kill you.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.gameplay.cheat.invincible = v,
-                descs: [
-                    "Mortal, as the game intends.",
-                    "Nothing can kill you (cheat).",
-                ],
+                descs: ["You can die", "Nothing can kill you (cheat)"],
             },
         },
         Spec {
@@ -3222,16 +2772,11 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--ghost"),
             cfg_path: "gameplay.cheat.ghost",
             read: toggle!(c => gameplay.cheat.ghost),
-            desc: "Ghost mode: permanently invisible to everything (casting \
-                   does not break it, nothing sees through it) and flies \
-                   over impassable walls as if they were terrain. Not \
-                   invincibility. Neither original has it.",
+            desc: "Nobody can see you, even when you cast, and walls do not stop you. You can \
+                   still be hurt.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.gameplay.cheat.ghost = v,
-                descs: [
-                    "Seen and walled in, as the game intends.",
-                    "Unseen, walls are terrain (cheat).",
-                ],
+                descs: ["Seen and blocked", "Unseen, walls don't stop you (cheat)"],
             },
         },
         Spec {
@@ -3243,15 +2788,11 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--inert"),
             cfg_path: "gameplay.cheat.inert",
             read: toggle!(c => gameplay.cheat.inert),
-            desc: "Inert mode: the carpet trips no world trigger — no \
-                   pickups, teleporters, trigger volumes or switches. \
-                   Neither original has it.",
+            desc: "Flying over things sets nothing off: no pickups, teleporters, traps or \
+                   switches.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.gameplay.cheat.inert = v,
-                descs: [
-                    "Triggers fire, as the game intends.",
-                    "Nothing you fly over fires (cheat).",
-                ],
+                descs: ["Things react", "Nothing you fly over reacts (cheat)"],
             },
         },
         Spec {
@@ -3263,15 +2804,13 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--weightless"),
             cfg_path: "gameplay.cheat.weightless",
             read: toggle!(c => gameplay.cheat.weightless),
-            desc: "Weightless mode (was dev.lift_unclamped): q/e may pin \
-                   the desired altitude anywhere up to the level's highest \
-                   terrain + a 4-tile margin, instead of the per-game \
-                   ground-relative band. Applies live.",
+            desc: "The float keys can take you up to just above the level's highest terrain, \
+                   instead of a set height over the ground.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.gameplay.cheat.weightless = v,
                 descs: [
-                    "The per-game band: 1024 over terrain (MC2 caves 3072).",
-                    "Free climb to the global lift ceiling (cheat).",
+                    "The normal height limit",
+                    "Rise to the top of the level (cheat)",
                 ],
             },
         },
@@ -3285,14 +2824,13 @@ pub fn registry() -> Vec<Spec> {
             cli: Some("--plausible-spellbook"),
             cfg_path: "dev.plausible_spellbook",
             read: toggle!(c => dev.plausible_spellbook),
-            desc: "Seed the spellbook at level start with the spells a \
-                   diligent player COULD legitimately hold entering this \
-                   level (MC1 only). Applies at level load.",
+            desc: "Starts each Magic Carpet level with the spells a careful player could have \
+                   collected by then.",
             ctl: Ctl::Toggle {
                 set: |c, v| c.dev.plausible_spellbook = v,
                 descs: [
-                    "Only what the level itself grants.",
-                    "The campaign-plausible spell set at entry.",
+                    "Only the spells the level gives you",
+                    "The spells you would have by now",
                 ],
             },
         },

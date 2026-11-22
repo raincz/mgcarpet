@@ -163,7 +163,10 @@ fn layout(assets: &UiAssets, specs: &[Spec], st: &MenuState, w: f32, h: f32) -> 
     let row_h = lh * 1.25;
     let panel = [PANEL_X * w, PANEL_Y * h, PANEL_W * w, PANEL_H * h];
     let tab_h = lh * 1.4;
-    let desc_h = lh * 3.4;
+    // Five lines of help: the description (up to ~3) and the current
+    // choice's line (player ruling 2026-11-22 — three lines left room
+    // for one short sentence, so the texts overflowed).
+    let desc_h = lh * 5.4;
     let desc_y = panel[1] + panel[3] - desc_h;
     let pad = 8.0 * s;
 
@@ -711,6 +714,85 @@ mod tests {
     /// Under netplay the session's pinned rows lock — a preset too
     /// when it would set a pinned member — and the player's own rows
     /// stay live.
+    /// EVERY OPTION'S HELP FITS ITS BOX (player ruling 2026-11-22: the
+    /// texts overflowed and read like engineering notes). The box under
+    /// the list holds three FONT1 lines at the narrowest common layout
+    /// (4:3): the "label: description" paragraph plus the "choice:
+    /// what it does" line for toggles and choices, each wrapped exactly
+    /// as [`draw`] wraps them. Skips without a baked UI bundle.
+    #[test]
+    fn every_option_description_fits_its_box() {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../baked/assets");
+        let Ok(b) = mgc_formats::bundle::Bundle::load(&root.join("mc2-night")) else {
+            eprintln!("skip: no baked mc2-night bundle");
+            return;
+        };
+        let Some((idx, px)) = b.ui_sprites.as_ref() else {
+            return;
+        };
+        let assets = UiAssets::build(
+            idx.clone(),
+            px,
+            &b.palette,
+            b.blend_lut.as_deref(),
+            false,
+            b.font.as_ref().map(|(i, p)| (i, p.as_slice())),
+            b.web_sprites.as_ref().map(|(i, p)| (i, p.as_slice())),
+        );
+        let specs = settings::registry();
+        let st = MenuState::new(&specs);
+        let (w, h) = (1280.0, 960.0);
+        let l = layout(&assets, &specs, &st, w, h);
+        let max_w = (l.panel[2] - 2.0 * 8.0 * l.s) / l.fs;
+        // The box's line budget, as `draw` spends it.
+        let budget = ((l.panel[1] + l.panel[3] - 2.0 * l.s - (l.desc_y + 4.0 * l.s)) / l.lh).floor()
+            as usize;
+        let cfg = Config::default();
+        let mut over = Vec::new();
+        for spec in &specs {
+            let suffix = if spec.mutability() == Mutability::Startup {
+                " (applies at level load)"
+            } else {
+                ""
+            };
+            let head = wrap(
+                &assets,
+                &format!("{}{}: {}", spec.label, suffix, spec.desc),
+                max_w,
+            )
+            .len();
+            // The longest per-choice line this option can show.
+            let choice = match (&spec.ctl, (spec.read)(&cfg)) {
+                (Ctl::Toggle { descs, .. }, _) => ["off", "on"]
+                    .iter()
+                    .zip(descs.iter())
+                    .map(|(c, d)| wrap(&assets, &format!("{c}: {d}"), max_w).len())
+                    .max()
+                    .unwrap_or(0),
+                (Ctl::Choice { descs, .. }, Val::Choice { variants, .. }) => variants
+                    .iter()
+                    .zip(descs.iter())
+                    .map(|(c, d)| wrap(&assets, &format!("{c}: {d}"), max_w).len())
+                    .max()
+                    .unwrap_or(0),
+                _ => 0,
+            };
+            if head + choice > budget {
+                over.push(format!(
+                    "{} ({}): {head} + {choice} lines",
+                    spec.label, spec.cfg_path
+                ));
+            }
+        }
+        assert!(
+            over.is_empty(),
+            "{} option texts overflow the {budget}-line box ({:.0} px wide):\n{}",
+            over.len(),
+            max_w,
+            over.join("\n")
+        );
+    }
+
     #[test]
     fn session_pins_lock_their_rows() {
         let specs = settings::registry();

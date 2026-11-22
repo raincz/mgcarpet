@@ -818,11 +818,8 @@ pub fn bake_mc2_audio(
                 let rom = awe32_rom()?;
                 let mdi = src.read("SOUND/SBAWE32.MDI").map_err(|e| e.to_string())?;
                 let sbk = src.read("SOUND/BULLFROG.SBK").map_err(|e| e.to_string())?;
-                let w = crate::mc2_music::parse_bank(
-                    &music_dat,
-                    0,
-                    crate::mc2_music::DRIVER_AWE32,
-                )?;
+                let w =
+                    crate::mc2_music::parse_bank(&music_dat, 0, crate::mc2_music::DRIVER_AWE32)?;
                 Ok((rom, mdi, sbk, w))
             })();
             let awe = match awe {
@@ -905,10 +902,9 @@ pub fn bake_mc2_audio(
                 let mut awe_danger_file = None;
                 if let Some((rom, mdi, sbk, w)) = &awe {
                     match w.iter().find(|ws| stem_of(&ws.name) == stem_of(&sub.name)) {
-                        None => println!(
-                            "note: mc2 music: {role}: no AWE32 score for {}",
-                            sub.name
-                        ),
+                        None => {
+                            println!("note: mc2 music: {role}: no AWE32 score for {}", sub.name)
+                        }
                         Some(ws) => {
                             // Retail's XMIDI master volume: the menu plays
                             // at 127, gameplay and the movie scores at 100
@@ -919,8 +915,8 @@ pub fn bake_mc2_audio(
                             // The war stem plays its channels un-muted:
                             // the conf's CC119 trigger mute is what keeps
                             // them silent in the ambient render.
-                            let stem_conf = mgc_awe32::MC2_CONF
-                                .replace("trigger_mute 1", "trigger_mute 0");
+                            let stem_conf =
+                                mgc_awe32::MC2_CONF.replace("trigger_mute 1", "trigger_mute 0");
                             let render = |mask: u16, conf: &str| {
                                 let mut o =
                                     mgc_awe32::RenderOptions::new(rom, mgc_awe32::Driver::Dos);
@@ -951,8 +947,7 @@ pub fn bake_mc2_audio(
                                     let member = format!("music/{role}-awe.flac");
                                     emit(
                                         &member,
-                                        &crate::flac::encode(&base, 2, MUSIC_RATE)
-                                            .map_err(err)?,
+                                        &crate::flac::encode(&base, 2, MUSIC_RATE).map_err(err)?,
                                     )?;
                                     awe_file = Some(member);
                                     if let Some(stem) = &stem {

@@ -400,8 +400,13 @@ pub const MAX_FOG_TILES: u32 = 120;
 /// The fog-distance menu stops: (tiles, tag). Top stop =
 /// [`MAX_FOG_TILES`]; the old 255 whole-torus stop is retired
 /// (player-ruled 2026-08-08: the fog must never reach the melt band).
-pub const FOG_STOPS: [(u32, &str); 5] =
-    [(20, "faithful"), (50, "mid"), (70, "high"), (90, "max"), (120, "extreme")];
+pub const FOG_STOPS: [(u32, &str); 5] = [
+    (20, "faithful"),
+    (50, "mid"),
+    (70, "high"),
+    (90, "max"),
+    (120, "extreme"),
+];
 
 impl Default for RenderPreference {
     fn default() -> Self {

@@ -4118,7 +4118,11 @@ impl Renderer {
         // (overflowing it was a wgpu write_buffer panic, 2026-11-21):
         // grow it to fit.
         let need = (self.cull_indices.len() * std::mem::size_of::<u32>()) as u64;
-        if self.cull_index_buf.as_ref().is_some_and(|b| b.size() < need) {
+        if self
+            .cull_index_buf
+            .as_ref()
+            .is_some_and(|b| b.size() < need)
+        {
             self.cull_index_buf = Some(self.device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("terrain cull indices"),
                 size: need,

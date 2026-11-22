@@ -13,6 +13,7 @@ mod autofire;
 mod bakecheck;
 mod camera;
 mod campaign;
+mod cli_help;
 mod config;
 mod entities;
 mod film;
@@ -6252,7 +6253,10 @@ impl App {
         if self.selector_drag.is_none() && self.cfg.render.enhancement.hotbar {
             let b = ui::hotbar_bounds(assets, pane, size.0, size.1, true);
             let (x0, y0) = (r[0].min(b[0]), r[1].min(b[1]));
-            let (x1, y1) = ((r[0] + r[2]).max(b[0] + b[2]), (r[1] + r[3]).max(b[1] + b[3]));
+            let (x1, y1) = (
+                (r[0] + r[2]).max(b[0] + b[2]),
+                (r[1] + r[3]).max(b[1] + b[3]),
+            );
             r = [x0, y0, x1 - x0, y1 - y0];
         }
         // WHOLE-PIXEL bounds inside the rect: the OS pointer lives on
@@ -8019,13 +8023,14 @@ impl App {
             // order) and to every MC1 control scheme — the bar shows
             // the keys, so they should fill themselves.
             {
-                let (owned, order): ([bool; 26], &[u8]) = if matches!(w.game(), mgc_sim::ids::GameId::Mc2) {
-                    (w.mc2_book_view(local_hx()).owned, &ui::MC2_GRID_ORDER)
-                } else {
-                    let mut o = [false; 26];
-                    o[..24].copy_from_slice(&w.loadout(local_hx()).owned);
-                    (o, &SPELL_CANON)
-                };
+                let (owned, order): ([bool; 26], &[u8]) =
+                    if matches!(w.game(), mgc_sim::ids::GameId::Mc2) {
+                        (w.mc2_book_view(local_hx()).owned, &ui::MC2_GRID_ORDER)
+                    } else {
+                        let mut o = [false; 26];
+                        o[..24].copy_from_slice(&w.loadout(local_hx()).owned);
+                        (o, &SPELL_CANON)
+                    };
                 // A carried bar is the player's: the level's STARTING
                 // spells only seed the diff baseline, never a key.
                 if self.quick_first_pass.take() == Some(false) {
@@ -8911,7 +8916,13 @@ impl App {
                 let lines: Vec<(String, String, [u8; 3])> = self
                     .message_log
                     .iter()
-                    .map(|l| (l.stamp(), net_named(&self.net_names, &l.text, is_mc2), l.color))
+                    .map(|l| {
+                        (
+                            l.stamp(),
+                            net_named(&self.net_names, &l.text, is_mc2),
+                            l.color,
+                        )
+                    })
                     .collect();
                 quads.extend(ui::message_log_quads(
                     assets,
@@ -9522,8 +9533,7 @@ impl ApplicationHandler for App {
                 if self.exit_confirm {
                     if down && button == MouseButton::Left {
                         let size = self.view_size();
-                        let (ok, cancel) =
-                            ui::exit_confirm_rects(ui_assets!(self), size.0, size.1);
+                        let (ok, cancel) = ui::exit_confirm_rects(ui_assets!(self), size.0, size.1);
                         if ui::rect_hit(ok, self.cursor) {
                             self.confirm_exit(event_loop);
                         } else if ui::rect_hit(cancel, self.cursor) {
@@ -11397,75 +11407,12 @@ fn parse_args() -> Result<Args, String> {
                 net_game = Some(lobby::NetGame::parse(&key).map_err(|e| format!("--game: {e}"))?);
             }
             "--help" | "-h" => {
-                return Err(format!(
-                    "usage: mgcarpet [--level <game:index> | <baked/.../level-NNN.mgcl>] \
-                     [--campaign mc1|mc1hw|mc2 [--slot N] [--new-game]] \
-                     [--seat 1-8 (fly that wizard seat; --level only)] \
-                     [--host [ADDR] | --join ADDR | --serve [ADDR] (netplay; port {NET_PORT} \
-                     by default; --host = a server in this app + its admin player, \
-                     --serve = the dedicated server alone, headless; needs \
-                     --game mc1|mc1hw|mc2) [--passphrase WORD]] \
-                     (slot 0 = default: a fresh run, saved only from the in-game menu) \
-                     [--tileset 0|1] [--config <path>] \
-                     [--smooth-shading|--no-smooth-shading] \
-                     [--smooth-textures|--no-smooth-textures] \
-                     [--segment-order|--no-segment-order] [--hotbar|--no-hotbar] \
-                     [--map-triggers|--no-map-triggers] \
-                     [--crosshair|--no-crosshair] [--coords|--no-coords] \
-                     [--health-bars|--no-health-bars] \
-                     [--dev-spells|--no-dev-spells] \
-                     [--plausible-spellbook|--no-plausible-spellbook] \
-                     [--set-spellbook id[:xp],id,… (the exact level-start book by \
-                     in-level spell id; `--set-spellbook list` prints the ids)] \
-                     [--wheel-spells|--no-wheel-spells] \
-                     [--invincible|--no-invincible] \
-                     [--ghost|--no-ghost] [--inert|--no-inert] \
-                     [--weightless|--no-weightless] \
-                     [--expose-jar-spells|--no-expose-jar-spells] \
-                     [--grace-meter|--no-grace-meter] \
-                     [--dev-mode] \
-                     [--thrust classic|enhanced] [--altitude classic|enhanced] \
-                     [--bindings classic|wasd] \
-                     [--spell-selector auto|mc1|mc2|mc1+mc2] \
-                     [--rival-tags auto|on|off] \
-                     [--subtitles on|off] [--fog-distance TILES (0 = no fog)] \
-                     [--sky|--no-sky] [--reflections|--no-reflections] \
-                     [--horizon-cull|--no-horizon-cull] \
-                     [--light-sources|--no-light-sources] \
-                     [--vsync|--no-vsync] [--fullscreen|--windowed] \
-                     [--movies|--no-movies] [--stats|--no-stats] [--anti-aliasing off|msaa|1.5x|2x] \
-                     [--fps|--no-fps] \
-                     [--screenshot out.png [--camera x,y,z,yaw,pitch] [--map-view] \
-                     [--anim-turn N]] \
-                     [--map out.png [--map-scale N] [--map-settle TICKS (MC2 \
-                     terrain is BUILT by gameplay ticks — 0 renders an unbuilt \
-                     level; 8 matches a recording's first frame)]] \
-                     [--no-terrain-features] \
-                     [--pool-slots N] [--awake-range TILES (0 = always awake)] \
-                     [--replay take.mgcr (play a recording — retail or port — as \
-                     the session; level from the header)] \
-                     [--firstperson (default: replay through the carpet's own \
-                     eye, the recorded pose hidden) | --thirdperson (watch it \
-                     from a boom behind the carpet, the recorded pose solid)] \
-                     [--film DIR [--film-from TURN] [--film-to TURN] \
-                     [--film-rate N (frames per game turn, default 1 = 24 fps)] \
-                     (capture the session as numbered PNG frames on a fixed \
-                     clock — one frame per 1/N turn, nothing dropped — seeking \
-                     to --film-from first, exiting at --film-to or when the \
-                     take ends; usually with --replay; encode with tools/film.py)] \
-                     [--replay-check take.mgcr (headless: whole take + drift \
-                     summary; exit 0 = zero divergence)] \
-                     [--record out.mgcr (write this session as a port recording; \
-                     WITH --replay/--replay-check it re-records the take as an \
-                     INPUT-ONLY port take — the recovered input, no state/obs \
-                     channels, ~150x smaller and shareable. The originals stay \
-                     the conformance oracle)] \
-                     [--flock-probe out.csv [--probe-ticks N] [--probe-every N] \
-                     [--probe-pose far|start|hover[:ALT]|approach[:ALT]|orbit[:ALT]] \
-                     [--probe-species CLASS,MODEL] [--probe-strip] [--probe-dis N,N..]]\n\
-                     enhancements persist in {} (see crates/mgc-app/src/config.rs)",
-                    config::DEFAULT_PATH
-                ));
+                // The 80-column reference (`cli_help`) on stdout, exit 0.
+                print!(
+                    "{}",
+                    cli_help::render(&settings::registry(), cli_help::WIDTH)
+                );
+                std::process::exit(0);
             }
             other => return Err(format!("unknown argument {other} (try --help)")),
         }

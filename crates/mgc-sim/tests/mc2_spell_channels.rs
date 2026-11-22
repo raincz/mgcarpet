@@ -1979,7 +1979,10 @@ fn mc2_spell_select_raises_notification_toast() {
     assert!(!name.is_empty(), "the tier-1 name resolves from L1.TXT");
     let want = format!("Left: {name}");
     let (text, color) = w.notification().expect("select raises a toast");
-    assert_eq!(text, want, "the toast is the hand + the chosen tier's spell name");
+    assert_eq!(
+        text, want,
+        "the toast is the hand + the chosen tier's spell name"
+    );
     assert_eq!(color, [255, 0, 0], "plain toasts are red");
 
     // The 20-frame select life decays on the app-driven wall-clock
