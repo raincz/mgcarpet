@@ -108,17 +108,199 @@ const SND_VULCAN: u8 = 9;
 /// a static that re-arms only when portal 3 stops being pending, so
 /// it falls once per run, not per map visit.
 const STAR_PORTAL: u32 = 3;
-const STAR_FROM: (f32, f32) = (595.0, 0.0);
-const STAR_TO: (f32, f32) = (570.0, 636.0);
-const STAR_FLY_FIRST: usize = 277;
-const STAR_FLY_FRAMES: usize = 8;
-const STAR_HIT_FIRST: usize = 93;
-const STAR_HIT_FRAMES: usize = 11;
+const STAR: MapPath = MapPath {
+    from: (595.0, 0.0),
+    to: (570.0, 636.0),
+    fly: (277, 284),
+    hit: (93, 103),
+    launch: 9,
+    land: 3,
+};
+const SND_STAR_LAUNCH: u8 = STAR.launch;
+const SND_STAR_HIT: u8 = STAR.land;
 /// 4 steps × 2 px per ~60 Hz retail frame on the major axis (the
 /// carpet's travel law, `TRAVEL_SPEED`, is the same stepper at 3×2).
-const STAR_SPEED: f32 = 4.0 * 2.0 * 60.0;
-const SND_STAR_LAUNCH: u8 = 9;
-const SND_STAR_HIT: u8 = 3;
+const PATH_SPEED: f32 = 4.0 * 2.0 * 60.0;
+
+/// One `str_WORD_E20A4` flight (MI:240-252, `DrawAndSoundDragonAndFire_
+/// 81EE0`): from `from` (top-left, map px) to `to` along the Bresenham
+/// stepper at [`PATH_SPEED`], looping the flight frames `fly`
+/// (inclusive) at 12.5 fps; on arrival the `hit` frames play once
+/// there. `launch` / `land` = the samples at the start and the
+/// arrival (`word_10` / `word_14`).
+struct MapPath {
+    from: (f32, f32),
+    to: (f32, f32),
+    fly: (usize, usize),
+    hit: (usize, usize),
+    launch: u8,
+    land: u8,
+}
+
+impl MapPath {
+    /// The flight's duration: the major axis at `PATH_SPEED`.
+    fn fly_time(&self) -> f32 {
+        let (dx, dy) = (self.to.0 - self.from.0, self.to.1 - self.from.1);
+        dx.abs().max(dy.abs()) / PATH_SPEED
+    }
+
+    /// The arrival animation's duration (every `hit` frame once).
+    fn hit_time(&self) -> f32 {
+        (self.hit.1 - self.hit.0 + 1) as f32 / ANIM_FPS
+    }
+
+    /// Sprite + map position `t` seconds into the flight.
+    fn flying(&self, t: f32) -> (usize, (f32, f32)) {
+        let u = (t / self.fly_time()).clamp(0.0, 1.0);
+        let pos = (
+            self.from.0 + (self.to.0 - self.from.0) * u,
+            self.from.1 + (self.to.1 - self.from.1) * u,
+        );
+        let n = self.fly.1 - self.fly.0 + 1;
+        (self.fly.0 + (t.max(0.0) * ANIM_FPS) as usize % n, pos)
+    }
+
+    /// Sprite + map position `t` seconds into the arrival.
+    fn landing(&self, t: f32) -> (usize, (f32, f32)) {
+        let n = self.hit.1 - self.hit.0 + 1;
+        (
+            self.hit.0 + ((t.max(0.0) * ANIM_FPS) as usize).min(n - 1),
+            self.to,
+        )
+    }
+}
+
+/// THE MAP'S PERIODIC FLIGHTS — the table's MODE-1 rows (MI:240-244,
+/// 249-252): three dragons, a second and third kind of flyer, and four
+/// falling stars (remc2's "explosion" rows: a star streaks down from
+/// the top edge and bursts on the ground). Each waits `wait` seconds,
+/// flies, plays its arrival frames, and starts over, forever, on its
+/// own clock (MI:4580-4631). Retail's wait test is an integer-second
+/// `(time − t0) / 100 > stateY` on the 100 Hz clock, so the real wait
+/// is `stateY + 1` seconds — the values below. The dragons' "arrival"
+/// is just more wingbeats past the map's bottom/right edge.
+struct Periodic {
+    path: MapPath,
+    wait: f32,
+}
+
+const DRAGON: (usize, usize) = (140, 145);
+const PERIODIC: [Periodic; 9] = [
+    Periodic {
+        path: MapPath {
+            from: (384.0, 0.0),
+            to: (543.0, 960.0),
+            fly: DRAGON,
+            hit: DRAGON,
+            launch: 37,
+            land: 37,
+        },
+        wait: 51.0,
+    },
+    Periodic {
+        path: MapPath {
+            from: (395.0, 10.0),
+            to: (550.0, 970.0),
+            fly: DRAGON,
+            hit: DRAGON,
+            launch: 37,
+            land: 37,
+        },
+        wait: 51.0,
+    },
+    Periodic {
+        path: MapPath {
+            from: (400.0, 6.0),
+            to: (555.0, 980.0),
+            fly: DRAGON,
+            hit: DRAGON,
+            launch: 37,
+            land: 37,
+        },
+        wait: 51.0,
+    },
+    Periodic {
+        path: MapPath {
+            from: (1.0, 190.0),
+            to: (1276.0, 308.0),
+            fly: (206, 211),
+            hit: (206, 211),
+            launch: 39,
+            land: 39,
+        },
+        wait: 41.0,
+    },
+    Periodic {
+        path: MapPath {
+            from: (459.0, 0.0),
+            to: (1278.0, 960.0),
+            fly: (146, 151),
+            hit: (146, 151),
+            launch: 37,
+            land: 37,
+        },
+        wait: 21.0,
+    },
+    Periodic {
+        path: MapPath {
+            from: (357.0, 0.0),
+            to: (287.0, 656.0),
+            fly: (107, 114),
+            hit: (93, 103),
+            launch: 9,
+            land: 3,
+        },
+        wait: 16.0,
+    },
+    Periodic {
+        path: MapPath {
+            from: (939.0, 0.0),
+            to: (879.0, 614.0),
+            fly: (107, 114),
+            hit: (93, 103),
+            launch: 9,
+            land: 3,
+        },
+        wait: 16.0,
+    },
+    Periodic {
+        path: MapPath {
+            from: (431.0, 0.0),
+            to: (361.0, 512.0),
+            fly: (107, 114),
+            hit: (93, 103),
+            launch: 9,
+            land: 3,
+        },
+        wait: 12.0,
+    },
+    Periodic {
+        path: MapPath {
+            from: (455.0, 0.0),
+            to: (395.0, 114.0),
+            fly: (107, 114),
+            hit: (93, 103),
+            launch: 9,
+            land: 3,
+        },
+        wait: 19.0,
+    },
+];
+/// Table order: the dragons/flyers (rows 0-4) draw before the
+/// level-4 star, the falling stars (5-8) after it (MI:4568 walks the
+/// rows in order).
+const PERIODIC_BEFORE_STAR: usize = 5;
+
+/// A periodic flight's phase (retail `byte_43` cases 0-4).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Flight {
+    /// Waiting since this `anim` time.
+    Waiting(f32),
+    /// Flying since this `anim` time.
+    Flying(f32),
+    /// Arrival frames since this `anim` time.
+    Landing(f32),
+}
 
 /// The falling star's phase (retail `byte_43` of its row).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -134,10 +316,9 @@ enum Star {
 }
 
 impl Star {
-    /// The fall's duration: the major axis at `STAR_SPEED`.
+    /// The fall's duration.
     fn fall_time() -> f32 {
-        let (dx, dy) = (STAR_TO.0 - STAR_FROM.0, STAR_TO.1 - STAR_FROM.1);
-        dx.abs().max(dy.abs()) / STAR_SPEED
+        STAR.fly_time()
     }
 }
 
@@ -602,6 +783,8 @@ pub struct WorldMap {
     vulcan: Option<f32>,
     /// The level-4 falling star ([`Star`]).
     star: Star,
+    /// The periodic flights ([`PERIODIC`]), one phase per row.
+    flights: [Flight; 9],
 }
 
 /// A stats-table row: a stat, a breakdown sub-row (indented), or a
@@ -779,6 +962,7 @@ impl WorldMap {
             faces: (0.0, 0.0),
             vulcan: None,
             star: Star::Armed,
+            flights: [Flight::Waiting(0.0); 9],
         })
     }
 
@@ -973,6 +1157,24 @@ impl WorldMap {
         } else {
             self.vulcan = None;
         }
+        // The periodic flights (see `PERIODIC`): wait, launch (sample),
+        // fly, arrive (sample), play the arrival frames, start over.
+        for (f, row) in self.flights.iter_mut().zip(&PERIODIC) {
+            match *f {
+                Flight::Waiting(t0) if self.anim - t0 >= row.wait => {
+                    *f = Flight::Flying(self.anim);
+                    self.sounds.push(row.path.launch);
+                }
+                Flight::Flying(t0) if self.anim - t0 >= row.path.fly_time() => {
+                    *f = Flight::Landing(self.anim);
+                    self.sounds.push(row.path.land);
+                }
+                Flight::Landing(t0) if self.anim - t0 >= row.path.hit_time() => {
+                    *f = Flight::Waiting(self.anim);
+                }
+                _ => {}
+            }
+        }
         // The level-4 falling star (see `Star`).
         if save.levels_completed == STAR_PORTAL {
             match self.star {
@@ -984,7 +1186,7 @@ impl WorldMap {
                     self.star = Star::Impact(self.anim);
                     self.sounds.push(SND_STAR_HIT);
                 }
-                Star::Impact(t0) if self.anim - t0 >= STAR_HIT_FRAMES as f32 / ANIM_FPS => {
+                Star::Impact(t0) if self.anim - t0 >= STAR.hit_time() => {
                     self.star = Star::Done;
                 }
                 _ => {}
@@ -1968,26 +2170,26 @@ impl WorldMap {
         }
         // The level-4 falling star — retail draws the event rows after
         // the portals and ambients, before the carpet (MI:3265-66).
+        // So are the periodic flights, in table order around it.
+        let flight = |i: usize| match self.flights[i] {
+            Flight::Flying(t0) => Some(PERIODIC[i].path.flying(self.anim - t0)),
+            Flight::Landing(t0) => Some(PERIODIC[i].path.landing(self.anim - t0)),
+            Flight::Waiting(_) => None,
+        };
         let star = match self.star {
-            Star::Falling(t0) => {
-                let t = self.anim - t0;
-                let u = (t / Star::fall_time()).clamp(0.0, 1.0);
-                let pos = (
-                    STAR_FROM.0 + (STAR_TO.0 - STAR_FROM.0) * u,
-                    STAR_FROM.1 + (STAR_TO.1 - STAR_FROM.1) * u,
-                );
-                Some((STAR_FLY_FIRST + (t * ANIM_FPS) as usize % STAR_FLY_FRAMES, pos))
-            }
-            Star::Impact(t0) => {
-                let f = (((self.anim - t0) * ANIM_FPS) as usize).min(STAR_HIT_FRAMES - 1);
-                Some((STAR_HIT_FIRST + f, STAR_TO))
-            }
+            Star::Falling(t0) => Some(STAR.flying(self.anim - t0)),
+            Star::Impact(t0) => Some(STAR.landing(self.anim - t0)),
             _ => None,
         };
-        if let Some((id, pos)) = star
-            && let Some(q) = self.sprite(id, pos, scale)
-        {
-            quads.push(q);
+        let events: Vec<(usize, (f32, f32))> = (0..PERIODIC_BEFORE_STAR)
+            .filter_map(flight)
+            .chain(star)
+            .chain((PERIODIC_BEFORE_STAR..PERIODIC.len()).filter_map(flight))
+            .collect();
+        for (id, pos) in events {
+            if let Some(q) = self.sprite(id, pos, scale) {
+                quads.push(q);
+            }
         }
         // The carpet: travelling along a leg (8 heading families of
         // 4 frames, sprites 1-32, family by `carpet_family` from the
@@ -2234,6 +2436,7 @@ mod tests {
             faces: (0.0, 0.0),
             vulcan: None,
             star: Star::Armed,
+            flights: [Flight::Waiting(0.0); 9],
         }
     }
 
@@ -2756,6 +2959,53 @@ mod tests {
     /// sample 3) and is gone; it does not fall again on the same run
     /// until portal 3 stops being pending; other records never see it.
     #[test]
+    #[test]
+
+    /// THE PERIODIC FLIGHTS: each row waits its `wait`, launches
+    /// (sample), flies its path, arrives (sample), plays its arrival
+    /// frames and starts over; all draw after the portals, the dragons
+    /// before the level-4 star and the falling stars after it.
+    #[test]
+    fn the_map_dragons_and_falling_stars_cycle() {
+        let mut wm = bare();
+        wm.rects = (0..320)
+            .map(|i| Some((i as f32, 0.0, 24.0, 24.0)))
+            .collect();
+        let save = save_with(3);
+        // The shortest row: dragon3 (row 4), every 21 s.
+        let row = &PERIODIC[4];
+        wm.tick(row.wait - 0.5, &save);
+        assert_eq!(wm.flights[4], Flight::Waiting(0.0));
+        wm.take_sounds();
+        wm.tick(0.6, &save);
+        assert!(matches!(wm.flights[4], Flight::Flying(_)));
+        assert!(wm.take_sounds().contains(&row.path.launch));
+        wm.tick(row.path.fly_time() + 0.01, &save);
+        assert!(matches!(wm.flights[4], Flight::Landing(_)));
+        wm.tick(row.path.hit_time() + 0.01, &save);
+        assert!(matches!(wm.flights[4], Flight::Waiting(_)), "starts over");
+        // Mid-flight it moves along its path, a flight frame.
+        let (id, a) = row.path.flying(0.2);
+        let (_, b) = row.path.flying(0.4);
+        assert!((146..=151).contains(&id));
+        assert!(b.0 > a.0 && b.1 > a.1);
+        // Draw order: a dragon (row 0) and a falling star (row 5) in
+        // flight together with the level-4 star.
+        wm.flights[0] = Flight::Flying(wm.anim);
+        wm.flights[5] = Flight::Flying(wm.anim);
+        wm.star = Star::Falling(wm.anim);
+        wm.scroll = (300.0, 0.0);
+        let ids: Vec<usize> = wm
+            .quads(&save, (640.0, 480.0), (0.0, 0.0))
+            .iter()
+            .skip(1)
+            .map(|q| q.uv[0] as usize)
+            .collect();
+        let at =
+            |r: std::ops::RangeInclusive<usize>| ids.iter().position(|i| r.contains(i)).unwrap();
+        assert!(at(140..=145) < at(277..=284), "dragons before the star");
+        assert!(at(277..=284) < at(107..=114), "falling stars after it");
+    }
 
     #[test]
     fn the_meteor_level_star_falls_onto_portal_three() {
@@ -2796,7 +3046,7 @@ mod tests {
         assert!(wm.take_sounds().contains(&SND_STAR_HIT));
         assert!((93..=103).contains(&star_ids(&mut wm, &pending3)[0]));
         // Burst over: gone, and it stays gone on this run.
-        wm.tick(STAR_HIT_FRAMES as f32 / ANIM_FPS + 0.05, &pending3);
+        wm.tick(STAR.hit_time() + 0.05, &pending3);
         assert_eq!(wm.star, Star::Done);
         assert!(star_ids(&mut wm, &pending3).is_empty());
         wm.tick(5.0, &pending3);
