@@ -7196,6 +7196,12 @@ impl World {
             // comparison on that wizard shatters even when the
             // elected ball agrees.
             if model == 57 && ((self.g.watcom_rand() % 255) as u16) < per {
+                // PATCH `mc2_fools_mana_skip`: the perceptive wizard
+                // sees through THIS decoy and keeps looking; retail
+                // abandons the whole search (see `WorldPatches`).
+                if self.patches.mc2_fools_mana_skip && !self.strict_retail {
+                    continue 'walk;
+                }
                 break 'walk; // the 57-break (EF:6544-49)
             }
             let score = if let Some(o) = self.owner_slot(claim) {
@@ -11096,6 +11102,48 @@ mod human_seat_tests {
         s.thrust_model[crate::engine::world::Hx::FIRST] = ThrustModel::Mc1;
         s.sync_carpet_from_flyer(crate::engine::world::Hx::FIRST);
         s
+    }
+
+    /// PATCH `mc2_fools_mana_skip`. A rival at Perception 255 (every
+    /// roll lands) walks a sphere chain of [fool's sphere, real ball].
+    /// Retail's 57-break abandons the walk at the fool's sphere, so the
+    /// real ball is never elected; patched, the rival skips the decoy
+    /// and takes the ball.
+    #[test]
+    fn a_perceptive_rival_skips_fools_mana_only_under_the_patch() {
+        let Some(a) = arena() else { return };
+        for patched in [false, true] {
+            let mut w = build(&a, 0, true);
+            w.set_patches(crate::WorldPatches {
+                mc2_fools_mana_skip: patched,
+                ..crate::WorldPatches::RETAIL
+            });
+            let ri = (0..w.mc2_rivals.len())
+                .find(|&r| !w.mc2_rivals[r].eliminated)
+                .expect("a live rival");
+            w.mc2_rivals[ri].per = 255;
+            let i = w.mc2_rivals[ri].ent as usize;
+            let (x, y, z) = (w.g.ent[i].x, w.g.ent[i].y, w.g.ent[i].z);
+            let fool = w
+                .g
+                .mc2_spawn_mana_sphere(57, x.wrapping_add(4 << 8), y, z)
+                .expect("fool's sphere");
+            let ball = w
+                .g
+                .spawn_mana_ball(x.wrapping_add(8 << 8), y, z)
+                .expect("mana ball");
+            assert_eq!(w.g.ent[fool].model65, 57);
+            // Chain order is the test: the decoy first.
+            w.g.ball_chain.list = vec![fool as u16, ball as u16];
+            w.g.ball_chain.cut = usize::MAX;
+            w.mc2_rival_pick_ball(ri, i);
+            let elected = w.mc2_rivals[ri].target as usize == ball
+                && w.mc2_rivals[ri].state == super::Mc2AiState::Possess;
+            assert_eq!(
+                elected, patched,
+                "patched={patched}: the real ball is elected only under the patch"
+            );
+        }
     }
 
     #[test]

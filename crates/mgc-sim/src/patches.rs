@@ -598,6 +598,21 @@ pub struct WorldPatches {
     /// Patched: the rotation runs `% 4` over {m4, m12, m13, m14}, each
     /// model a quarter of the windows. Retail: `% 3`, m14 immune.
     pub skeletons_convert_traders: bool,
+    /// THE FOOL'S-MANA BREAK (MC2): a rival's mana-ball pick
+    /// (`sub_148E0` EF:6518-6609) walks the class-10 sphere chain, and
+    /// at every non-own FOOL'S sphere (model 57) rolls its Perception
+    /// — `if (watcomrand() % 255 < Perception) break;` (EF:6544-49).
+    /// The roll is the wizard seeing through the decoy; the `break`
+    /// abandons the WHOLE search, keeping only the balls before that
+    /// sphere in slot order. A perceptive rival facing a few fool's
+    /// spheres therefore all but stops collecting mana — the sharper
+    /// the wizard, the worse (third-party report via the player,
+    /// 2026-11-22). Read as a `break`-for-`continue` slip.
+    ///
+    /// Patched: a landed roll SKIPS that sphere and the walk goes on
+    /// (the same roll, still on the global watcom stream — one draw
+    /// per non-own m57 node, all of them now). Retail: the break.
+    pub mc2_fools_mana_skip: bool,
 }
 
 impl WorldPatches {
@@ -633,6 +648,7 @@ impl WorldPatches {
         mc2_leviathan_true_aim: false,
         mc2_flyers_clear_terrain: false,
         skeletons_convert_traders: false,
+        mc2_fools_mana_skip: false,
     };
 
     /// The pre-option behavior set: what native play hard-wired
@@ -679,5 +695,6 @@ impl WorldPatches {
         mc2_leviathan_true_aim: false,
         mc2_flyers_clear_terrain: false,
         skeletons_convert_traders: false,
+        mc2_fools_mana_skip: false,
     };
 }

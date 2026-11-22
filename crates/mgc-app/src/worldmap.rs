@@ -2947,20 +2947,6 @@ mod tests {
         assert!(wm.frontier_drawn);
     }
 
-    /// The won campaign redraws Vissuluth's island and raises the mana
-    /// volcano on it: the 12 island tiles straight over the
-    /// background, then the route dots, then the looping volcano
-    /// (297-304, hiding the dots under it), then the dressing; the
-    /// start sample fires once, not per visit; an unfinished record
-    /// shows none of it.
-    /// THE LEVEL-4 FALLING STAR: with portal 3 pending (and the stats
-    /// table gone) a star falls from the top edge onto the portal
-    /// (frames 277-284, launch sample 9), bursts there (93-103, impact
-    /// sample 3) and is gone; it does not fall again on the same run
-    /// until portal 3 stops being pending; other records never see it.
-    #[test]
-    #[test]
-
     /// THE PERIODIC FLIGHTS: each row waits its `wait`, launches
     /// (sample), flies its path, arrives (sample), plays its arrival
     /// frames and starts over; all draw after the portals, the dragons
@@ -3007,6 +2993,11 @@ mod tests {
         assert!(at(277..=284) < at(107..=114), "falling stars after it");
     }
 
+    /// THE LEVEL-4 FALLING STAR: with portal 3 pending (and the stats
+    /// table gone) a star falls from the top edge onto the portal
+    /// (frames 277-284, launch sample 9), bursts there (93-103, impact
+    /// sample 3) and is gone; it does not fall again on the same run
+    /// until portal 3 stops being pending; other records never see it.
     #[test]
     fn the_meteor_level_star_falls_onto_portal_three() {
         let mut wm = bare();
@@ -3056,6 +3047,12 @@ mod tests {
         assert_eq!(wm.star, Star::Armed);
     }
 
+    /// The won campaign redraws Vissuluth's island and raises the mana
+    /// volcano on it: the 12 island tiles straight over the
+    /// background, then the route dots, then the looping volcano
+    /// (297-304, hiding the dots under it), then the dressing; the
+    /// start sample fires once, not per visit; an unfinished record
+    /// shows none of it.
     #[test]
     fn finale_raises_the_mana_volcano() {
         let mut wm = bare();

@@ -1354,6 +1354,14 @@ pub struct GameplayPatches {
     /// immune. Castle guards and animals are never converted either
     /// way. Player-ruled 2026-10-05.
     pub skeletons_convert_traders: PatchArm,
+    /// Rivals keep collecting mana around Fool's Mana. A rival
+    /// searching for mana balls rolls its Perception at each Fool's
+    /// Mana sphere it meets — seeing through the decoy — and retail
+    /// then abandons the WHOLE search, so a perceptive rival facing a
+    /// few fool's spheres all but stops collecting mana. `patched`
+    /// (default): it skips that sphere and keeps looking. `retail`:
+    /// the search ends. MC2 only. Player-ruled 2026-11-22.
+    pub mc2_fools_mana_skip: PatchArm,
     /// The arm the SIM half of `ball_owner_recolor` runs, when a
     /// take's policy pins it apart from the player's own (drawing)
     /// choice: `None` = follow the option (native play), `Some` =
@@ -1403,6 +1411,7 @@ impl Default for GameplayPatches {
             mc2_leviathan_high_lunge: PatchArm::Patched,
             mc2_flyers_clear_terrain: PatchArm::Patched,
             skeletons_convert_traders: PatchArm::Patched,
+            mc2_fools_mana_skip: PatchArm::Patched,
             owner_recolor_sim_pin: None,
         }
     }
@@ -1442,6 +1451,7 @@ impl GameplayPatches {
             mc2_leviathan_high_lunge: PatchArm::Retail,
             mc2_flyers_clear_terrain: PatchArm::Retail,
             skeletons_convert_traders: PatchArm::Retail,
+            mc2_fools_mana_skip: PatchArm::Retail,
             owner_recolor_sim_pin: None,
         }
     }
@@ -1503,6 +1513,8 @@ impl GameplayPatches {
             mc2_flyers_clear_terrain: PatchArm::Retail,
             // 2026-10-05; no port take predates it.
             skeletons_convert_traders: PatchArm::Retail,
+            // 2026-11-22; no port take predates it.
+            mc2_fools_mana_skip: PatchArm::Retail,
             // Native MC2 freed in-walk from the first port (the sweep
             // landed 2026-09-17), so a legacy take ran the PATCHED arm
             // — `..Self::default()` supplies it.

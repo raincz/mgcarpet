@@ -2842,6 +2842,34 @@ pub fn registry() -> Vec<Spec> {
         Spec {
             domain: Gameplay,
             group: "gameplay · patches",
+            label: "mc2_fools_mana_skip",
+            class: Patch,
+            key: None,
+            cli: None,
+            cfg_path: "gameplay.patches.mc2_fools_mana_skip",
+            read: |c| Val::Toggle {
+                on: c.gameplay.patches.mc2_fools_mana_skip.on(),
+                faithful: false,
+            },
+            desc: "Rival wizards keep collecting mana when Fool's Mana is \
+                   around. A rival looking for mana balls may see through a \
+                   Fool's Mana sphere (a Perception roll); in retail that \
+                   ends its whole search, so the most perceptive rivals all \
+                   but stop collecting mana. Patched, it just skips the \
+                   decoy and keeps looking. MC2 only.",
+            ctl: Ctl::Toggle {
+                set: |c, v| {
+                    c.gameplay.patches.mc2_fools_mana_skip = crate::config::PatchArm::from_on(v)
+                },
+                descs: [
+                    "Spotting Fool's Mana ends a rival's mana search, as retail.",
+                    "Rivals skip Fool's Mana and keep collecting (default).",
+                ],
+            },
+        },
+        Spec {
+            domain: Gameplay,
+            group: "gameplay · patches",
             label: "mc2_orphan_balloon_reap",
             class: Patch,
             key: None,
@@ -3434,8 +3462,9 @@ mod tests {
         // (a balance deviation riding the class for its pin), and
         // mc2_flyers_clear_terrain 2026-10-03,
         // mc1_pack_speed_restore 2026-10-10 (the pack-speed ratchet), and
-        // skeletons_convert_traders 2026-10-05.
-        assert_eq!(patches, 29, "all twenty-nine patches ship on");
+        // skeletons_convert_traders 2026-10-05, and
+        // mc2_fools_mana_skip 2026-11-22.
+        assert_eq!(patches, 30, "all thirty patches ship on");
     }
 
     #[test]
