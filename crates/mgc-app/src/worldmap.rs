@@ -94,6 +94,53 @@ const VULCAN_POS: (f32, f32) = (610.0, 114.0);
 const VULCAN_FIRST: usize = 297;
 const VULCAN_FRAMES: usize = 8;
 const SND_VULCAN: u8 = 9;
+/// THE FALLING STAR over level 4 ("A gift from the gods! Alas, it
+/// fell towards the realm of the spires" — the Meteor level): the one
+/// MODE-2 row of `str_WORD_E20A4` (MI:245; remc2 labels it "sea
+/// beast", but its data is a star falling onto portal 3). While
+/// portal 3 is the PENDING one (MI:4634-42 — the first portal not
+/// yet won), and not under the stats table (`x_BYTE_17DB8F != 4`,
+/// MI:4633), it falls once from the map's top edge to the portal —
+/// flight frames 277-284 looping at 12.5 fps, 4 Bresenham steps of 2
+/// px per retail frame (MI:4655-57) — then plays the impact frames
+/// 93-103 there and is gone. Sample 9 at the launch, 3 at the
+/// impact (`word_10` / `word_14`). Retail's state byte (`byte_43`) is
+/// a static that re-arms only when portal 3 stops being pending, so
+/// it falls once per run, not per map visit.
+const STAR_PORTAL: u32 = 3;
+const STAR_FROM: (f32, f32) = (595.0, 0.0);
+const STAR_TO: (f32, f32) = (570.0, 636.0);
+const STAR_FLY_FIRST: usize = 277;
+const STAR_FLY_FRAMES: usize = 8;
+const STAR_HIT_FIRST: usize = 93;
+const STAR_HIT_FRAMES: usize = 11;
+/// 4 steps × 2 px per ~60 Hz retail frame on the major axis (the
+/// carpet's travel law, `TRAVEL_SPEED`, is the same stepper at 3×2).
+const STAR_SPEED: f32 = 4.0 * 2.0 * 60.0;
+const SND_STAR_LAUNCH: u8 = 9;
+const SND_STAR_HIT: u8 = 3;
+
+/// The falling star's phase (retail `byte_43` of its row).
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Star {
+    /// Waiting for portal 3 to be pending (and the stats table gone).
+    Armed,
+    /// Falling since this `anim` time.
+    Falling(f32),
+    /// The impact animation since this `anim` time.
+    Impact(f32),
+    /// Played; re-arms when portal 3 stops being pending.
+    Done,
+}
+
+impl Star {
+    /// The fall's duration: the major axis at `STAR_SPEED`.
+    fn fall_time() -> f32 {
+        let (dx, dy) = (STAR_TO.0 - STAR_FROM.0, STAR_TO.1 - STAR_FROM.1);
+        dx.abs().max(dy.abs()) / STAR_SPEED
+    }
+}
+
 /// The finale's island redraw: sprites 285-296 at their map
 /// positions (`MapMenuPortalsDraw_81760`, MI:3835-46).
 const VULCAN_ISLAND: [(usize, (f32, f32)); 12] = [
@@ -553,6 +600,8 @@ pub struct WorldMap {
     /// that only re-arms when the condition fails, so the start
     /// sample fires once, not per visit.
     vulcan: Option<f32>,
+    /// The level-4 falling star ([`Star`]).
+    star: Star,
 }
 
 /// A stats-table row: a stat, a breakdown sub-row (indented), or a
@@ -729,6 +778,7 @@ impl WorldMap {
             glide: None,
             faces: (0.0, 0.0),
             vulcan: None,
+            star: Star::Armed,
         })
     }
 
@@ -922,6 +972,25 @@ impl WorldMap {
             }
         } else {
             self.vulcan = None;
+        }
+        // The level-4 falling star (see `Star`).
+        if save.levels_completed == STAR_PORTAL {
+            match self.star {
+                Star::Armed if self.stats.is_none() => {
+                    self.star = Star::Falling(self.anim);
+                    self.sounds.push(SND_STAR_LAUNCH);
+                }
+                Star::Falling(t0) if self.anim - t0 >= Star::fall_time() => {
+                    self.star = Star::Impact(self.anim);
+                    self.sounds.push(SND_STAR_HIT);
+                }
+                Star::Impact(t0) if self.anim - t0 >= STAR_HIT_FRAMES as f32 / ANIM_FPS => {
+                    self.star = Star::Done;
+                }
+                _ => {}
+            }
+        } else {
+            self.star = Star::Armed;
         }
         // The pending-level narrative: once per map visit, after the
         // next portal has materialized — suppressed while that
@@ -1897,6 +1966,29 @@ impl WorldMap {
                 quads.push(q);
             }
         }
+        // The level-4 falling star — retail draws the event rows after
+        // the portals and ambients, before the carpet (MI:3265-66).
+        let star = match self.star {
+            Star::Falling(t0) => {
+                let t = self.anim - t0;
+                let u = (t / Star::fall_time()).clamp(0.0, 1.0);
+                let pos = (
+                    STAR_FROM.0 + (STAR_TO.0 - STAR_FROM.0) * u,
+                    STAR_FROM.1 + (STAR_TO.1 - STAR_FROM.1) * u,
+                );
+                Some((STAR_FLY_FIRST + (t * ANIM_FPS) as usize % STAR_FLY_FRAMES, pos))
+            }
+            Star::Impact(t0) => {
+                let f = (((self.anim - t0) * ANIM_FPS) as usize).min(STAR_HIT_FRAMES - 1);
+                Some((STAR_HIT_FIRST + f, STAR_TO))
+            }
+            _ => None,
+        };
+        if let Some((id, pos)) = star
+            && let Some(q) = self.sprite(id, pos, scale)
+        {
+            quads.push(q);
+        }
         // The carpet: travelling along a leg (8 heading families of
         // 4 frames, sprites 1-32, family by `carpet_family` from the
         // residual to the target, re-read every frame), or PARKED on
@@ -2141,6 +2233,7 @@ mod tests {
             glide: None,
             faces: (0.0, 0.0),
             vulcan: None,
+            star: Star::Armed,
         }
     }
 
@@ -2657,6 +2750,62 @@ mod tests {
     /// (297-304, hiding the dots under it), then the dressing; the
     /// start sample fires once, not per visit; an unfinished record
     /// shows none of it.
+    /// THE LEVEL-4 FALLING STAR: with portal 3 pending (and the stats
+    /// table gone) a star falls from the top edge onto the portal
+    /// (frames 277-284, launch sample 9), bursts there (93-103, impact
+    /// sample 3) and is gone; it does not fall again on the same run
+    /// until portal 3 stops being pending; other records never see it.
+    #[test]
+
+    #[test]
+    fn the_meteor_level_star_falls_onto_portal_three() {
+        let mut wm = bare();
+        wm.rects = (0..320)
+            .map(|i| Some((i as f32, 0.0, 24.0, 24.0)))
+            .collect();
+        wm.scroll = (300.0, 300.0);
+        let star_ids = |wm: &mut WorldMap, save: &Mc2Save| -> Vec<usize> {
+            let quads = wm.quads(save, (640.0, 480.0), (0.0, 0.0));
+            quads[1..]
+                .iter()
+                .map(|q| q.uv[0] as usize)
+                .filter(|id| (277..=284).contains(id) || (93..=103).contains(id))
+                .collect()
+        };
+        let other = save_with(2);
+        wm.tick(0.1, &other);
+        assert_eq!(wm.star, Star::Armed);
+        assert!(!wm.take_sounds().contains(&SND_STAR_LAUNCH));
+
+        let pending3 = save_with(3);
+        wm.stats = Some(2);
+        wm.tick(0.1, &pending3);
+        assert_eq!(wm.star, Star::Armed, "waits for the stats table");
+        wm.stats = None;
+        wm.tick(0.01, &pending3);
+        assert!(matches!(wm.star, Star::Falling(_)));
+        assert!(wm.take_sounds().contains(&SND_STAR_LAUNCH));
+        // Late in the fall it is in view, a flight frame.
+        wm.tick(Star::fall_time() * 0.9, &pending3);
+        let ids = star_ids(&mut wm, &pending3);
+        assert_eq!(ids.len(), 1);
+        assert!((277..=284).contains(&ids[0]));
+        // Landed: the impact, on the portal.
+        wm.tick(Star::fall_time() * 0.2, &pending3);
+        assert!(matches!(wm.star, Star::Impact(_)));
+        assert!(wm.take_sounds().contains(&SND_STAR_HIT));
+        assert!((93..=103).contains(&star_ids(&mut wm, &pending3)[0]));
+        // Burst over: gone, and it stays gone on this run.
+        wm.tick(STAR_HIT_FRAMES as f32 / ANIM_FPS + 0.05, &pending3);
+        assert_eq!(wm.star, Star::Done);
+        assert!(star_ids(&mut wm, &pending3).is_empty());
+        wm.tick(5.0, &pending3);
+        assert_eq!(wm.star, Star::Done, "once per run");
+        // Re-arms only once portal 3 stops being pending.
+        wm.tick(0.1, &save_with(4));
+        assert_eq!(wm.star, Star::Armed);
+    }
+
     #[test]
     fn finale_raises_the_mana_volcano() {
         let mut wm = bare();
