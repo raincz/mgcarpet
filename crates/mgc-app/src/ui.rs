@@ -49,6 +49,10 @@ pub struct UiAssets {
     /// ghost(91 + LUT-blended icon), 3 unowned grey relief(89 +
     /// colourize-0xA6 icon)]. Empty on MC1 atlases.
     pane_uv: Vec<[[f32; 4]; 4]>,
+    /// The per-TIER twins of `pane_uv`'s owned states: uv per spell ×
+    /// tier × [0 castable, 1 hovered shot-meter, 2 owned-unaffordable],
+    /// the tier's own icon (enhancement). Empty on MC1 atlases.
+    pane_tier_uv: Vec<[[[f32; 4]; 3]; 3]>,
     /// MC2 selector FLYOUT tiles: uv per (spell·3 + level) ×
     /// [0 lit(161), 1 pool-fail(162 + LUT-ghosted icon), 2 broke
     /// (162 + LIT icon — retail keys the tile on `canSubSummon &&
@@ -229,10 +233,14 @@ impl UiAssets {
         let sub_rows = (n_mc2 * 3 * 3).div_ceil(sub_per_row);
         let grid_y0 = base_h + tile_rows * tile_h;
         let sub_y0 = grid_y0 + grid_rows * gh;
+        // Per-TIER grid tiles (enhancement): spell × tier × the three
+        // owned states, the tier's own icon in place of the base one.
+        let tier_rows = (n_mc2 * 3 * 3).div_ceil(grid_per_row);
+        let tier_y0 = sub_y0 + sub_rows * sh;
 
         // The messaging font is appended as a WHITE mask block below all
         // the composited tiles (its glyphs are tinted at draw time).
-        let font_y0 = sub_y0 + sub_rows * sh;
+        let font_y0 = tier_y0 + tier_rows * gh;
         let font_h = font.map_or(0, |(fi, _)| fi.atlas_height as usize);
         // The spider-web overlay bank rides below the font — plain
         // palette-resolved tiles like the base atlas (index 0
@@ -319,6 +327,7 @@ impl UiAssets {
         // the 0xA6 colourize row for the unowned relief).
         let mut pane_uv = Vec::new();
         let mut sub_uv = Vec::new();
+        let mut pane_tier_uv = Vec::new();
         if !book_tiles {
             let meter_box = sprite_px(MC2_SPR_TILE_BAR);
             let dark_box = sprite_px(MC2_SPR_BOX_DARK);
@@ -351,6 +360,53 @@ impl UiAssets {
                     emit8(&mut rgba, base_w, palette, (tx, ty), (gw, gh), &tile);
                 }
                 pane_uv.push(uvs);
+
+                // The per-TIER grid tiles (enhancement, player ruling
+                // 2026-11-22 — retail's grid always shows the base
+                // icon): the castable / meter / unaffordable states with
+                // the tier's own small icon [179 + 3·spell + tier] (the
+                // flyout art). Its content box is centred on the base
+                // icon's content centre, so switching tiers never moves
+                // the picture.
+                let content = |spr: &(usize, usize, Vec<u8>)| -> Option<(f32, f32)> {
+                    let (w, h, px) = spr;
+                    let (mut x0, mut y0, mut x1, mut y1) = (*w, *h, 0, 0);
+                    for y in 0..*h {
+                        for x in 0..*w {
+                            if px[y * w + x] != 0 {
+                                (x0, y0, x1, y1) = (x0.min(x), y0.min(y), x1.max(x), y1.max(y));
+                            }
+                        }
+                    }
+                    (x0 <= x1).then(|| ((x0 + x1) as f32 / 2.0, (y0 + y1) as f32 / 2.0))
+                };
+                let base_c = icon.as_ref().and_then(content);
+                let mut tiers = [[[0.0f32; 4]; 3]; 3];
+                for (level, tier) in tiers.iter_mut().enumerate() {
+                    let tier_icon = sprite_px(MC2_SPR_SUB_ICON + 3 * spell + level);
+                    let off = match (base_c, tier_icon.as_ref().and_then(content)) {
+                        (Some((bx, by)), Some((cx, cy))) => (
+                            (bx - cx).round().max(0.0) as usize,
+                            (by - cy).round().max(0.0) as usize,
+                        ),
+                        _ => (0, 0),
+                    };
+                    for (variant, (bg, ink)) in variants[..3].iter().enumerate() {
+                        let t = (spell * 3 + level) * 3 + variant;
+                        let (tx, ty) =
+                            ((t % grid_per_row) * gw, tier_y0 + (t / grid_per_row) * gh);
+                        tier[variant] = [tx as f32, ty as f32, gw as f32, gh as f32];
+                        let mut tile = vec![0u8; gw * gh];
+                        if let Some(b) = bg.as_ref() {
+                            overlay8(&mut tile, (gw, gh), b, (0, 0), PaneInk::Raw, &resolve);
+                        }
+                        if let Some(ic) = &tier_icon {
+                            overlay8(&mut tile, (gw, gh), ic, off, *ink, &resolve);
+                        }
+                        emit8(&mut rgba, base_w, palette, (tx, ty), (gw, gh), &tile);
+                    }
+                }
+                pane_tier_uv.push(tiers);
 
                 // Flyout tiles: number badge at (+6,+10), per-level
                 // icon [179 + 3·spell + level] at (+18,+6) — the
@@ -482,6 +538,7 @@ impl UiAssets {
             pointer_base: index.pointer_base as usize,
             pane_uv,
             sub_uv,
+            pane_tier_uv,
             glyph_uv,
             line_height,
             web_uv,
@@ -629,6 +686,14 @@ impl UiAssets {
     /// on MC1 atlases.
     fn pane_tile(&self, spell: usize, variant: usize) -> Option<[f32; 4]> {
         self.pane_uv.get(spell).map(|v| v[variant])
+    }
+
+    /// A per-tier grid tile (see `pane_tier_uv`) for an OWNED state
+    /// (`variant` 0..=2); None past the table (MC1 atlases).
+    fn pane_tier_tile(&self, spell: usize, tier: usize, variant: usize) -> Option<[f32; 4]> {
+        (variant < 3)
+            .then(|| self.pane_tier_uv.get(spell).map(|t| t[tier.min(2)][variant]))
+            .flatten()
     }
 
     /// A pre-composited MC2 flyout tile (see `sub_uv`); None on MC1
@@ -3055,7 +3120,16 @@ fn pane_cell(
         } else {
             0
         };
-        if let Some(uv) = assets.pane_tile(spell, variant) {
+        // Tiers 2 and 3 show their own icon (enhancement — retail's
+        // grid shows the base spell whatever the tier). Tier 1 keeps
+        // the base icon: it is retail's look at the default tier, and
+        // several tier-1 flyout icons are drawn smaller than the base.
+        let tier = view.selected_level.get(spell).copied().unwrap_or(0) as usize;
+        if let Some(uv) = (tier > 0)
+            .then(|| assets.pane_tier_tile(spell, tier, variant))
+            .flatten()
+            .or_else(|| assets.pane_tile(spell, variant))
+        {
             quads.push(UiQuad {
                 rect: snap(cell),
                 uv,
@@ -3249,9 +3323,25 @@ fn hotbar_cell(
     let k = fx.min(fy);
     let frame = if active { SPR_SLOT_HELD } else { SPR_SLOT_IDLE };
     push_opt(quads, assets.sprite_quad_rect_tint(frame, r, WHITE));
-    let icon = if mc2 { 123 + spell } else { SPR_SPELL_ICON + spell };
-    let (iw, ih) = assets.sprite_dims(icon).unwrap_or((ICON_W, ICON_H));
-    let irect = [r[0] + (r[2] - 64.0 * k) / 2.0, r[1], iw * k, ih * k];
+    // MC2: the SELECTED tier's own small icon (the hand panels' big art
+    // exists per spell only), at its native size on the cell's native
+    // scale, centred over the recess. MC1: the hand panel's icon.
+    let (icon, irect) = if mc2 {
+        // Tier 1 = the grid's base icon, like the pane (see `pane_cell`).
+        let tier = view.selected_level.get(spell).copied().unwrap_or(0).min(2) as usize;
+        let id = if tier == 0 {
+            MC2_SPR_ICON_SMALL + spell
+        } else {
+            MC2_SPR_SUB_ICON + 3 * spell + tier
+        };
+        let (iw, ih) = assets.sprite_dims(id).unwrap_or((40.0, 22.0));
+        let u = r[2] / 48.0;
+        (id, [r[0] + (r[2] - iw * u) / 2.0, r[1] + 3.0 * u, iw * u, ih * u])
+    } else {
+        let id = SPR_SPELL_ICON + spell;
+        let (iw, ih) = assets.sprite_dims(id).unwrap_or((ICON_W, ICON_H));
+        (id, [r[0] + (r[2] - 64.0 * k) / 2.0, r[1], iw * k, ih * k])
+    };
     if !owned {
         push_opt(quads, assets.sprite_quad_rect_mask(icon, irect, UNOWNED_MASK));
     } else {
