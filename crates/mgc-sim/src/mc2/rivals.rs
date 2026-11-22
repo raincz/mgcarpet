@@ -11104,6 +11104,56 @@ mod human_seat_tests {
         s
     }
 
+    /// THE DEV-SPELLS TOGGLE RE-STAMPS THE BOOK (player report
+    /// 2026-11-22): the instrument's castle-upkeep bypass lives on each
+    /// manifestation (`SetSpell`), so a spell whose gated top tier was
+    /// selected BEFORE the toggle must lose its gate when the cheat goes
+    /// on (it stayed blocked until re-selected) and get it back when the
+    /// cheat goes off; a tier picked only through the cheat drops back
+    /// to the earned one.
+    #[test]
+    fn the_dev_spells_toggle_restamps_held_spells() {
+        use crate::engine::world::Hx;
+        let Some(a) = arena() else { return };
+        let mut w = build(&a, 0, true);
+        let hx = Hx::FIRST;
+        // A spell/tier with a castle-pool prerequisite.
+        let Some((s, t, req)) = (0..26usize).find_map(|s| {
+            let row = w.g.assets.spells.get(s)?;
+            let n = (row.byte_0 as usize).clamp(1, 3);
+            (1..n).find_map(|t| {
+                let r = row.tiers[t].max_mana_limit;
+                (r > 0).then_some((s, t, r))
+            })
+        }) else {
+            eprintln!("skip: no gated tier in the arena's SPELLS table");
+            return;
+        };
+        // Earn it honestly (XP way past the ladder), select it.
+        w.mc2_grant_plausible(hx, &[(s as u8, 1 << 30)]);
+        assert!(w.mc2_book[hx].levels[s] as usize >= t, "tier {t} earned");
+        w.mc2_select_spell(hx, s as u8, t as u8, 0);
+        let m = w.mc2_book[hx].ent[s] as usize;
+        assert_eq!(w.g.ent[m].f136, req, "the real castle-pool gate");
+        w.set_dev_spells(hx, true);
+        assert_eq!(w.g.ent[m].f136, 0, "the cheat lifts an already-set gate");
+        w.set_dev_spells(hx, false);
+        assert_eq!(w.g.ent[m].f136, req, "and restores it when it goes off");
+
+        // A cheat-only tier falls back to the earned one.
+        let mut w = build(&a, 0, true);
+        w.mc2_grant_plausible(hx, &[(s as u8, 0)]);
+        let earned = w.mc2_book[hx].levels[s];
+        assert!((earned as usize) < t);
+        w.set_dev_spells(hx, true);
+        w.mc2_select_spell(hx, s as u8, t as u8, 0);
+        assert_eq!(w.mc2_book[hx].sel[s] as usize, t);
+        w.set_dev_spells(hx, false);
+        assert_eq!(w.mc2_book[hx].sel[s], earned, "the cheat's tier is not kept");
+        let m = w.mc2_book[hx].ent[s] as usize;
+        assert_eq!(w.g.ent[m].f71, earned, "and the manifestation follows");
+    }
+
     /// PATCH `mc2_fools_mana_skip`. A rival at Perception 255 (every
     /// roll lands) walks a sphere chain of [fool's sphere, real ball].
     /// Retail's 57-break abandons the walk at the fool's sphere, so the

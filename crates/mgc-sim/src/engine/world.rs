@@ -15301,9 +15301,34 @@ impl World {
     /// exactly what the player had earned. Tests that want the whole
     /// book materialised call [`Self::grant_all_spells`] as well.
     pub fn set_dev_spells(&mut self, hx: Hx, on: bool) {
+        let changed = self.dev_spells != on;
         self.dev_spells = on;
         if !on {
             self.dev_release_all(hx);
+        }
+        // MC2: the instrument's gate bypass (no castle-pool upkeep, one
+        // mana a tick) is stamped INTO each manifestation by `SetSpell`
+        // (`mc2_set_spell`), so a toggle must re-stamp every held spell
+        // at its selected tier — or the spells set before it keep the
+        // other arm until re-selected: a top tier selected before the
+        // toggle stayed blocked by its castle-pool gate WITH the cheat
+        // on (player report 2026-11-22), and one set during the cheat
+        // stayed free after it. Off, the selection also drops back to
+        // the EARNED tier (the cheat lets every tier be picked).
+        if changed && matches!(self.game, GameId::Mc2) {
+            for s in 0..crate::mc2::rivals::MC2_SPELLS {
+                let m = self.mc2_book[hx].ent[s] as usize;
+                if m == 0 {
+                    continue;
+                }
+                if !on {
+                    let earned = self.mc2_book[hx].levels[s];
+                    let sel = &mut self.mc2_book[hx].sel[s];
+                    *sel = (*sel).min(earned);
+                }
+                let tier = self.mc2_book[hx].sel[s];
+                self.mc2_set_spell(hx, m, tier);
+            }
         }
     }
 

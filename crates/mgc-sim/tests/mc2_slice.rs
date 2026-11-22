@@ -755,7 +755,8 @@ fn mc2_slice_behaviors_and_goldens() {
         // (`player.left/right`, hashed); the overlay leaves it alone.
         // A/B-ATTRIBUTED: restoring the wipe alone reproduces the
         // previous D and E exactly; OBSERVABLE holds.
-        0xb6f7e0a8a9ef5c4e, // (was 0x3642251fa7d3b930, 2026-09-17 tick-top reap) D — was 0x2410773a72d4f3d0, re-pinned 2026-09-04 (ROUND 98) for THE
+        // RE-PINNED 2026-11-22: the dev-spells toggle re-stamps the held book (`World::set_dev_spells` — the seeded spells pick up the instrument's free gates when it goes on; was 0xb6f7e0a8a9ef5c4e). `if false` on that loop restores the old pin.
+        0xca0e42aa7abe724c, // (was 0x3642251fa7d3b930, 2026-09-17 tick-top reap) D — was 0x2410773a72d4f3d0, re-pinned 2026-09-04 (ROUND 98) for THE
         // LAUNCH AIM POINT `axis_0x9A_154x` EXTENDED TO THE WHOLE
         // class-15 fire table (`MGC_NO_MC2_LAUNCH_AXIS_BAND=1`
         // reverts). Retail stamps the flyer's @0x9A with the caster's
@@ -867,7 +868,8 @@ fn mc2_slice_behaviors_and_goldens() {
         // array unmoved: `MGC_NO_MC2_CLASS14_MARKER_HIDE_BIT` (the ending
         // markers hide on byte[0] bit 0, not the invisibility bit 0x20);
         // that switch alone reproduces 0x75c66d0a65b520a7.
-        0x1d623c449ca00d8c, // E: census + villager/archer provocation (was 0x46c9c6f10efc23f8 before the tick-top reap, 0x75c66d0a65b520a7 before the marker hide bit, both 2026-09-17; 0xa463e62ac91d6c3b, 2026-09-15 — see D)
+        // RE-PINNED 2026-11-22: the dev-spells toggle re-stamps the held book (`World::set_dev_spells` — the seeded spells pick up the instrument's free gates when it goes on; was 0x1d623c449ca00d8c). `if false` on that loop restores the old pin.
+        0x09c1bd64c8954e12, // E: census + villager/archer provocation (was 0x46c9c6f10efc23f8 before the tick-top reap, 0x75c66d0a65b520a7 before the marker hide bit, both 2026-09-17; 0xa463e62ac91d6c3b, 2026-09-15 — see D)
     ];
     // Checkpoints 4-6 re-pinned for the DISPOSITION-FIRE stack
     // rebuild (see mc2_cave.rs — sub_49F90 at sub_4A1E0's top,

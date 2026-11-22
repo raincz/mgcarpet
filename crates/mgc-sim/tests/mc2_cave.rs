@@ -921,7 +921,8 @@ fn mc2_cave_behaviors_and_goldens() {
             // reproduces the previous C and D pins exactly, and the
             // OBSERVABLE digests below hold — the world is unchanged,
             // only the mirror is.
-            0xbcdf82b98d45cc38, // was 0x57237f7c82d36989
+            // RE-PINNED 2026-11-22: the dev-spells toggle re-stamps the held book (`World::set_dev_spells` — the seeded spells pick up the instrument's free gates when it goes on; was 0xbcdf82b98d45cc38). `if false` on that loop restores the old pin.
+            0x2a3f556332195f9f, // was 0x57237f7c82d36989
             // Checkpoint D re-pinned 2026-09-10 (A/B/C hold BYTE-FOR-
             // BYTE) for THE (10,77) FIRE-ORB SATELLITE'S CLONED @0x2C —
             // the SAME CLASS as checkpoint A's 2026-09-02 fire-ctor
@@ -973,7 +974,8 @@ fn mc2_cave_behaviors_and_goldens() {
             // natively spawned whirlwind / fire-orb record writes the admit
             // mask into BOTH of its port homes; state-only, OBSERVABLE holds).
             // With that switch alone the pin is 0x5f504759165dbf93.
-            0x5aa1d00924cc72ab, // was 0x5f504759165dbf93 / 0x06f940b92d340c8b / 0xb81708d1a4f89892 (2026-09-17); 0x7387656e3a5ccc62 (2026-09-15, see C)
+            // RE-PINNED 2026-11-22: the dev-spells toggle re-stamps the held book (`World::set_dev_spells` — the seeded spells pick up the instrument's free gates when it goes on; was 0x5aa1d00924cc72ab). `if false` on that loop restores the old pin.
+            0xa9ba31fcefa67816, // was 0x5f504759165dbf93 / 0x06f940b92d340c8b / 0xb81708d1a4f89892 (2026-09-17); 0x7387656e3a5ccc62 (2026-09-15, see C)
         ],
         "cave goldens moved — re-pin ONLY for an intended fidelity change"
     );
