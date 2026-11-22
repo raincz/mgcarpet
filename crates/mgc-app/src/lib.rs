@@ -2875,7 +2875,7 @@ fn open_audio(
     audio_bank: u32,
 ) -> mgc_audio::Audio {
     let mut a = mgc_audio::Audio::open();
-    a.set_prefer_gm(cfg.audio.arrangement.prefer_gm());
+    a.set_arrangement(cfg.audio.arrangement.preference());
     if is_mc2 {
         a.set_mc2_danger_ramp();
     }

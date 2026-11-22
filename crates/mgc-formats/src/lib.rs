@@ -161,7 +161,16 @@ pub const FORMAT_VERSION: u32 = 2;
 ///    frontend selector 4): `pmulti-bg.bin` / `pmulti-pal.bin`,
 ///    `pmulti-sprites.{bin,json}` (PMULTSPR), `sfont1.{bin,json}` and
 ///    `arena-names.json` (the EXEs' `off_99A84` tables).
-pub const BAKE_EPOCH: u32 = 29;
+/// 30: MC2 music re-bakes on AIL's FIXED 120 Hz XMIDI clock — the
+///    score's `FF 51` tempo metas are no longer applied (every baked
+///    MC2 piece ran at the wrong speed; `mgc-import` xmi.rs).
+/// 31: both audio bundles gain the Sound Blaster AWE32 arrangement
+///    (`MusicTrack::awe_file` / `awe_danger_file`, `music/*-awe*.flac`)
+///    rendered by `mgc-awe32` on the bundled wave ROM — MC2 from its own
+///    AWE32 scores (MUSIC.DAT slot W) + SBAWE32.MDI + BULLFROG.SBK, MC1
+///    from the GM score + CARPET.EXE's embedded AWE32 tables. The
+///    default arrangement wherever it exists.
+pub const BAKE_EPOCH: u32 = 31;
 
 /// Which original game an asset belongs to. Serialized as the short
 /// tags used in `meta.json`.

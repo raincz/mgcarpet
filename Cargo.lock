@@ -1308,6 +1308,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mgc-awe32"
+version = "0.1.0"
+
+[[package]]
 name = "mgc-conform"
 version = "0.1.0"
 dependencies = [
@@ -1337,6 +1341,7 @@ dependencies = [
  "flate2",
  "innospect",
  "md-5 0.11.0",
+ "mgc-awe32",
  "mgc-formats",
  "mgc-sim",
  "midly",
@@ -1344,6 +1349,7 @@ dependencies = [
  "oxisynth",
  "serde_json",
  "sha2 0.10.9",
+ "zstd",
 ]
 
 [[package]]

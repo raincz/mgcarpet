@@ -215,6 +215,16 @@ pub struct MusicTrack {
     /// contract as `danger_file`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gm_danger_file: Option<String>,
+    /// The Sound Blaster AWE32 arrangement — the score the games
+    /// targeted on that card (MC2: MUSIC.DAT's own AWE32 scores plus
+    /// its `BULLFROG.SBK` bank; MC1: the GM score), rendered at import
+    /// time by `mgc-awe32` on the card's wave ROM. Same contract as
+    /// `gm_file`; the default arrangement wherever it was baked.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub awe_file: Option<String>,
+    /// AWE32 danger-layer stem, sample-aligned with `awe_file`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub awe_danger_file: Option<String>,
     /// Provenance: original source (`CGAME1.HMP`, `redbook track 2`).
     pub source: String,
 }

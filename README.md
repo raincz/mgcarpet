@@ -283,7 +283,11 @@ not exist without:
 - **Tomáš Veselý (turican0)** — the original
   [remc2](https://github.com/turican0/remc2), the assembly→C++
   reconstruction of Magic Carpet 2 that made the engine family
-  understandable at all.
+  understandable at all — and
+  [AWE32Emu](https://github.com/turican0/AWE32Emu), the Sound Blaster
+  AWE32 emulator (EMU8000 chip measured against a real card, plus the
+  Creative driver logic) whose Rust port renders the AWE32 music
+  arrangement.
 - **Tim Hobbs (thobbsinteractive) and contributors** —
   [Magic Carpet 2 HD](https://github.com/thobbsinteractive/magic-carpet-2-hd),
   the actively maintained continuation of remc2, whose codebase serves as
@@ -306,5 +310,9 @@ not exist without:
 
 GPL-3.0-or-later. The RNC decompressor is ported from remc2's
 implementation (itself derived from the decompiled original ProPack).
+The AWE32 renderer (`crates/mgc-awe32`) is ported from AWE32Emu; its
+EMU8000 chip core is 86Box's `snd_emu8k.c` (GPL-2.0-or-later) with
+AWE32Emu's measured corrections. Bundled third-party assets and their
+terms are listed in [assets/static/README.md](assets/static/README.md).
 
 [remc2]: https://github.com/thobbsinteractive/magic-carpet-2-hd

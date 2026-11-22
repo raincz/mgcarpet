@@ -2147,26 +2147,29 @@ pub fn registry() -> Vec<Spec> {
                     crate::config::MusicArrangement::Auto => 0,
                     crate::config::MusicArrangement::Fm => 1,
                     crate::config::MusicArrangement::Gm => 2,
+                    crate::config::MusicArrangement::Awe32 => 3,
                 },
                 faithful: 0,
-                variants: &["auto", "fm", "gm"],
+                variants: &["auto", "fm", "gm", "awe32"],
             },
-            desc: "Which MC1 music arrangement plays — the CD shipped one per \
-                   sound-card family, so each is authentic. Applies at level \
-                   load.",
+            desc: "Which music arrangement plays — the games shipped one per \
+                   sound-card family, so each is authentic. AWE32 is the card \
+                   the music was tuned for. Applies at level load.",
             ctl: Ctl::Choice {
                 set: |c, i| {
                     c.audio.arrangement = match i {
                         0 => crate::config::MusicArrangement::Auto,
                         1 => crate::config::MusicArrangement::Fm,
-                        _ => crate::config::MusicArrangement::Gm,
+                        2 => crate::config::MusicArrangement::Gm,
+                        _ => crate::config::MusicArrangement::Awe32,
                     }
                 },
                 descs: &[
-                    "The best-available render: General MIDI when baked, \
+                    "The best-available render: AWE32, else General MIDI, \
                      else FM.",
                     "The AdLib FM (OPL3) render.",
                     "The General MIDI render.",
+                    "The Sound Blaster AWE32 render.",
                 ],
             },
         },

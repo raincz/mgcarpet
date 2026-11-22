@@ -8,6 +8,7 @@ members = [
     "crates/mgc-audio",
     "crates/mgc-app",
     "crates/mgc-conform",
+    "crates/mgc-awe32",
 ]
 
 [workspace.package]

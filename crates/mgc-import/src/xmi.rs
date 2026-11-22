@@ -11,9 +11,17 @@
 //! EVNT quirks vs regular MIDI (all byte-verified against retail):
 //! - Delta time = a RUN of bytes < 0x80, SUMMED (127+127+… for long
 //!   waits) — NOT the SMF continuation VLQ. The first high-bit byte
-//!   is the next status. XMI ticks run at 120/s nominal; we emit SMF
-//!   division 60 PPQN and pass `FF 51` tempo metas through, which
-//!   reproduces AIL's wall clock exactly.
+//!   is the next status. XMI ticks run on AIL's FIXED 120 Hz clock:
+//!   the XMIDI sequencer IGNORES `FF 51` tempo metas. We emit SMF
+//!   division 60 PPQN with one 500 000 µs/quarter tempo at tick 0, so
+//!   a tick is exactly 1/120 s, and drop the score's own tempo metas.
+//!   (Until 2026-11-22 they were passed through and every baked MC2
+//!   piece ran at the wrong speed — the cave track 361 s instead of
+//!   237 s. Two witnesses: AWE32Emu's `XmiFile.cpp:139` ignores FF 51
+//!   on purpose, checked against a real MC2 recording — C2GAME1 52755
+//!   ticks / 120 = 439.6 s vs 441.9 s recorded, tempo-applied 493 s;
+//!   and on the fixed clock `-music2`'s C1GAME1/2/3 last exactly as
+//!   long as MC1's own HMP cgame1/2/3, the same notes.)
 //! - Note-on carries an embedded duration as a STANDARD
 //!   (continuation-bit) VLQ; there are no note-off events — the
 //!   converter synthesizes them at `tick + duration`.
@@ -25,7 +33,7 @@
 //!   ramps them up in combat — Sound.cpp:851/5880; the MC2 analog of
 //!   MC1's channel-3/4/5 danger stems).
 
-/// One event at an absolute XMI tick (120/s nominal, tempo-scaled).
+/// One event at an absolute XMI tick (fixed 120/s).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Event {
     pub tick: u32,
@@ -65,7 +73,8 @@ pub enum EventKind {
         note: u8,
         val: u8,
     },
-    /// `FF 51` — microseconds per quarter note, passed through.
+    /// `FF 51` — microseconds per quarter note. Parsed for the record;
+    /// AIL ignores it and so does [`encode_smf`].
     Tempo {
         usec_per_quarter: u32,
     },
@@ -339,8 +348,9 @@ fn vlq(out: &mut Vec<u8>, mut v: u32) {
     }
 }
 
-/// Encode as a type-0 SMF, division [`SMF_DIVISION`], tempo metas
-/// passed through (wall clock = AIL's 120 Hz tempo-scaled sequencer).
+/// Encode as a type-0 SMF, division [`SMF_DIVISION`], one fixed
+/// 500 000 µs/quarter tempo at tick 0 and the score's own tempo metas
+/// DROPPED — AIL's XMIDI clock is a fixed 120 Hz (see the module doc).
 pub fn encode_smf(song: &Song, mix: Mix) -> Vec<u8> {
     let keep = |ch: u8| -> bool {
         match mix {
@@ -349,7 +359,8 @@ pub fn encode_smf(song: &Song, mix: Mix) -> Vec<u8> {
             Mix::WarStem => song.war_channels & (1 << ch) != 0,
         }
     };
-    let mut track = Vec::new();
+    // The fixed clock, explicit (it is also the SMF default).
+    let mut track = vec![0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20];
     let mut last_tick = 0u32;
     for ev in &song.events {
         let bytes: Vec<u8> = match ev.kind {
@@ -362,10 +373,8 @@ pub fn encode_smf(song: &Song, mix: Mix) -> Vec<u8> {
             }
             EventKind::ChannelPressure { ch, val } if keep(ch) => vec![0xD0 | ch, val],
             EventKind::Aftertouch { ch, note, val } if keep(ch) => vec![0xA0 | ch, note, val],
-            EventKind::Tempo { usec_per_quarter } => {
-                let u = usec_per_quarter;
-                vec![0xFF, 0x51, 0x03, (u >> 16) as u8, (u >> 8) as u8, u as u8]
-            }
+            // AIL ignores tempo metas (fixed 120 Hz clock).
+            EventKind::Tempo { .. } => continue,
             _ => continue, // filtered by the mix
         };
         vlq(&mut track, ev.tick - last_tick);
@@ -474,7 +483,7 @@ mod tests {
     }
 
     #[test]
-    fn tempo_meta_passes_through() {
+    fn tempo_metas_are_ignored_on_the_fixed_120hz_clock() {
         let evnt = [
             0xFF, 0x51, 0x03, 0x08, 0x8E, 0x6C, // 560748 µs/qn
             0x90, 60, 100, 10, //
@@ -490,9 +499,16 @@ mod tests {
         let smf = encode_smf(&song, Mix::Full);
         // division 60 in the header.
         assert_eq!(&smf[12..14], &SMF_DIVISION.to_be_bytes());
-        // The tempo meta made it out.
-        let pos = smf.windows(3).position(|w| w == [0xFF, 0x51, 0x03]);
-        assert!(pos.is_some());
+        // Exactly one tempo meta: the fixed 500 000 µs/quarter at tick
+        // 0 (track data starts at 22) — the score's 560748 is gone.
+        let metas: Vec<usize> = smf
+            .windows(3)
+            .enumerate()
+            .filter(|(_, w)| *w == [0xFF, 0x51, 0x03])
+            .map(|(i, _)| i)
+            .collect();
+        assert_eq!(metas, vec![23]);
+        assert_eq!(&smf[22..30], &[0x00, 0xFF, 0x51, 0x03, 0x07, 0xA1, 0x20, 0x00]);
     }
 
     #[test]

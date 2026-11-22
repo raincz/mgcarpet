@@ -1,0 +1,14 @@
+[package]
+name = "mgc-awe32"
+description = "Pure-Rust port of AWE32Emu (by turican0): the measured EMU8000 chip from 86Box (snd_emu8k.c) plus the Creative DOS driver logic, SoundFont/SBK/MDI banks and the XMI/SMF sequencer - renders music as a Sound Blaster AWE32 plays it"
+version.workspace = true
+edition.workspace = true
+# The chip (`snd_emu8k.c`, 86Box) is GPL-2.0-or-later; the project is
+# GPL-3.0-or-later, which is what the combined work is distributed under.
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+
+[lints]
+workspace = true

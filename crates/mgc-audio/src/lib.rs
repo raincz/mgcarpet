@@ -28,6 +28,34 @@ pub use mixer::{FaithfulMixer, Listener, Sounds, Source};
 /// sim dependency).
 const TICK_RATE: f32 = 24.0;
 
+/// Which baked music arrangement to play. Every track carries the FM
+/// render; GM and AWE32 are present when the bake could render them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MusicPreference {
+    /// The best available: AWE32, else GM, else FM.
+    Best,
+    /// The AdLib FM render.
+    Fm,
+    /// General MIDI, else FM.
+    Gm,
+    /// AWE32, else GM, else FM.
+    Awe32,
+}
+
+impl MusicPreference {
+    /// The `(file, danger stem)` this preference plays for `track`.
+    fn pick(self, t: &mgc_formats::bundle::MusicTrack) -> (&String, &Option<String>) {
+        let fm = (&t.file, &t.danger_file);
+        let gm = t.gm_file.as_ref().map(|f| (f, &t.gm_danger_file));
+        let awe = t.awe_file.as_ref().map(|f| (f, &t.awe_danger_file));
+        match self {
+            MusicPreference::Fm => fm,
+            MusicPreference::Gm => gm.unwrap_or(fm),
+            MusicPreference::Best | MusicPreference::Awe32 => awe.or(gm).unwrap_or(fm),
+        }
+    }
+}
+
 pub struct Audio {
     out: output::Output,
     pub mixer: FaithfulMixer,
@@ -49,9 +77,9 @@ pub struct Audio {
     /// `±90/24` (Sound.cpp:5877/6076).
     danger_up: f32,
     danger_down: f32,
-    /// Prefer the General MIDI render (`gm_file`) when the bundle
-    /// carries it; the FM render is the always-present fallback.
-    prefer_gm: bool,
+    /// Which baked arrangement plays (see [`MusicPreference`]); the
+    /// FM render is the always-present fallback.
+    arrangement: MusicPreference,
     /// Voiceover duck state: retail drops music+sfx to 1/3 the
     /// instant a line starts (FadeDownSoundVolume_59A50) and ramps
     /// them back when it ends (the 120 Hz FadeUpSoundVolume timer).
@@ -75,7 +103,7 @@ pub struct Audio {
     /// otherwise refuse to restart it.
     music_cmd: Option<(Arc<Vec<i16>>, Option<Arc<Vec<i16>>>, u16, u32, bool)>,
     /// The last STOPPED track's decoded payload, keyed by (name,
-    /// prefer_gm at decode time): a music re-enable (`stop_music`
+    /// arrangement at decode time): a music re-enable (`stop_music`
     /// then `play_music` of the same track) reuses it instead of
     /// decoding ~0.5-0.8 s of FLAC on the game thread again
     /// (player-reported startup lag, 2026-09-08). One entry: it holds
@@ -83,7 +111,7 @@ pub struct Audio {
     /// game costs no more memory than a playing one.
     music_cache: Option<(
         String,
-        bool,
+        MusicPreference,
         (Arc<Vec<i16>>, Option<Arc<Vec<i16>>>, u16, u32),
     )>,
     /// Stream watchdog: last observed heartbeat, ticks it has been
@@ -107,7 +135,7 @@ impl Audio {
             danger_level: 0.0,
             danger_up: 2.0 * 60.0 / TICK_RATE,
             danger_down: -2.0 * 20.0 / TICK_RATE,
-            prefer_gm: true,
+            arrangement: MusicPreference::Best,
             duck_gain: 1.0,
             movie_voices: Vec::new(),
             movie_bank: 0,
@@ -132,11 +160,11 @@ impl Audio {
         self.mixer.set_mc2(true);
     }
 
-    /// Pick the music arrangement (config `audio.arrangement`): `true`
-    /// prefers the GM render when baked, `false` forces FM. Applies
-    /// from the next `play_music` — the playing track is not restarted.
-    pub fn set_prefer_gm(&mut self, prefer_gm: bool) {
-        self.prefer_gm = prefer_gm;
+    /// Pick the music arrangement (config `audio.arrangement`).
+    /// Applies from the next `play_music` — the playing track is not
+    /// restarted.
+    pub fn set_arrangement(&mut self, arrangement: MusicPreference) {
+        self.arrangement = arrangement;
     }
 
     /// The danger-mode wish for this tick (the original's wizard
@@ -449,12 +477,9 @@ impl Audio {
             return Err(format!("no music track named {name}"));
         };
         let (pcm, overlay, channels, sample_rate) = match self.music_cache.take() {
-            Some((cached, gm, payload)) if cached == name && gm == self.prefer_gm => payload,
+            Some((cached, arr, payload)) if cached == name && arr == self.arrangement => payload,
             _ => {
-                let (file, danger_file) = match &track.gm_file {
-                    Some(gm) if self.prefer_gm => (gm, &track.gm_danger_file),
-                    _ => (&track.file, &track.danger_file),
-                };
+                let (file, danger_file) = self.arrangement.pick(track);
                 let decoded = music::decode_flac(&bundle.dir.join(file))?;
                 let overlay = match danger_file {
                     Some(f) => Some(music::decode_flac(&bundle.dir.join(f))?.pcm),
@@ -482,7 +507,7 @@ impl Audio {
         if let (Some(name), Some((pcm, overlay, ch, rate, _))) =
             (self.music_playing.take(), self.music_cmd.take())
         {
-            self.music_cache = Some((name, self.prefer_gm, (pcm, overlay, ch, rate)));
+            self.music_cache = Some((name, self.arrangement, (pcm, overlay, ch, rate)));
         }
         self.music_playing = None;
         self.music_cmd = None;
@@ -502,6 +527,36 @@ impl Audio {
 
 #[cfg(test)]
 mod tests {
+    /// The arrangement fallback chain: AWE32 → GM → FM for Best and
+    /// Awe32, GM → FM for Gm, FM always available.
+    #[test]
+    fn arrangement_preferences_fall_back_in_order() {
+        use mgc_formats::bundle::MusicTrack;
+        let track = |gm: bool, awe: bool| MusicTrack {
+            bank: 0,
+            name: "t".into(),
+            file: "fm.flac".into(),
+            danger_file: None,
+            gm_file: gm.then(|| "gm.flac".into()),
+            gm_danger_file: None,
+            awe_file: awe.then(|| "awe.flac".into()),
+            awe_danger_file: None,
+            source: String::new(),
+        };
+        let all = track(true, true);
+        let pick = |p: MusicPreference, t: &MusicTrack| p.pick(t).0.clone();
+        assert_eq!(pick(MusicPreference::Best, &all), "awe.flac");
+        assert_eq!(pick(MusicPreference::Awe32, &all), "awe.flac");
+        assert_eq!(pick(MusicPreference::Gm, &all), "gm.flac");
+        assert_eq!(pick(MusicPreference::Fm, &all), "fm.flac");
+        let no_awe = track(true, false);
+        assert_eq!(pick(MusicPreference::Best, &no_awe), "gm.flac");
+        assert_eq!(pick(MusicPreference::Awe32, &no_awe), "gm.flac");
+        let fm_only = track(false, false);
+        assert_eq!(pick(MusicPreference::Best, &fm_only), "fm.flac");
+        assert_eq!(pick(MusicPreference::Gm, &fm_only), "fm.flac");
+    }
+
     use super::*;
 
     /// The baked MC2 bundle, when present (a bake is not a test
@@ -580,7 +635,7 @@ mod tests {
         );
         // The arrangement changed under the cache: decode afresh.
         a.stop_music();
-        a.set_prefer_gm(false);
+        a.set_arrangement(MusicPreference::Fm);
         a.play_music("csetup", true).unwrap();
         assert!(!Arc::ptr_eq(&first, &a.music_cmd.as_ref().unwrap().0));
     }

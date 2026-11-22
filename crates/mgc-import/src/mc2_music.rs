@@ -22,13 +22,21 @@
 //! Cave=3 → sub-song n-1), the menu plays SETUP (track 4 → sub-song
 //! 3).
 
-/// One named sub-song: (`C2GAME1.GEN`, parsed XMI).
+/// One named sub-song: (`C2GAME1.GEN`, parsed XMI, its own bytes).
 pub struct SubSong {
     pub name: String,
     pub song: crate::xmi::Song,
+    /// The sub-song's standalone `FORM XDIR … CAT XMID` container, as
+    /// shipped — what the AWE32 renderer plays (it reads XMI itself).
+    pub xmi: Vec<u8>,
 }
 
-const DRIVER_GM: usize = 0;
+/// Driver slots of a bank record (G, R, F, W).
+pub const DRIVER_GM: usize = 0;
+/// The Sound Blaster AWE32 scores (`C2*.WTB`) — the game's own AWE32
+/// arrangement: GAME2/3 and CUTS equal the GM ones, GAME1 differs by
+/// six bytes, SETUP and INTRO are genuinely re-arranged.
+pub const DRIVER_AWE32: usize = 3;
 
 fn le_u32(b: &[u8], at: usize) -> Result<u32, String> {
     Ok(u32::from_le_bytes(
@@ -51,12 +59,21 @@ fn maybe_rnc(raw: &[u8]) -> Result<Vec<u8>, String> {
 /// set; 1 = the hidden `-music2` "C1" alternate) into its six named
 /// sub-songs.
 pub fn parse_gm_bank(data: &[u8], bank: usize) -> Result<Vec<SubSong>, String> {
+    parse_bank(data, bank, DRIVER_GM)
+}
+
+/// [`parse_gm_bank`] for any driver slot ([`DRIVER_GM`],
+/// [`DRIVER_AWE32`], …).
+pub fn parse_bank(data: &[u8], bank: usize, driver: usize) -> Result<Vec<SubSong>, String> {
+    if driver > 3 {
+        return Err(format!("driver slot {driver} out of range"));
+    }
     if data.len() < 12 {
         return Err("MUSIC.DAT too short".into());
     }
     let datapos = le_u32(data, data.len() - 4)? as usize;
     let banks = i16::from_le_bytes(
-        data.get(datapos + DRIVER_GM * 2..datapos + DRIVER_GM * 2 + 2)
+        data.get(datapos + driver * 2..datapos + driver * 2 + 2)
             .ok_or("driver index out of range")?
             .try_into()
             .unwrap(),
@@ -64,9 +81,9 @@ pub fn parse_gm_bank(data: &[u8], bank: usize) -> Result<Vec<SubSong>, String> {
     // A corrupt/negative count must not wrap huge through the usize
     // cast.
     if banks < 0 || bank >= banks as usize {
-        return Err(format!("GM section has {banks} banks, wanted {bank}"));
+        return Err(format!("driver {driver} section has {banks} banks, wanted {bank}"));
     }
-    let rec = datapos + 8 + bank * 64 + DRIVER_GM * 16;
+    let rec = datapos + 8 + bank * 64 + driver * 16;
     let hdr_off = le_u32(data, rec)? as usize;
     let xmi_off = le_u32(data, rec + 4)? as usize;
     let hdr_size = le_u32(data, rec + 8)? as usize;
@@ -131,7 +148,11 @@ pub fn parse_gm_bank(data: &[u8], bank: usize) -> Result<Vec<SubSong>, String> {
                 return Err(format!("{name}: {} EVNTs in one container", evnts.len()));
             };
             let song = crate::xmi::parse_evnt(evnt).map_err(|e| format!("{name}: {e}"))?;
-            Ok(SubSong { name, song })
+            Ok(SubSong {
+                name,
+                song,
+                xmi: blob[start..end].to_vec(),
+            })
         })
         .collect()
 }

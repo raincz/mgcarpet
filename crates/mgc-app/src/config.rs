@@ -951,9 +951,8 @@ pub struct AudioConfig {
     /// narration (player-ruled; retail has no narration volume).
     pub sfx_volume: f32,
     pub music_volume: f32,
-    /// Which MC1 music arrangement plays (multi-column matrix option —
-    /// all three shipped on the CD as per-sound-card targets, so each
-    /// column is authentic; MC2's XMI gameplay music is unaffected).
+    /// Which music arrangement plays — the games shipped one score per
+    /// sound-card family, so each choice is authentic.
     pub arrangement: MusicArrangement,
     /// MC2 objective voiceovers (the redbook speech clips) — the
     /// original's in-game "Speech On/Off" toggle
@@ -1004,18 +1003,18 @@ impl Subtitles {
     }
 }
 
-/// MC1 shipped three interchangeable music arrangements, one per
-/// sound-card family (`MUSIC<bank>-<digit>`, remc1 :54029-30): AdLib
-/// FM (digit 0), Roland MT-32 (1, not baked — no MT-32 renderer), and
-/// General MIDI (2). The bundle always carries the FM render; the GM
-/// render (the pure-Rust oxisynth + a GM soundfont, `crate::synth`) is
-/// baked when a soundfont is present — the game ships one, so GM is the
-/// out-of-the-box default on every platform.
+/// The games shipped one music arrangement per sound-card family (MC1
+/// `MUSIC<bank>-<digit>`, remc1 :54029-30: AdLib FM 0, Roland MT-32 1 —
+/// not baked, no MT-32 renderer — and General MIDI 2; MC2's MUSIC.DAT
+/// carries a score per driver, the AWE32 one included). The bundle
+/// always carries the FM render; GM (oxisynth + the shipped soundfont)
+/// and the Sound Blaster AWE32 render (`mgc-awe32` on the bundled wave
+/// ROM — the card both games' music was tuned for) are baked alongside.
+/// AWE32 is the default wherever it exists (player ruling 2026-11-22).
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum MusicArrangement {
-    /// The best-available render: General MIDI when the bundle
-    /// carries it, else the FM render.
+    /// The best-available render: AWE32, else General MIDI, else FM.
     #[default]
     Auto,
     /// Force the AdLib FM (OPL3) render — the `-0` driver's sound.
@@ -1025,13 +1024,21 @@ pub enum MusicArrangement {
     /// missing at bake time; drop one in or set `MGC_SOUNDFONT` and
     /// rebake).
     Gm,
+    /// Force the Sound Blaster AWE32 render (falls back to GM, then
+    /// FM, when the bundle has none).
+    Awe32,
 }
 
 impl MusicArrangement {
-    /// Resolve to the runtime preference bit ([`mgc_audio::Audio`]
-    /// falls back to FM per track when GM is absent).
-    pub fn prefer_gm(self) -> bool {
-        !matches!(self, MusicArrangement::Fm)
+    /// The runtime preference ([`mgc_audio::Audio`] falls back per
+    /// track when an arrangement was not baked).
+    pub fn preference(self) -> mgc_audio::MusicPreference {
+        match self {
+            MusicArrangement::Auto => mgc_audio::MusicPreference::Best,
+            MusicArrangement::Fm => mgc_audio::MusicPreference::Fm,
+            MusicArrangement::Gm => mgc_audio::MusicPreference::Gm,
+            MusicArrangement::Awe32 => mgc_audio::MusicPreference::Awe32,
+        }
     }
 }
 

@@ -38,3 +38,18 @@ Rebake after changing it (bump `mgc_formats::BAKE_EPOCH`, or delete the
 baked `music/` output) to re-render the GM tracks with the new font.
 FluidR3 in particular is a fine MIT-licensed alternative for anyone who
 prefers it to the shipped GeneralUser GS.
+
+## awe32.rom.zst — the Sound Blaster AWE32 wave ROM
+
+`awe32.rom.zst` is the AWE32's 1 MB General MIDI wave ROM (the card's
+`awe32.raw` dump), zstd-compressed to keep the shipped assets small. The
+AWE32 renderer (`crates/mgc-awe32`, ported from
+[AWE32Emu](https://github.com/turican0/AWE32Emu)) plays the AWE32 music
+arrangement from it at bake time, the arrangement both games' authors
+tuned for (MC2 ships its own AWE32 scores and instrument bank). It is
+compiled into the bake tool, so nothing has to sit beside the binary.
+
+The ROM content is Creative Technology's. The same dump ships with
+AWE32Emu and remc2; it is bundled here on the same basis, for this free,
+non-commercial project, and will be removed on the rights holder's
+request.

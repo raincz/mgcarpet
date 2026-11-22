@@ -328,6 +328,29 @@ const MUSIC_RATE: u32 = 44100;
 /// MC1 ships sample banks 0..=13 (bank = per-level/screen sound set).
 const MC1_SOUND_BANKS: std::ops::RangeInclusive<u32> = 0..=13;
 
+/// The Sound Blaster AWE32's 1 MB General MIDI wave ROM, bundled
+/// zstd-compressed (`assets/static/awe32.rom.zst`) and compiled in, so
+/// the AWE32 arrangement bakes with nothing beside the binary.
+fn awe32_rom() -> Result<Vec<u8>, String> {
+    static ROM: &[u8] = include_bytes!("../../../assets/static/awe32.rom.zst");
+    zstd::decode_all(ROM).map_err(|e| format!("AWE32 ROM: {e}"))
+}
+
+/// One AWE32 render (`mgc-awe32`, the AWE32Emu port) as the f32 the
+/// shared pair normalization takes. A bank that fails to load is an
+/// error here — never bake a silent or half-voiced arrangement; the
+/// caller falls back to GM.
+fn awe32_render(
+    opts: &mgc_awe32::RenderOptions,
+    score: mgc_awe32::Score,
+) -> Result<Vec<f32>, String> {
+    let r = mgc_awe32::render(opts, score)?;
+    if let Some(w) = r.warnings.first() {
+        return Err(format!("AWE32 bank: {w}"));
+    }
+    Ok(r.pcm.iter().map(|&s| f32::from(s) / 32768.0).collect())
+}
+
 // One shared normalization factor per song — the
 // overlay SUM is what must not clip (MC1 GM contract).
 fn normalize_gm_pair(
@@ -443,6 +466,32 @@ pub fn bake_mc1_audio(
             None
         }
     };
+    // The AWE32 arrangement (the default wherever it bakes — player
+    // ruling 2026-11-22): the same `-2` GENERAL score MC1 sent its
+    // AWE32 driver (`BF_MUSIC=SBAWE32` → 0xA008, the GM bank), played
+    // on the card's wave ROM by `mgc-awe32`. The presets come from
+    // CARPET.EXE itself: it embeds the AWE32 driver's GM preset /
+    // instrument / sample tables byte-for-byte as SBAWE32.MDI carries
+    // them (the table scan finds them; HIDDEN.EXE holds the same).
+    // MC1's own driver code is HMI's, which AWE32Emu does not model —
+    // the Miles `dos` family stands in (close: `sdk` measured within
+    // ±1.5 dB).
+    let awe: Option<(Vec<u8>, Vec<u8>)> = if src.exists("CARPET.EXE") {
+        match (awe32_rom(), source("CARPET.EXE", &mut sources)) {
+            (Ok(rom), Ok(exe)) => Some((rom, exe)),
+            (Err(why), _) => {
+                println!("note: mc1 music: no AWE32 render ({why})");
+                None
+            }
+            (_, Err(why)) => {
+                println!("note: mc1 music: no AWE32 render ({why})");
+                None
+            }
+        }
+    } else {
+        println!("note: mc1 music: no CARPET.EXE — no AWE32 render");
+        None
+    };
     let mut music = MusicIndex { tracks: Vec::new() };
     for bank in 0..=1u32 {
         let dat_rel = format!("DATA/MUSIC{bank}-0.DAT");
@@ -457,7 +506,7 @@ pub fn bake_mc1_audio(
         // The GM arrangement, keyed by song stem (`cgame1.gen` ↔
         // `cgame1.hmp` — same songs, per-driver patches/mix).
         let mut gm_songs: Vec<(String, crate::hmp::Song)> = Vec::new();
-        if gm.is_some() && src.exists(&format!("DATA/MUSIC{bank}-2.DAT")) {
+        if (gm.is_some() || awe.is_some()) && src.exists(&format!("DATA/MUSIC{bank}-2.DAT")) {
             let dat = source(&format!("DATA/MUSIC{bank}-2.DAT"), &mut sources)?;
             let tab = source(&format!("DATA/MUSIC{bank}-2.TAB"), &mut sources)?;
             let parsed = crate::sound::parse_bank(bank, &tab, &dat, false)
@@ -484,7 +533,12 @@ pub fn bake_mc1_audio(
                 name.strip_suffix(".hmp").unwrap_or(name),
                 i + 1,
                 parsed.entries.len(),
-                if gm.is_some() { ", FM + GM" } else { ", FM" },
+                match (gm.is_some(), awe.is_some()) {
+                    (true, true) => ", FM + GM + AWE32",
+                    (true, false) => ", FM + GM",
+                    (false, true) => ", FM + AWE32",
+                    (false, false) => ", FM",
+                },
             );
             let err = |e: String| {
                 BakeError::Level(Path::new(&dat_rel).to_path_buf(), 0, format!("{name}: {e}"))
@@ -562,6 +616,55 @@ pub fn bake_mc1_audio(
                     gm_danger_file = Some(member);
                 }
             }
+            // The AWE32 render: the same score and mixes as GM, one
+            // shared normalization per pair. A failure keeps GM.
+            let mut awe_file = None;
+            let mut awe_danger_file = None;
+            if let (Some((rom, exe)), Some((_, gm_song))) =
+                (awe.as_ref(), gm_songs.iter().find(|(stem, _)| stem == name))
+            {
+                let render = |mix: &crate::adlib::MixSpec| {
+                    let midi = crate::smf::encode(gm_song, mix);
+                    let mut o = mgc_awe32::RenderOptions::new(rom, mgc_awe32::Driver::Dos);
+                    o.banks = vec![mgc_awe32::BankSpec::mdi_tables(exe)];
+                    o.master_volume = Some(100);
+                    awe32_render(&o, mgc_awe32::Score::Smf(&midi))
+                };
+                let layered = crate::adlib::has_danger_layer(gm_song);
+                let base_mix = if layered {
+                    crate::adlib::MixSpec::ambient()
+                } else {
+                    crate::adlib::MixSpec::full()
+                };
+                let pair = render(&base_mix).and_then(|base| {
+                    let stem = if layered {
+                        Some(render(&crate::adlib::MixSpec::danger_stem())?)
+                    } else {
+                        None
+                    };
+                    Ok((base, stem))
+                });
+                match pair {
+                    Err(why) => println!("note: mc1 music: {name}: no AWE32 render ({why})"),
+                    Ok((base, stem)) => {
+                        let (base, stem) = normalize_gm_pair(base, stem);
+                        let member = format!("music/{bank}-{name}-awe.flac");
+                        emit(
+                            &member,
+                            &crate::flac::encode(&base, 2, MUSIC_RATE).map_err(err)?,
+                        )?;
+                        awe_file = Some(member);
+                        if let Some(stem) = &stem {
+                            let member = format!("music/{bank}-{name}-awe-danger.flac");
+                            emit(
+                                &member,
+                                &crate::flac::encode(stem, 2, MUSIC_RATE).map_err(err)?,
+                            )?;
+                            awe_danger_file = Some(member);
+                        }
+                    }
+                }
+            }
             music.tracks.push(MusicTrack {
                 bank,
                 name: name.to_string(),
@@ -569,6 +672,8 @@ pub fn bake_mc1_audio(
                 danger_file,
                 gm_file,
                 gm_danger_file,
+                awe_file,
+                awe_danger_file,
                 source: format!("MUSIC{bank}-0 {}.HMP", name.to_ascii_uppercase()),
             });
         }
@@ -700,6 +805,33 @@ pub fn bake_mc2_audio(
         Ok(renderer) => {
             let subsongs = crate::mc2_music::parse_gm_bank(&music_dat, 0)
                 .map_err(|e| BakeError::Level(Path::new("SOUND/MUSIC.DAT").to_path_buf(), 0, e))?;
+            // The AWE32 arrangement (the default wherever it bakes —
+            // player ruling 2026-11-22): the game's OWN AWE32 scores
+            // (MUSIC.DAT driver slot W, `C2*.WTB` — SETUP and INTRO
+            // re-arranged vs GM) through its AWE32 driver's banks in
+            // the game's load order (`SBAWE32.MDI`'s GM set, then
+            // `BULLFROG.SBK` — Bullfrog's own presets over GM, Sound.cpp
+            // InitAWE32_9F740), on the card's wave ROM, with the MDI
+            // driver's start-up channel state (`mgc_awe32::MC2_CONF`).
+            // Rendered by `mgc-awe32` (the AWE32Emu port).
+            let awe = (|| -> Result<_, String> {
+                let rom = awe32_rom()?;
+                let mdi = src.read("SOUND/SBAWE32.MDI").map_err(|e| e.to_string())?;
+                let sbk = src.read("SOUND/BULLFROG.SBK").map_err(|e| e.to_string())?;
+                let w = crate::mc2_music::parse_bank(
+                    &music_dat,
+                    0,
+                    crate::mc2_music::DRIVER_AWE32,
+                )?;
+                Ok((rom, mdi, sbk, w))
+            })();
+            let awe = match awe {
+                Ok(a) => Some(a),
+                Err(why) => {
+                    println!("note: mc2 music: no AWE32 render ({why})");
+                    None
+                }
+            };
             // MapType track n → sub-song n-1 (the ±1 lives in AIL:
             // `SOUND_start_sequence(track-1)`, Sound.cpp:4974): Night=1
             // →GAME1, Day=2→GAME2, Cave=3→GAME3; menu StartMusic(4)→
@@ -729,7 +861,10 @@ pub fn bake_mc2_audio(
                         format!("{}: {e}", sub.name),
                     )
                 };
-                println!("mc2 music: rendering {role} (GM)…");
+                println!(
+                    "mc2 music: rendering {role} ({})…",
+                    if awe.is_some() { "GM + AWE32" } else { "GM" }
+                );
                 let layered = sub.song.has_war_layer();
                 let base_mix = if layered {
                     crate::xmi::Mix::Ambient
@@ -763,6 +898,77 @@ pub fn bake_mc2_audio(
                     }
                     None => None,
                 };
+                // The AWE32 pair. The W sub-song is matched to this role
+                // by name stem (C2GAME1.WTB ↔ C2GAME1.GEN), not position.
+                let stem_of = |n: &str| n.split('.').next().unwrap_or(n).to_ascii_uppercase();
+                let mut awe_file = None;
+                let mut awe_danger_file = None;
+                if let Some((rom, mdi, sbk, w)) = &awe {
+                    match w.iter().find(|ws| stem_of(&ws.name) == stem_of(&sub.name)) {
+                        None => println!(
+                            "note: mc2 music: {role}: no AWE32 score for {}",
+                            sub.name
+                        ),
+                        Some(ws) => {
+                            // Retail's XMIDI master volume: the menu plays
+                            // at 127, gameplay and the movie scores at 100
+                            // (measured against the game's driver trace —
+                            // AWE32Emu conf notes); 127 clips the gameplay
+                            // pieces hard.
+                            let master = if role == "mc2-menu" { 127 } else { 100 };
+                            // The war stem plays its channels un-muted:
+                            // the conf's CC119 trigger mute is what keeps
+                            // them silent in the ambient render.
+                            let stem_conf = mgc_awe32::MC2_CONF
+                                .replace("trigger_mute 1", "trigger_mute 0");
+                            let render = |mask: u16, conf: &str| {
+                                let mut o =
+                                    mgc_awe32::RenderOptions::new(rom, mgc_awe32::Driver::Dos);
+                                o.banks = vec![
+                                    mgc_awe32::BankSpec::sf(mdi),
+                                    mgc_awe32::BankSpec::sf(sbk),
+                                ];
+                                o.conf = Some(conf);
+                                o.master_volume = Some(master);
+                                o.channel_mask = mask;
+                                awe32_render(&o, mgc_awe32::Score::Xmi(&ws.xmi))
+                            };
+                            let war = ws.song.war_channels;
+                            let pair = render(0xFFFF, mgc_awe32::MC2_CONF).and_then(|base| {
+                                let stem = if war != 0 {
+                                    Some(render(war, &stem_conf)?)
+                                } else {
+                                    None
+                                };
+                                Ok((base, stem))
+                            });
+                            match pair {
+                                Err(why) => {
+                                    println!("note: mc2 music: {role}: no AWE32 render ({why})")
+                                }
+                                Ok((base, stem)) => {
+                                    let (base, stem) = normalize_gm_pair(base, stem);
+                                    let member = format!("music/{role}-awe.flac");
+                                    emit(
+                                        &member,
+                                        &crate::flac::encode(&base, 2, MUSIC_RATE)
+                                            .map_err(err)?,
+                                    )?;
+                                    awe_file = Some(member);
+                                    if let Some(stem) = &stem {
+                                        let member = format!("music/{role}-awe-danger.flac");
+                                        emit(
+                                            &member,
+                                            &crate::flac::encode(stem, 2, MUSIC_RATE)
+                                                .map_err(err)?,
+                                        )?;
+                                        awe_danger_file = Some(member);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
                 music.tracks.push(MusicTrack {
                     bank: 0,
                     name: role.to_string(),
@@ -770,6 +976,8 @@ pub fn bake_mc2_audio(
                     danger_file,
                     gm_file: None,
                     gm_danger_file: None,
+                    awe_file,
+                    awe_danger_file,
                     source: format!("MUSIC.DAT G bank 0 {}", sub.name),
                 });
             }
@@ -2246,5 +2454,19 @@ mod level_name_tests {
         let hw = exe_level_names(&src.read("HIDDEN.EXE").unwrap()).expect("HIDDEN.EXE names");
         assert_eq!((hw[0].as_str(), hw[8].as_str()), ("Goyaan", "Rama'Q"));
         assert_eq!(hw[25..], mc1[25..], "HW reuses MC1's names from 26 on");
+    }
+}
+
+#[cfg(test)]
+mod awe32_rom_tests {
+    /// The AWE32 wave ROM ships INSIDE the binary (`awe32_rom`,
+    /// `include_bytes!`), so the release packaging copies nothing — but
+    /// a file that is not the real compressed dump (a Git LFS pointer,
+    /// a truncated upload) would still compile and only make the bake
+    /// fall back to GM with a console note. CI catches it here.
+    #[test]
+    fn the_embedded_awe32_rom_is_the_full_dump() {
+        let rom = super::awe32_rom().expect("the embedded ROM decompresses");
+        assert_eq!(rom.len(), 1 << 20, "the AWE32 GM wave ROM is exactly 1 MB");
     }
 }
